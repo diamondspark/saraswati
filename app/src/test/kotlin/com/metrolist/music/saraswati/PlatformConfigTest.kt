@@ -99,6 +99,48 @@ class PlatformConfigTest {
     }
 
     @Test
+    fun `no network security config anywhere trusts user CAs or has debug-overrides`() {
+        // SARASWATI: "no user-installed CAs, ever, in any build type" is one
+        // of this fork's Global Constraints — this directly tests that
+        // guarantee against the actual XML, instead of relying on nobody
+        // ever adding it back. Globs every network_security_config.xml
+        // under src/*/res/xml/ (today there's exactly one, in main) rather
+        // than hardcoding that one path, so a future variant-specific file
+        // (e.g. src/debug/res/xml/) can't quietly reintroduce Android
+        // Studio's default new-project template, which adds a
+        // <debug-overrides><trust-anchors><certificates src="user"/>...
+        // block that trusts user CAs in debug builds — exactly what this
+        // fork's network story must never do, in any build variant.
+        val configFiles =
+            File("src")
+                .walkTopDown()
+                .filter { it.isFile && it.parentFile?.name == "xml" && it.name == "network_security_config.xml" }
+                .toList()
+        assertTrue("expected at least one network_security_config.xml under src/*/res/xml/", configFiles.isNotEmpty())
+
+        for (file in configFiles) {
+            val doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(file)
+
+            assertEquals(
+                "${file.path} must not have a <debug-overrides> block " +
+                    "(it would trust user-installed CAs in debug builds)",
+                0,
+                doc.getElementsByTagName("debug-overrides").length,
+            )
+
+            val certificates = doc.getElementsByTagName("certificates")
+            for (i in 0 until certificates.length) {
+                val cert = certificates.item(i) as Element
+                assertTrue(
+                    "${file.path} has <certificates src=\"${cert.getAttribute("src")}\"> — " +
+                        "src=\"user\" must never appear anywhere in this file",
+                    cert.getAttribute("src") != "user",
+                )
+            }
+        }
+    }
+
+    @Test
     fun `file provider exposes only named subdirectories`() {
         val doc = parseXml("src/main/res/xml/provider_paths.xml")
         val root = doc.documentElement

@@ -81,8 +81,14 @@
     </domain-config>
 
     <!-- Google sign-in (accounts.google.com, accounts.youtube.com hops through
-         here too) and the WebView's own sub-resources (fonts.googleapis.com,
-         apis.google.com, play.google.com, www.google.com, ogs.google.com). -->
+         here too) and the WebView's own sub-resources on this same root domain
+         (apis.google.com, play.google.com, www.google.com, ogs.google.com).
+         SARASWATI: fonts.googleapis.com is a DIFFERENT root domain
+         (googleapis.com, not google.com) and is NOT covered by this
+         domain-config or any other entry here — it is not currently
+         allowlisted at all (see docs/pending-human-steps.md's DEFERRED
+         checklist for that decision; this comment previously, incorrectly,
+         claimed it was covered). -->
     <domain-config cleartextTrafficPermitted="false">
         <domain includeSubdomains="true">google.com</domain>
         <trust-anchors>
