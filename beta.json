@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "channel": "beta",
+  "versionCode": 3902,
+  "versionName": "13.7.0-s3902",
+  "apk": {
+    "url": "https://github.com/diamondspark/saraswati/releases/download/v3902/saraswati-v3902.apk",
+    "sha256": "5a076f3d9265a6ab6cf0eea46b52b118811af1aafddd211f3fc5d51057ade205",
+    "size": 26205060
+  },
+  "urgent": false,
+  "notes": "First signed Saraswati release: auto-update checks, the Sudhaar update-ready banner, and the Saraswati Updates installer app.",
+  "publishedAt": "2026-10-18T22:39:07Z",
+  "updater": {
+    "versionCode": 3902,
+    "apk": {
+      "url": "https://github.com/diamondspark/saraswati/releases/download/v3902/saraswati-updater-v3902.apk",
+      "sha256": "91237fc8a7ccae33d8a1b4f71413cc94c6e2b17eb80524eb4a85f5e3617b1f2e",
+      "size": 256152
+    }
+  }
+}
