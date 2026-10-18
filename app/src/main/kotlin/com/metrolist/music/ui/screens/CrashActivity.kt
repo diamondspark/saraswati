@@ -51,13 +51,20 @@ import java.util.Date
 import java.util.Locale
 
 class CrashActivity : ComponentActivity() {
-    
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        
+
+        // SARASWATI (audit A11-3): a shared crash file was never deleted
+        // after sharing. Rather than relying on the user's share target to
+        // clean up (it may not, or the share may be cancelled), sweep stale
+        // crash files every time this screen starts — which happens exactly
+        // when a new crash file is about to be written.
+        cleanupOldCrashFiles()
+
         val crashLog = intent.getStringExtra(CrashHandler.EXTRA_CRASH_LOG) ?: getString(R.string.crash_no_log)
-        
+
         setContent {
             val darkTheme = isSystemInDarkTheme()
             MetrolistTheme(darkTheme = darkTheme) {
@@ -70,11 +77,29 @@ class CrashActivity : ComponentActivity() {
         }
     }
     
+    // SARASWATI (audit A11-3): delete crash files left in the shared cache
+    // folder for more than an hour. Scoped to this prefix (and the legacy
+    // "metrolist_crash_" name from before the rebrand) rather than the whole
+    // "shared/" folder, which other features (image/CSV export) also use for
+    // in-flight shares.
+    private fun cleanupOldCrashFiles() {
+        runCatching {
+            val cutoffMillis = System.currentTimeMillis() - CRASH_FILE_MAX_AGE_MS
+            File(cacheDir, "shared")
+                .listFiles { file ->
+                    file.isFile &&
+                        (file.name.startsWith(CRASH_FILE_PREFIX) || file.name.startsWith(LEGACY_CRASH_FILE_PREFIX)) &&
+                        file.lastModified() < cutoffMillis
+                }
+                ?.forEach { it.delete() }
+        }
+    }
+
     private fun shareCrashLog(crashLog: String) {
         try {
             // Create crash log file
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            val fileName = "metrolist_crash_$timestamp.txt"
+            val fileName = "$CRASH_FILE_PREFIX$timestamp.txt"
             // SARASWATI: write into the "shared/" subdirectory, the only one
             // provider_paths.xml's cache-path exposes (Task 6), not the
             // cache root.
@@ -107,6 +132,13 @@ class CrashActivity : ComponentActivity() {
             }
             startActivity(Intent.createChooser(shareIntent, getString(R.string.crash_share_title)))
         }
+    }
+
+    private companion object {
+        // SARASWATI: rebranded from "metrolist_crash_" (audit A11-3).
+        const val CRASH_FILE_PREFIX = "saraswati_crash_"
+        const val LEGACY_CRASH_FILE_PREFIX = "metrolist_crash_"
+        const val CRASH_FILE_MAX_AGE_MS = 60 * 60 * 1000L
     }
 }
 

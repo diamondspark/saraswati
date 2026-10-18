@@ -50,7 +50,8 @@ class CrashHandler private constructor(
         }.toString()
 
         return buildString {
-            appendLine("Metrolist Crash Report")
+            // SARASWATI: rebranded from "Metrolist Crash Report" (audit A11-3).
+            appendLine("Saraswati Crash Report")
             appendLine("=".repeat(50))
             appendLine()
             appendLine("Manufacturer: ${Build.MANUFACTURER}")

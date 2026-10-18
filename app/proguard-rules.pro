@@ -118,6 +118,16 @@
     #public static int e(...);
 }
 
+# SARASWATI (audit A11-1): App.kt only plants Timber.DebugTree in debug
+# builds, so these calls are already no-ops in release; this rule lets R8
+# also strip the call sites and their (sometimes non-trivial) message/arg
+# expressions from the release binary entirely.
+-assumenosideeffects class timber.log.Timber* {
+    public static *** v(...);
+    public static *** d(...);
+    public static *** i(...);
+}
+
 # Generated automatically by the Android Gradle plugin.
 -dontwarn java.beans.BeanDescriptor
 -dontwarn java.beans.BeanInfo

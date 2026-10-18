@@ -119,7 +119,14 @@ class App :
         }
 
         // Plant logging before extraction services initialize.
-        Timber.plant(Timber.DebugTree())
+        // SARASWATI (audit A11-1): only in debug builds — unconditionally
+        // planting DebugTree sent ~990 call sites to release Logcat,
+        // including BotGuard responses and Listen Together room codes.
+        // Timber tolerates nothing ever being planted: every Timber.*() call
+        // elsewhere in the app is then simply a no-op in release.
+        if (BuildConfig.DEBUG) {
+            Timber.plant(Timber.DebugTree())
+        }
         InnerTubeXPlayer.initialize(this)
 
         // Pre-read Coil cache size on background to avoid runBlocking in newImageLoader
