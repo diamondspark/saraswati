@@ -113,4 +113,19 @@
             <certificates src="system" />
         </trust-anchors>
     </domain-config>
+
+    <!-- SARASWATI: Task 7 — the "Sudhaar" ("Update ready") banner's manifest
+         fetch (UpdateChecker, saraswati/update/UpdateChecker.kt), GitHub
+         Pages host for stable.json/beta.json. Exact host only (Ruling
+         R20): the app calls exactly this one GitHub Pages site, never the
+         github.io apex or any other project's Pages site. Note this is a
+         different host from github.com/githubusercontent.com, which stay
+         forbidden (security/egress-allowlist.json) — the APK itself is
+         never fetched by this app, only by the separate Updater app. -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="false">diamondspark.github.io</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
 </network-security-config>

@@ -107,6 +107,15 @@ val DismissedStandaloneUpdateKey = stringPreferencesKey("dismissedStandaloneUpda
 val DismissedKmpUpdateKey = stringPreferencesKey("dismissedKmpUpdate")
 val UpdateNotificationsEnabledKey = booleanPreferencesKey("updateNotifications")
 
+// SARASWATI: Task 7 — the "Sudhaar" ("Update ready") banner's own state,
+// separate from the legacy keys above. SaraswatiUpdateChannelKey is
+// "stable" or "beta" (toggled by the seven-tap gesture on the About
+// screen's version row, AboutScreen.kt); SaraswatiLastUpdateCheckKey is
+// when UpdateChecker last actually reached the network, so the 12-hour
+// throttle survives an app restart instead of resetting every launch.
+val SaraswatiUpdateChannelKey = stringPreferencesKey("saraswatiUpdateChannel")
+val SaraswatiLastUpdateCheckKey = longPreferencesKey("saraswatiLastUpdateCheck")
+
 val AudioQualityKey = stringPreferencesKey("audioQuality")
 
 enum class AudioQuality {
