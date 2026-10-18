@@ -53,6 +53,23 @@ jobs:
       - name: Build and test (gms)
         run: ./gradlew --dependency-verification strict :app:testGmsDebugUnitTest :app:assembleGmsRelease
 
+      # apk_gate.py invokes the bare `apkanalyzer` command (relies on PATH).
+      # The runner's preinstalled Android SDK has it under cmdline-tools,
+      # but (unlike the dev machine's scripts/dev-env.sh) nothing on this
+      # runner puts that directory on PATH by default.
+      - name: Add Android cmdline-tools to PATH
+        run: |
+          if [ -d "$ANDROID_HOME/cmdline-tools/latest/bin" ]; then
+            echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          else
+            apkanalyzer_path="$(find "$ANDROID_HOME" -maxdepth 6 -type f -name apkanalyzer 2>/dev/null | head -1)"
+            if [ -z "$apkanalyzer_path" ]; then
+              echo "apkanalyzer not found under ANDROID_HOME=$ANDROID_HOME" >&2
+              exit 1
+            fi
+            dirname "$apkanalyzer_path" >> "$GITHUB_PATH"
+          fi
+
       - name: APK manifest gate
         run: |
           python3 -I security/apk_gate.py check \
