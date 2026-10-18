@@ -41,17 +41,17 @@ measure where things stand, not to make them pass.
   a warm-up, and prints median/p90 for cold start, tap-to-audio, and jank.
   Run it once per package and compare the two printed reports by hand.
 
-### Known gap: Task 10 hasn't landed yet
+### Known gap: resolved
 
-The plan's Task 10 ("Release-like build on the Pixel, smoke script,
-white-box checks") was meant to produce a unit-tested
-`parse_playing_state(dumpsys_text, package) -> bool` helper that this task's
-`perf-baseline.sh` would import for the tap-to-audio check. As of this
-writing `scripts/smoke.sh` and that helper do not exist in this repo (Task
-10 has not been run). `perf-baseline.sh` therefore contains its own small,
-undocumented-format `is_playing` check (see the `KNOWN GAP` comment at the
-top of that file) rather than importing a module that isn't there. When
-Task 10 lands, prefer its tested helper and remove the duplicate here.
+Task 13 originally landed before Task 10 (execution-order gap), so
+`perf-baseline.sh` carried its own small, undocumented-format `is_playing`
+stand-in rather than importing Task 10's helper. Task 10 has since landed:
+`scripts/smoke_helpers.py` now provides the unit-tested
+`parse_playing_state(dumpsys_text, package) -> bool`
+(`scripts/test_smoke_helpers.py`), and `perf-baseline.sh`'s `is_playing`
+calls into it via its CLI (`python3 -I scripts/smoke_helpers.py is-playing
+<package>`) instead of re-parsing `dumpsys media_session` itself. The two
+scripts now share one tested implementation.
 
 ### Why this can't be measured on the emulator
 

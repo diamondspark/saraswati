@@ -25,17 +25,16 @@
 # PATH — `source scripts/dev-env.sh` first — and falls back to
 # $ANDROID_HOME/platform-tools/adb otherwise.
 #
-# KNOWN GAP (see docs/perf-baseline.md): the plan's Task 10
-# (scripts/smoke.sh / a parse_playing_state helper) has not been implemented
-# in this repo yet, so the tap-to-audio check below does its own minimal,
-# undocumented-format parsing of `dumpsys media_session` instead of
-# importing Task 10's helper. Treat `is_playing` below as a stand-in: once
-# Task 10 lands, prefer its tested helper over this one to avoid drift.
+# The tap-to-audio check below decides PLAYING via Task 10's
+# `parse_playing_state` (scripts/smoke_helpers.py), the same unit-tested
+# helper scripts/smoke.sh uses, rather than parsing `dumpsys media_session`
+# a second time here.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PERF_STATS_PY="$SCRIPT_DIR/perf_stats.py"
+SMOKE_HELPERS_PY="$SCRIPT_DIR/smoke_helpers.py"
 DEFAULT_VIDEO_ID="dQw4w9WgXcQ" # same default Task 10's brief names for its own deep-link check
 TAP_TO_AUDIO_TIMEOUT_S=20       # same timeout Task 10's brief polls PLAYING for
 
@@ -152,19 +151,15 @@ cold_start_once() {
 }
 
 # --- tap-to-audio (deep link to PLAYING) ------------------------------------
-# See the KNOWN GAP note at the top of this file: Task 10 hasn't landed, so
-# `is_playing` is this script's own stand-in for parse_playing_state, not an
-# imported, unit-tested helper. It mirrors the stable AOSP shape
-# `PlaybackState.toString()` has printed since Lollipop ("PlaybackState
-# {state=<int>, ...}", where 3 is STATE_PLAYING) inside the block `dumpsys
-# media_session` prints for a `package=<pkg>` session.
+# PLAYING is decided by Task 10's `parse_playing_state`
+# (scripts/smoke_helpers.py), via its thin CLI, so this script and
+# scripts/smoke.sh share one tested implementation instead of two.
 
 is_playing() {
-  local package="$1"
-  adb_cmd shell dumpsys media_session 2>/dev/null \
-    | grep -A 20 -F "package=$package" \
-    | grep -m1 -oE 'state=PlaybackState \{state=[0-9]+' \
-    | grep -q 'state=3$'
+  local package="$1" result
+  result="$(adb_cmd shell dumpsys media_session 2>/dev/null \
+    | python3 -I "$SMOKE_HELPERS_PY" is-playing "$package")"
+  [[ "$result" == "true" ]]
 }
 
 tap_to_audio_once() {

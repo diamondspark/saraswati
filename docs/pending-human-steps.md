@@ -16,6 +16,83 @@ General rules for every step below:
   `python3 -I -m unittest discover -s security -p 'test_*.py' -v` (it asserts the two files
   stay in sync) before committing.
 
+## Task 10 — human checkpoint, white-box checks (brief Steps 4-6)
+
+Task 10 built and proved, without the Pixel: `scripts/smoke_helpers.py`'s
+`parse_playing_state` (unit-tested, RED then GREEN), `scripts/smoke.sh`
+(argument parsing, non-device parsing logic, and a real dry run of checks
+1-7 against the headless emulator with a debug build of Saraswati itself —
+never Metrolist, never the Pixel), and both the debug and a locally
+re-signed release-like APK (`docs/device-checks.md` has the exact build
+commands and sizes). Everything below needs the Pixel, a signed-in
+account, or both — do these once the Pixel 8 Pro is back.
+
+1. **Install both variants on the Pixel:**
+   ```bash
+   source scripts/dev-env.sh
+   export ANDROID_SERIAL=<PIXEL_SERIAL>
+   sar_gradle :app:assembleGmsDebug :app:assembleGmsRelease
+   apksigner sign --ks ~/.android/debug.keystore --ks-pass pass:android \
+     --ks-key-alias androiddebugkey --key-pass pass:android \
+     --out /tmp/saraswati-local.apk \
+     app/build/outputs/apk/gms/release/app-gms-release-unsigned.apk
+   adb install -r -d app/build/outputs/apk/gms/debug/app-gms-debug.apk
+   adb install -r -d /tmp/saraswati-local.apk
+   ```
+2. **Sign in with the real YouTube account** on each variant you intend to
+   smoke-test, through the app's own Login screen (manual — your hands,
+   your password; never paste credentials into any tool).
+3. **Run the smoke script against both, without `--skip-playback`:**
+   ```bash
+   scripts/smoke.sh app/build/outputs/apk/gms/debug/app-gms-debug.apk dev.diamondspark.saraswati.debug
+   scripts/smoke.sh /tmp/saraswati-local.apk dev.diamondspark.saraswati
+   ```
+   Expected: all 8 checks `[PASS]` for both, including playback reaching
+   PLAYING. If check 8 times out, confirm you actually signed in on that
+   variant first (the error message says so).
+4. **White-box checks on the debug variant** (`dev.diamondspark.saraswati.debug`):
+   - Cookie file is sealed, not plaintext (Task 7):
+     ```bash
+     adb exec-out run-as dev.diamondspark.saraswati.debug \
+       cat files/datastore/settings.preferences_pb | grep -c SAPISID
+     ```
+     Expected: `0`.
+   - The removed recognizer intent-filter doesn't leave a live entry point
+     via an explicit component start (Task 5):
+     ```bash
+     adb shell am start -a com.metrolist.music.action.RECOGNITION \
+       -n dev.diamondspark.saraswati.debug/com.metrolist.music.MainActivity
+     ```
+     Expected: the app opens normally (last screen or Home on a cold
+     start) — no recognition screen, no crash, nothing in
+     `adb logcat -d | grep -i recogni`.
+   - Walk `docs/strip-checklist.md`'s "Manual click-through (Task 10)"
+     list (all 10 items: Settings root, Player & Audio, Content, Lyrics
+     provider selection, Home, Search, search long-press, Listen Together,
+     the recognizer intent above, general smoke). Record any deviation —
+     a stray row, a blank section, a crash — as a new finding, not
+     something to paper over.
+   - Playlist export + crash share round trip, to confirm the narrowed
+     FileProvider (`app/src/main/res/xml/provider_paths.xml`, Task 6)
+     still works for both call sites: export any playlist as CSV or M3U
+     and share it (should open a normal share sheet, no
+     `FileUriExposedException`/`SecurityException` in `adb logcat -d`);
+     separately, trigger a crash and use the crash screen's Share button
+     (`CrashActivity`) and confirm the same — no exposure exception, the
+     shared file is under `cache/shared/`, and (per Task 10's audit note,
+     A11-3) it's swept away again the next time `CrashActivity` opens.
+5. **Uninstall the debug variant** (`dev.diamondspark.saraswati.debug`)
+   from the Pixel when you're done — it is debuggable and should not stay
+   installed:
+   ```bash
+   adb uninstall dev.diamondspark.saraswati.debug
+   ```
+   The locally-signed release-like variant (`dev.diamondspark.saraswati`)
+   can stay installed for now if you want to keep using it; just remember
+   that moving to the real CI-signed Phase 2 release later needs an
+   uninstall first (the signing keys differ, so Android refuses the
+   update otherwise), which loses that sign-in.
+
 ## Task 12 — network egress allowlist, dynamic evidence (brief Steps 3-5)
 
 Task 12 built and proved the deny-by-default mechanism itself on the emulator
@@ -124,8 +201,7 @@ budgets and exact commands, numbers left as TODO.
    - If a denial or a missing host shows up, treat it as a real finding
      (Task 8's controller policy or Task 12's egress allowlist), not
      something to paper over to make the checklist pass.
-3. **Known cross-task gap:** the plan's Task 10 (`scripts/smoke.sh`, a
-   unit-tested `parse_playing_state` helper) has not been run in this repo.
-   `scripts/perf-baseline.sh` currently contains its own small stand-in for
-   that check (see the `KNOWN GAP` comment at the top of that file). When
-   Task 10 is eventually run, reconcile the two instead of leaving both.
+3. **Known cross-task gap: resolved.** Task 10 has since landed
+   `scripts/smoke_helpers.py`'s unit-tested `parse_playing_state`, and
+   `scripts/perf-baseline.sh`'s `is_playing` now calls into it instead of
+   its own stand-in. Nothing left to reconcile here.
