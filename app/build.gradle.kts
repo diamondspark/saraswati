@@ -301,6 +301,12 @@ dependencies {
 
     implementation(project(":innertube"))
 
+    // SARASWATI: Task 7 — the "Sudhaar" ("Update ready") Home banner reuses
+    // update-core's already-tested manifest parsing and update-decision
+    // rules (Task 4) instead of re-implementing them against the app's own
+    // network stack.
+    implementation(project(":update-core"))
+
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.okhttp)
     implementation(libs.ktor.client.content.negotiation)
