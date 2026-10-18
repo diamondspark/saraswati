@@ -24,7 +24,10 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.security.ProviderException
+import javax.crypto.SecretKey
 
 /** Minimal in-memory [DataStore] so these tests need no disk I/O or Android runtime. */
 private class InMemoryPreferencesDataStore(
@@ -103,5 +106,44 @@ class SecretScrubberTest {
             SecretScrubber.scrub(dataStore, vault)
 
             assertEquals(true, dataStore.data.first()[PureBlackKey])
+        }
+
+    // SARASWATI (fix round 1): a broken/custom-ROM Keystore implementation
+    // can make AesGcmKeyProvider.key() throw a java.security.ProviderException
+    // — a RuntimeException, not a GeneralSecurityException — which
+    // CookieVault.open()'s catch blocks do not cover, so it propagates
+    // straight out of scrub(). That is real and expected; the fix is that
+    // App.onCreate now wraps its SecretScrubber.scrub(...) call in a plain
+    // try/catch (Exception) so a broken Keystore degrades to "skip this
+    // boot's scrub" instead of crashing every single app launch. This test
+    // pins both halves: scrub() really does throw with a broken provider,
+    // and App.onCreate's catch pattern really does stop it from escaping.
+    @Test
+    fun `a broken keystore during scrub does not escape App onCreate's guard`() =
+        runBlocking {
+            val brokenVault =
+                CookieVault(
+                    object : AesGcmKeyProvider {
+                        override fun key(): SecretKey = throw ProviderException("Keystore unavailable")
+                    },
+                )
+            val dataStore =
+                InMemoryPreferencesDataStore(
+                    mutablePreferencesOf(InnerTubeCookieKey to vault.seal("SAPISID=abc; HSID=def456")),
+                )
+
+            var caught: Throwable? = null
+            try {
+                SecretScrubber.scrub(dataStore, brokenVault)
+            } catch (e: Exception) {
+                caught = e
+            }
+
+            assertTrue(
+                "expected scrub() to throw a ProviderException with a broken Keystore " +
+                    "(that's the real gap App.onCreate's try/catch now guards against) " +
+                    "but got: $caught",
+                caught is ProviderException,
+            )
         }
 }

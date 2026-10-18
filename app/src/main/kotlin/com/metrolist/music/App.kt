@@ -101,7 +101,22 @@ class App :
         // Application.onCreate() returns, so blocking here guarantees the
         // scrub finishes before observeSettingsChanges() below — or
         // anything else in this process — ever reads the cookie.
-        runBlocking { SecretScrubber.scrub(dataStore, SaraswatiVault.cookieVault) }
+        //
+        // SARASWATI (fix round 1): a broken/custom-ROM Keystore
+        // implementation (seen on some Samsung/Xiaomi phones) can make
+        // AndroidKeystoreKeyProvider.key() throw even after the StrongBox
+        // fallback — e.g. a java.security.ProviderException, which is a
+        // RuntimeException CookieVault.open()'s catch blocks don't cover.
+        // Uncaught, that would crash the app on every single launch with
+        // no recovery short of an uninstall. Catching here instead skips
+        // this boot's scrub (SecretScrubber runs again next boot; the
+        // worst case is a secret preference surviving a little longer,
+        // not an unusable app).
+        try {
+            runBlocking { SecretScrubber.scrub(dataStore, SaraswatiVault.cookieVault) }
+        } catch (e: Exception) {
+            Timber.w(e, "SecretScrubber.scrub failed, skipping this boot's scrub")
+        }
 
         // Plant logging before extraction services initialize.
         Timber.plant(Timber.DebugTree())
