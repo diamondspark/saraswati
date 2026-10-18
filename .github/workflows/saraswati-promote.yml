@@ -1,0 +1,162 @@
+name: saraswati-promote
+
+# Promotes an already-published beta release to stable (Task 6) by copying
+# beta.json to stable.json (with channel rewritten) on the gh-pages branch —
+# it never builds, signs or re-releases anything; the APK was already
+# signed and published by saraswati-release.yml. Gated by the same `release`
+# environment approval as the release workflow, plus an automatic refusal
+# unless the beta release is at least 48 hours old (skipped when its
+# manifest says `urgent`) — Review Focus item 6: a phone must never be
+# "updated" onto an older build, and a human needs a real window to notice
+# a bad beta before it reaches every family phone on stable.
+on:
+  workflow_dispatch:
+    inputs:
+      version_code:
+        description: "versionCode of the beta release to promote to stable (must match beta.json)"
+        type: number
+        required: true
+
+concurrency:
+  group: saraswati-promote-${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Holds the environment-approval wait — and ONLY that. Deliberately a
+  # separate job from `publish` below, the same shape as
+  # saraswati-release.yml's `sign` (environment: release) vs. `publish`
+  # (the shared concurrency group): a job gated by a protected
+  # environment's required reviewers shows as "Waiting" — holding its
+  # concurrency slot — for the entire time it sits unapproved, sometimes
+  # for days. Putting the shared `saraswati-gh-pages-publish` concurrency
+  # group on this same job (an earlier version of this file did exactly
+  # that) would mean one un-reviewed `promote` dispatch, left unapproved
+  # by accident, silently queues every saraswati-release.yml `publish`
+  # job — including an `urgent: true` release's `gh release create` —
+  # behind it indefinitely. `approve` itself carries no concurrency
+  # annotation, so it can sit "Waiting" as long as it needs to without
+  # blocking anything else; only `publish` below, which starts running
+  # (and stops "Waiting") the moment `approve` succeeds, contends for the
+  # shared group, bounded by its own timeout-minutes.
+  approve:
+    name: approve
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout gh-pages
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: gh-pages
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Check the 48-hour window and build stable.json
+        env:
+          REQUESTED_VERSION_CODE: ${{ inputs.version_code }}
+        run: |
+          set -euo pipefail
+          python3 -I - <<'PY'
+          import json
+          import os
+          import sys
+          from datetime import datetime, timedelta, timezone
+
+          requested_version_code = int(os.environ["REQUESTED_VERSION_CODE"])
+
+          with open("beta.json", encoding="utf-8") as fh:
+              beta = json.load(fh)
+
+          if beta["versionCode"] != requested_version_code:
+              print(
+                  f"beta.json is at versionCode {beta['versionCode']}, not "
+                  f"the requested {requested_version_code} — refusing to "
+                  "promote a different build than the one you meant to "
+                  "approve",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          if beta.get("urgent"):
+              print("beta.json is marked urgent: skipping the 48-hour wait")
+          else:
+              published_at = datetime.fromisoformat(
+                  beta["publishedAt"].replace("Z", "+00:00")
+              )
+              age = datetime.now(timezone.utc) - published_at
+              if age < timedelta(hours=48):
+                  remaining = timedelta(hours=48) - age
+                  print(
+                      f"refusing to promote: beta.json is only {age} old, "
+                      f"{remaining} short of the 48-hour minimum "
+                      "(not marked urgent)",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
+              print(f"beta.json is {age} old: promotion allowed")
+
+          stable = dict(beta)
+          stable["channel"] = "stable"
+          out_path = os.path.join(os.environ["RUNNER_TEMP"], "stable.json")
+          with open(out_path, "w", encoding="utf-8") as fh:
+              json.dump(stable, fh, indent=2)
+              fh.write("\n")
+          PY
+
+      - name: Upload the stable manifest
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: stable-manifest
+          path: ${{ runner.temp }}/stable.json
+          retention-days: 1
+
+  # Does the actual push, once `approve` has already succeeded (so this
+  # job never itself waits on an environment — nothing above gates it
+  # beyond the ordinary `needs:` dependency). Only this job carries the
+  # shared `saraswati-gh-pages-publish` concurrency group, same as
+  # saraswati-release.yml's `publish` — see that job's comment.
+  publish:
+    name: publish
+    needs: approve
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: saraswati-gh-pages-publish
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout gh-pages
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: gh-pages
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Download the stable manifest
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: stable-manifest
+          path: ${{ runner.temp }}
+
+      - name: Commit and push stable.json
+        env:
+          VERSION_CODE: ${{ inputs.version_code }}
+        run: |
+          set -euo pipefail
+          cp "$RUNNER_TEMP/stable.json" ./stable.json
+          git add stable.json
+          if git diff --cached --quiet; then
+            echo "stable.json already matches beta.json; nothing to commit"
+            exit 0
+          fi
+          git \
+            -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -m "promote: stable.json from beta.json (versionCode ${VERSION_CODE})"
+          git push origin HEAD:gh-pages
