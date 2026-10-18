@@ -279,6 +279,20 @@ jobs:
     needs: [build, sign]
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Job-level, shared with saraswati-promote.yml's `promote` job (same
+    # group name, not derived from github.workflow): both jobs push to
+    # the same gh-pages branch, and nothing else stops a release's
+    # manifest push and a promotion's stable.json push from racing each
+    # other. A plain (non-force) `git push` just fails the loser's job
+    # rather than clobbering anything, but serializing the two specific
+    # jobs here avoids that retry nuisance — without this, this job-level
+    # group would also queue behind an entire OTHER release run (verify
+    # + build + sign's human approval wait) if it were a workflow-level
+    # concurrency group instead; scoping it to just these two jobs avoids
+    # that.
+    concurrency:
+      group: saraswati-gh-pages-publish
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:

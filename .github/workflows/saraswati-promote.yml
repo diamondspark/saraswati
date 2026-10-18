@@ -29,6 +29,12 @@ jobs:
     name: promote
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Job-level, shared with saraswati-release.yml's `publish` job — see
+    # that job's comment for why this is scoped to just these two jobs
+    # rather than a workflow-level group.
+    concurrency:
+      group: saraswati-gh-pages-publish
+      cancel-in-progress: false
     environment: release
     permissions:
       contents: write

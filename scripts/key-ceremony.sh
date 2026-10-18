@@ -137,14 +137,77 @@ gh secret set RELEASE_KEY_PASSWORD --env release < "$KEY_PASS_FILE"
 echo "Uploaded: RELEASE_KEYSTORE_B64, RELEASE_KEYSTORE_PASSWORD, RELEASE_KEY_ALIAS, RELEASE_KEY_PASSWORD"
 echo
 
-echo "Creating ONE encrypted backup archive. You will be prompted for a gpg passphrase next —"
-echo "choose a strong one and save it in your password manager now, before you forget."
-tar -cf "$BACKUP_TAR" -C "$KEY_DIR" \
-  "$(basename "$KEYSTORE_FILE")" \
-  "$(basename "$STORE_PASS_FILE")" \
-  "$(basename "$KEY_PASS_FILE")" \
-  "$(basename "$CERT_FILE")"
+echo "Creating ONE encrypted backup archive. You will be prompted for a gpg passphrase"
+echo "TWICE below: once now to set it (gpg asks you to confirm it by typing it again),"
+echo "and once more right after, to prove the backup actually decrypts before anything"
+echo "real gets deleted. Choose a strong passphrase and save it in your password"
+echo "manager now, before you forget."
+echo
+
+# The one file that bundles all four secrets together — the single most
+# sensitive artifact this script ever writes to disk — gets the same
+# umask+chmod belt-and-suspenders treatment as $KEYSTORE_FILE above,
+# rather than relying only on $KEY_DIR's mode 700.
+( umask 077
+  tar -cf "$BACKUP_TAR" -C "$KEY_DIR" \
+    "$(basename "$KEYSTORE_FILE")" \
+    "$(basename "$STORE_PASS_FILE")" \
+    "$(basename "$KEY_PASS_FILE")" \
+    "$(basename "$CERT_FILE")"
+)
+chmod 600 "$BACKUP_TAR"
+PLAINTEXT_SHA256="$(sha256sum "$BACKUP_TAR" | cut -d' ' -f1)"
+
 gpg --symmetric --cipher-algo AES256 --output "$BACKUP_FILE" "$BACKUP_TAR"
+
+# CRITICAL check: a backup that only ever gets compared against itself
+# (two copies' sha256 matching each other) proves nothing if the gpg
+# write itself was silently truncated or corrupted, or if the passphrase
+# just typed won't actually be the one saved to the password manager —
+# both copies would still match each other byte-for-byte while being
+# useless. Decrypt it back out right now, before $BACKUP_TAR is
+# destroyed, and refuse to proceed unless the round trip is
+# byte-identical to the original.
+echo
+echo "Verifying the backup actually decrypts back to the exact same bytes —"
+echo "enter the SAME passphrase again:"
+DECRYPT_CHECK="$KEY_DIR/.backup-roundtrip-check.tar"
+rm -f "$DECRYPT_CHECK"
+decrypt_ok=0
+if ( umask 077; gpg --decrypt --output "$DECRYPT_CHECK" "$BACKUP_FILE" ); then
+  if [ -s "$DECRYPT_CHECK" ]; then
+    DECRYPTED_SHA256="$(sha256sum "$DECRYPT_CHECK" | cut -d' ' -f1)"
+    if [ "$DECRYPTED_SHA256" = "$PLAINTEXT_SHA256" ]; then
+      decrypt_ok=1
+    fi
+  fi
+fi
+shred -u "$DECRYPT_CHECK" 2>/dev/null || rm -f "$DECRYPT_CHECK"
+
+if [ "$decrypt_ok" -ne 1 ]; then
+  echo >&2
+  echo "key-ceremony: the encrypted backup did NOT verify — decrypting it back out" >&2
+  echo "did not reproduce the exact original bytes (wrong passphrase entered just now," >&2
+  echo "or gpg's write to the backup file was corrupted)." >&2
+  echo >&2
+  echo "NOTHING has been deleted. Your key material is still intact at:" >&2
+  echo "  $KEYSTORE_FILE" >&2
+  echo "  $STORE_PASS_FILE" >&2
+  echo "  $KEY_PASS_FILE" >&2
+  echo "  $CERT_FILE" >&2
+  echo "  $BACKUP_TAR  (the plaintext bundle these were just packed into)" >&2
+  echo >&2
+  echo "Do not shred or delete any of the above. Remove the bad encrypted file and" >&2
+  echo "try the backup again:" >&2
+  echo "  rm -f \"$BACKUP_FILE\"" >&2
+  echo "  gpg --symmetric --cipher-algo AES256 --output \"$BACKUP_FILE\" \"$BACKUP_TAR\"" >&2
+  echo "then re-run this script (it will refuse past the ceremony's earlier steps since" >&2
+  echo "$CERT_SHA256_PATH now exists — run just the two commands above by hand, then" >&2
+  echo "verify with: gpg --decrypt \"$BACKUP_FILE\" | sha256sum   (expect $PLAINTEXT_SHA256)." >&2
+  exit 1
+fi
+
+echo "Backup verified: it decrypts back to the exact same bytes as the original."
 shred -u "$BACKUP_TAR" 2>/dev/null || rm -f "$BACKUP_TAR"
 
 BACKUP_FINGERPRINT="$(sha256sum "$BACKUP_FILE" | cut -d' ' -f1)"
