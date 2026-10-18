@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SARASWATI: Task 5 — deny-by-default egress, same shape as :app's
+     network_security_config.xml (Task 12/Phase 1): the base-config trusts
+     no certificate authority at all, so any host without its own
+     domain-config below fails the TLS handshake before a single byte is
+     sent. Cleartext is refused everywhere. Exactly the three hosts the
+     Global Constraints name: github.com (the release-asset host and the
+     page a redirect starts from), githubusercontent.com (the CDN a
+     download redirects to — objects./release-assets.githubusercontent.com,
+     both covered by includeSubdomains), and diamondspark.github.io (the
+     manifest host). DownloadPolicy (:update-core) is the layer that
+     actually restricts which URLs/redirects are accepted; this is the
+     independent, second layer that stops a request to anything else from
+     ever reaching the network. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors/>
+    </base-config>
+
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="false">github.com</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">githubusercontent.com</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="false">diamondspark.github.io</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+</network-security-config>

@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "channel": "stable",
+  "versionCode": 4200,
+  "versionName": "1.4.2",
+  "apk": {
+    "url": "https://github.com/diamondspark/saraswati/releases/download/v1.4.2/saraswati-v1.4.2-arm64.apk",
+    "sha256": "08c5119c42cdf51b5a5ac9a3415d9f24f9c7ea2952af1ff05eb6d9ecfb1f1483",
+    "size": 52428800
+  },
+  "urgent": false,
+  "notes": "Bug fixes and performance improvements.",
+  "publishedAt": "2026-10-17T00:00:00Z",
+  "updater": {
+    "versionCode": 7,
+    "apk": {
+      "url": "https://github.com/diamondspark/saraswati/releases/download/updater-v1.0.7/saraswati-updater-v1.0.7.apk",
+      "sha256": "b94853eb10c29951f088dce3d06f939e184b3310757c0b498a02ec30b53e3223",
+      "size": 10485760
+    }
+  }
+}

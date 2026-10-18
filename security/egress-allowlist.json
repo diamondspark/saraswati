@@ -8,7 +8,8 @@
     { "name": "gstatic.com", "subdomains": true },
     { "name": "google.com", "subdomains": true },
     { "name": "lrclib.net", "subdomains": false },
-    { "name": "lyrics-api.boidu.dev", "subdomains": false }
+    { "name": "lyrics-api.boidu.dev", "subdomains": false },
+    { "name": "diamondspark.github.io", "subdomains": false }
   ],
   "forbidden_hosts": [
     "discord.com",

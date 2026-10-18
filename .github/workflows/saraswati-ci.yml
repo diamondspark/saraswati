@@ -1,0 +1,447 @@
+name: ci
+
+# Reusable build/test/gate pipeline. `workflow_call` lets the (future)
+# release workflow (Task 6) depend on this exact job instead of
+# duplicating it; `workflow_dispatch` allows a manual run.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: build-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      - name: Python security test suite
+        run: python3 -I -m unittest discover -s security -p 'test_*.py' -v
+
+      - name: Python scripts test suite
+        run: python3 -I -m unittest discover -s scripts -p 'test_*.py' -v
+
+      - name: Workflow policy check
+        run: python3 -I security/check_workflows.py
+
+      # :update-core:test and :updater:testDebugUnitTest carry the
+      # regression tests for Task 4's path-traversal fix and Task 5's
+      # install-permission recovery fix; :updater:assembleRelease exercises
+      # the Updater's R8-minified release build on every run, not just the
+      # first real release.
+      - name: Build and test (gms app, update-core, updater)
+        run: >-
+          ./gradlew --dependency-verification strict
+          :app:testGmsDebugUnitTest :app:assembleGmsRelease
+          :update-core:test
+          :updater:testDebugUnitTest :updater:assembleRelease
+
+      # apk_gate.py invokes the bare `apkanalyzer` command (relies on PATH).
+      # The runner's preinstalled Android SDK has it under cmdline-tools,
+      # but (unlike the dev machine's scripts/dev-env.sh) nothing on this
+      # runner puts that directory on PATH by default.
+      - name: Add Android cmdline-tools to PATH
+        run: |
+          if [ -d "$ANDROID_HOME/cmdline-tools/latest/bin" ]; then
+            echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          else
+            apkanalyzer_path="$(find "$ANDROID_HOME" -maxdepth 6 -type f -name apkanalyzer 2>/dev/null | head -1)"
+            if [ -z "$apkanalyzer_path" ]; then
+              echo "apkanalyzer not found under ANDROID_HOME=$ANDROID_HOME" >&2
+              exit 1
+            fi
+            dirname "$apkanalyzer_path" >> "$GITHUB_PATH"
+          fi
+
+      - name: APK manifest gate
+        run: |
+          python3 -I security/apk_gate.py check \
+            --apk app/build/outputs/apk/gms/release/app-gms-release-unsigned.apk \
+            --allowlist security/manifest-allowlist.json
+
+      - name: APK manifest gate (Saraswati Updates)
+        run: |
+          python3 -I security/apk_gate.py check \
+            --apk updater/build/outputs/apk/release/updater-release-unsigned.apk \
+            --allowlist security/updater-allowlist.json
+
+      - name: Install gitleaks
+        run: scripts/install-gitleaks.sh
+
+      # .gitleaksignore (repo root, read automatically) lists the exact
+      # fingerprints of 16 hardcoded Google API keys already in this
+      # history, all from upstream Metrolist — see that file's header for
+      # full provenance. Deliberately NOT --baseline-path: gitleaks
+      # excludes a --baseline-path file from scanning in its entirety
+      # (confirmed by reading gitleaks' own source and reproducing it),
+      # so a later PR could have smuggled a real secret into that file
+      # forever. .gitleaksignore has no such exclusion — gitleaks still
+      # scans every file, including this ignore file itself, and only
+      # suppresses a finding whose exact fingerprint is already listed
+      # (verified: a secret added anywhere, including inside
+      # .gitleaksignore itself, is still caught).
+      - name: Secret scan (gitleaks, full history)
+        run: |
+          "$RUNNER_TEMP/gitleaks" detect \
+            --source . \
+            --redact \
+            --report-format sarif \
+            --report-path "$RUNNER_TEMP/gitleaks-report.sarif" \
+            --exit-code 1
+
+      - name: Upload unsigned APKs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unsigned-apks
+          path: app/build/outputs/apk/gms/release/*.apk
+          if-no-files-found: warn
+
+      # A separate artifact rather than adding the Updater to
+      # "unsigned-apks": the mobsf job scans the first APK it finds in
+      # that one. release-dry-run below downloads both.
+      - name: Upload unsigned Updater APK
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unsigned-updater-apk
+          path: updater/build/outputs/apk/release/*.apk
+          if-no-files-found: warn
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: reports
+          path: |
+            app/build/test-results/**/*.xml
+            ${{ runner.temp }}/gitleaks-report.sarif
+          if-no-files-found: warn
+
+  # MobSF APK scan (Task 10). REPORT-ONLY for now: Steps 3-4 of the task
+  # (triaging the first real report with a human into
+  # security/mobsf-baseline.json, then switching this job to gate on
+  # scripts/mobsf_scan.py's `new_findings`) are deliberately not done yet.
+  # `continue-on-error: true` means nothing in this job -- a High finding,
+  # or an infrastructure hiccup starting MobSF -- can turn the overall
+  # workflow run red while it stays report-only.
+  mobsf:
+    name: mobsf-scan
+    needs: build-test
+    # Report-only (Steps 3-4 not done yet, see the block comment above):
+    # scoped to a manual run only, not every push/PR, so this ~30-minute
+    # Docker-based scan doesn't add real time to every ordinary CI run for
+    # a job that can't fail anything yet. Drop this `if:` once Step 4
+    # switches the job to gating -- at that point it should run on every
+    # push/PR like the rest of this workflow.
+    #
+    # `github.event_name` alone is not enough: when this workflow is
+    # reused via workflow_call, the github context is the CALLER's, so a
+    # saraswati-release.yml run (itself workflow_dispatch) would also
+    # match. `github.workflow == 'ci'` limits it to runs of this workflow
+    # itself; the actor check excludes the upstream-sync bot, whose
+    # `gh workflow run saraswati-ci.yml` (GITHUB_TOKEN) is a direct
+    # workflow_dispatch of this workflow too.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      && github.workflow == 'ci'
+      && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    services:
+      mobsf:
+        # opensecurity/mobile-security-framework-mobsf:v4.5.3, pinned by
+        # digest (this is a job-level `services:` image reference, not a
+        # marketplace `uses:` action -- security/check_workflows.py only
+        # gates `uses:` lines). Digest obtained and verified with:
+        #   docker pull opensecurity/mobile-security-framework-mobsf:v4.5.3
+        #   docker inspect --format '{{index .RepoDigests 0}}' \
+        #     opensecurity/mobile-security-framework-mobsf:v4.5.3
+        # which matched Docker Hub's own tag metadata for v4.5.3. A future
+        # version bump means repeating those two commands and editing this
+        # digest deliberately -- never re-pulling ":latest".
+        image: opensecurity/mobile-security-framework-mobsf@sha256:5113fbad0727445dda01afdccafea5e107bfa8632ead8a169492f5caa8aa1b7c # v4.5.3
+        ports:
+          - 8000:8000
+        env:
+          # Not a secret: a job-scoped token for the loopback-only REST API
+          # of a container that lives only for this one job and is never
+          # reachable outside this runner. Setting it up front (per MobSF's
+          # mobsf/MobSF/init.py `api_key()`) avoids having to `docker exec`
+          # into the service container to read its auto-generated key.
+          MOBSF_API_KEY: saraswati-ci-mobsf-report-only
+    env:
+      MOBSF_API_KEY: saraswati-ci-mobsf-report-only
+      MOBSF_URL: http://localhost:8000
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download unsigned APK
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: unsigned-apks
+          path: unsigned-apk
+
+      - name: Wait for MobSF
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -sf -o /dev/null "$MOBSF_URL/"; then
+              echo "MobSF is up"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "MobSF did not become ready in time" >&2
+          exit 1
+
+      - name: Upload APK to MobSF
+        id: upload
+        run: |
+          apk="$(find unsigned-apk -name '*.apk' | head -1)"
+          if [ -z "$apk" ]; then
+            echo "no unsigned APK found to scan" >&2
+            exit 1
+          fi
+          curl -sf -F "file=@${apk};type=application/octet-stream" \
+            -H "X-Mobsf-Api-Key: $MOBSF_API_KEY" \
+            "$MOBSF_URL/api/v1/upload" -o upload.json
+          cat upload.json
+          hash="$(python3 -I -c "import json; print(json.load(open('upload.json'))['hash'])")"
+          echo "hash=$hash" >> "$GITHUB_OUTPUT"
+
+      - name: Run MobSF static scan
+        run: |
+          curl -sf -X POST \
+            -H "X-Mobsf-Api-Key: $MOBSF_API_KEY" \
+            --data "scan_type=apk&hash=${{ steps.upload.outputs.hash }}&re_scan=0" \
+            "$MOBSF_URL/api/v1/scan" -o scan.json
+
+      - name: Fetch full JSON report
+        run: |
+          curl -sf -X POST \
+            -H "X-Mobsf-Api-Key: $MOBSF_API_KEY" \
+            --data "hash=${{ steps.upload.outputs.hash }}" \
+            "$MOBSF_URL/api/v1/report_json" -o report.json
+
+      - name: Fetch AppSec scorecard
+        run: |
+          curl -sf -X POST \
+            -H "X-Mobsf-Api-Key: $MOBSF_API_KEY" \
+            --data "hash=${{ steps.upload.outputs.hash }}" \
+            "$MOBSF_URL/api/v1/scorecard" -o scorecard.json
+
+      - name: Summarize findings (report-only)
+        run: python3 -I scripts/mobsf_scan.py --report scorecard.json --baseline security/mobsf-baseline.json
+
+      - name: Upload MobSF report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mobsf-report
+          path: |
+            report.json
+            scorecard.json
+          if-no-files-found: warn
+
+  # Secret-free rehearsal of saraswati-release.yml's `sign` job, on every
+  # push/PR/dispatch: signs build-test's unsigned APKs with
+  # scripts/sign_release.sh using a throwaway keystore generated right
+  # here, checks the signer with scripts/verify_apk_signer.sh (both the
+  # matching case and a wrong-key case that must be rejected), then runs
+  # the same apk_gate.py checks the real `sign` job runs on its output.
+  # Nothing here is real key material: both keystores exist only on this
+  # runner's disk for this one job, are never uploaded, and are deleted at
+  # the end. No secrets are referenced (security/check_workflows.py
+  # forbids that outside the release workflows anyway).
+  release-dry-run:
+    name: release-dry-run
+    needs: build-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 21
+        # keytool and apksigner both need a JDK.
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Download unsigned app APK
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: unsigned-apks
+          path: unsigned-app
+
+      - name: Download unsigned Updater APK
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: unsigned-updater-apk
+          path: unsigned-updater
+
+      # Same two PATH steps as saraswati-release.yml's `sign` job.
+      - name: Add Android build-tools to PATH
+        run: |
+          set -euo pipefail
+          build_tools_dir="$(find "$ANDROID_HOME/build-tools" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort -V | tail -1)"
+          if [ -z "$build_tools_dir" ] || [ ! -x "$build_tools_dir/apksigner" ] || [ ! -x "$build_tools_dir/zipalign" ]; then
+            echo "apksigner/zipalign not found under $ANDROID_HOME/build-tools" >&2
+            exit 1
+          fi
+          echo "$build_tools_dir" >> "$GITHUB_PATH"
+
+      - name: Add Android cmdline-tools to PATH
+        run: |
+          if [ -d "$ANDROID_HOME/cmdline-tools/latest/bin" ]; then
+            echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          else
+            apkanalyzer_path="$(find "$ANDROID_HOME" -maxdepth 6 -type f -name apkanalyzer 2>/dev/null | head -1)"
+            if [ -z "$apkanalyzer_path" ]; then
+              echo "apkanalyzer not found under ANDROID_HOME=$ANDROID_HOME" >&2
+              exit 1
+            fi
+            dirname "$apkanalyzer_path" >> "$GITHUB_PATH"
+          fi
+
+      # Two keystores: "good" signs the APKs, "wrong" stands in for a
+      # different key so the rejection path can be exercised. Passwords are
+      # random per run (not literals in this file) and are not secrets.
+      # Generated in the same shape as scripts/key-ceremony.sh: keytool's
+      # default keystore type (PKCS12), RSA-4096, one random password
+      # written to two SEPARATE files passed as -storepass:file and
+      # -keypass:file, and the sign step below reads KS_PASS and KEY_PASS
+      # from those two files independently, the way the real job reads
+      # two separate secrets. (PKCS12 has a single password; if the two
+      # files ever differed, keytool would ignore -keypass and signing
+      # would fail — exactly what this rehearses.) The cert digest is
+      # computed the same way the ceremony computes
+      # security/release-cert.sha256.
+      - name: Generate throwaway keystores
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/dry-run-keys"
+          ( umask 077; mkdir -p "$dir" )
+          for name in good wrong; do
+            ( umask 077; openssl rand -base64 48 | tr -d '\n' > "$dir/$name.store-pass" )
+            ( umask 077; cat "$dir/$name.store-pass" > "$dir/$name.key-pass" )
+            keytool -genkeypair \
+              -keystore "$dir/$name.keystore" \
+              -alias "dryrun-$name" \
+              -keyalg RSA \
+              -keysize 4096 \
+              -validity 1 \
+              -dname "CN=Saraswati CI release dry run throwaway $name" \
+              -storepass:file "$dir/$name.store-pass" \
+              -keypass:file "$dir/$name.key-pass"
+            keytool -exportcert \
+              -keystore "$dir/$name.keystore" \
+              -alias "dryrun-$name" \
+              -storepass:file "$dir/$name.store-pass" \
+              -rfc \
+              -file "$dir/$name.pem"
+            openssl x509 -in "$dir/$name.pem" -noout -fingerprint -sha256 \
+              | sed -n 's/^.*Fingerprint=//p' \
+              | tr -d ':' \
+              | tr '[:upper:]' '[:lower:]' > "$dir/$name.sha256"
+            if ! grep -qE '^[0-9a-f]{64}$' "$dir/$name.sha256"; then
+              echo "could not compute the $name throwaway cert's SHA-256" >&2
+              exit 1
+            fi
+            echo "$name throwaway cert SHA-256: $(cat "$dir/$name.sha256")"
+          done
+          if [ "$(cat "$dir/good.sha256")" = "$(cat "$dir/wrong.sha256")" ]; then
+            echo "the two throwaway certs have the same digest; the rejection check would prove nothing" >&2
+            exit 1
+          fi
+
+      - name: Sign both APKs with the throwaway key
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/dry-run-keys"
+          KS_PASS="$(cat "$dir/good.store-pass")"
+          KEY_PASS="$(cat "$dir/good.key-pass")"
+          KEY_ALIAS="dryrun-good"
+          export KS_PASS KEY_PASS KEY_ALIAS
+          scripts/sign_release.sh \
+            --keystore "$dir/good.keystore" \
+            --in unsigned-app/app-gms-release-unsigned.apk --out "$RUNNER_TEMP/app-signed.apk" \
+            --in unsigned-updater/updater-release-unsigned.apk --out "$RUNNER_TEMP/updater-signed.apk"
+
+      - name: Verify the signer matches the throwaway cert
+        run: |
+          scripts/verify_apk_signer.sh \
+            --expected "$(cat "$RUNNER_TEMP/dry-run-keys/good.sha256")" \
+            "$RUNNER_TEMP/app-signed.apk" \
+            "$RUNNER_TEMP/updater-signed.apk"
+
+      # The failure path: the same check against a different cert's digest
+      # must report a mismatch (exit 1) — not pass, and not merely fail to
+      # read a digest (exit 2), which would prove nothing about rejection.
+      - name: Verify a wrong-key digest is rejected
+        run: |
+          set -euo pipefail
+          for apk in "$RUNNER_TEMP/app-signed.apk" "$RUNNER_TEMP/updater-signed.apk"; do
+            # `|| rc=$?` so the expected non-zero exit doesn't end the step
+            # under `set -e` (GitHub's default shell is `bash -e` too).
+            rc=0
+            scripts/verify_apk_signer.sh \
+              --expected "$(cat "$RUNNER_TEMP/dry-run-keys/wrong.sha256")" \
+              "$apk" || rc=$?
+            if [ "$rc" -ne 1 ]; then
+              echo "expected a signer mismatch (exit 1) for $apk against the wrong cert, got exit $rc" >&2
+              exit 1
+            fi
+            echo "$apk: wrong-key digest correctly rejected"
+          done
+
+      - name: APK manifest gate (dry-run-signed Saraswati APK)
+        run: |
+          python3 -I security/apk_gate.py check \
+            --apk "$RUNNER_TEMP/app-signed.apk" \
+            --allowlist security/manifest-allowlist.json
+
+      - name: APK manifest gate (dry-run-signed Saraswati Updates APK)
+        run: |
+          python3 -I security/apk_gate.py check \
+            --apk "$RUNNER_TEMP/updater-signed.apk" \
+            --allowlist security/updater-allowlist.json
+
+      - name: Delete the throwaway keystores
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/dry-run-keys"

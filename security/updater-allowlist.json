@@ -1,0 +1,10 @@
+{
+  "package": "dev.diamondspark.saraswati.updater",
+  "permissions": [
+    "android.permission.INTERNET",
+    "android.permission.REQUEST_INSTALL_PACKAGES"
+  ],
+  "exported_components": [
+    "activity:dev.diamondspark.saraswati.updater.UpdateActivity"
+  ]
+}

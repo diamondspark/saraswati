@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SARASWATI: Task 5 — plain platform theme, no appcompat/material
+     dependency: this app is a single screen with large buttons and short
+     copy, not worth a UI toolkit dependency. Theme.DeviceDefault.DayNight
+     is built into the platform since API 26 (this module's minSdk). -->
+<resources>
+    <style name="Theme.SaraswatiUpdater" parent="android:Theme.DeviceDefault.DayNight">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+    </style>
+</resources>

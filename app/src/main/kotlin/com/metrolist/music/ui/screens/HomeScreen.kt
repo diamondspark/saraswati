@@ -5,6 +5,10 @@
 
 package com.metrolist.music.ui.screens
 
+// SARASWATI: Task 7 — Intent/PackageManager for the "Sudhaar" banner's tap
+// handler (launch the Updater app, or detect it isn't installed).
+import android.content.Intent
+import android.content.pm.PackageManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -43,6 +47,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -54,6 +59,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
 import androidx.compose.material3.carousel.rememberCarouselState
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -80,6 +86,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.Font
@@ -105,6 +112,7 @@ import com.metrolist.innertube.models.WatchEndpoint
 import com.metrolist.innertube.models.YTItem
 import com.metrolist.innertube.utils.completed
 import com.metrolist.innertube.utils.parseCookieString
+import com.metrolist.music.BuildConfig
 import com.metrolist.music.LocalDatabase
 import com.metrolist.music.LocalArtistNameAliases
 import com.metrolist.music.LocalListenTogetherManager
@@ -112,6 +120,10 @@ import com.metrolist.music.LocalPlayerAwareWindowInsets
 import com.metrolist.music.LocalPlayerConnection
 import com.metrolist.music.R
 import com.metrolist.music.saraswati.SaraswatiFeatures
+import com.metrolist.music.saraswati.update.SaraswatiUpdateHttpFetcher
+import com.metrolist.music.saraswati.update.UpdateBanner
+import com.metrolist.music.saraswati.update.UpdateChecker
+import com.metrolist.music.saraswati.update.UpdateStatus
 import com.metrolist.music.constants.AutoRadioQueueKey
 import com.metrolist.music.constants.GridItemSize
 import com.metrolist.music.constants.GridItemsSizeKey
@@ -120,6 +132,8 @@ import com.metrolist.music.constants.InnerTubeCookieKey
 import com.metrolist.music.constants.ListItemHeight
 import com.metrolist.music.constants.ListThumbnailSize
 import com.metrolist.music.constants.RandomizeHomeOrderKey
+import com.metrolist.music.constants.SaraswatiLastUpdateCheckKey
+import com.metrolist.music.constants.SaraswatiUpdateChannelKey
 import com.metrolist.music.constants.SmallGridThumbnailHeight
 import com.metrolist.music.constants.ThumbnailCornerRadius
 import com.metrolist.music.db.entities.Album
@@ -696,6 +710,35 @@ fun HomeScreen(
     val (randomizeHomeOrder) = rememberPreference(RandomizeHomeOrderKey, true)
     val autoRadioQueue by rememberPreference(AutoRadioQueueKey, defaultValue = true)
 
+    // SARASWATI: Task 7 — the "Sudhaar" ("Update ready") banner. UpdateChecker
+    // itself is pure (saraswati/update/UpdateChecker.kt); this effect only
+    // decides *when* to call it (once per Home screen foreground, re-run if
+    // the beta toggle flips mid-session — see AboutScreen.kt's seven-tap
+    // gesture) and persists the new lastUpdateCheckMillis so the 12-hour
+    // throttle survives an app restart. Throttled/Failed/None all resolve to
+    // "don't show the banner this session" — there is no cached "an update
+    // was ready" state to fall back on, by design (a stale banner pointing at
+    // an already-installed update is worse than no banner).
+    val context = LocalContext.current
+    val uriHandler = LocalUriHandler.current
+    val updateChannel by rememberPreference(SaraswatiUpdateChannelKey, defaultValue = "stable")
+    var lastUpdateCheckMillis by rememberPreference(SaraswatiLastUpdateCheckKey, defaultValue = 0L)
+    var updateStatus by remember { mutableStateOf<UpdateStatus>(UpdateStatus.None) }
+    var showUpdaterMissingDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(updateChannel) {
+        val now = System.currentTimeMillis()
+        val status = UpdateChecker(SaraswatiUpdateHttpFetcher).check(
+            installedVersionCode = BuildConfig.VERSION_CODE.toLong(),
+            channel = updateChannel,
+            lastCheckMillis = lastUpdateCheckMillis,
+        )
+        if (status != UpdateStatus.Throttled) {
+            lastUpdateCheckMillis = now
+        }
+        updateStatus = status
+    }
+
     LaunchedEffect(Unit) { viewModel.loadHomeData() }
 
     val shouldShowWrappedCard by viewModel.showWrappedCard.collectAsStateWithLifecycle()
@@ -1190,6 +1233,42 @@ fun HomeScreen(
                 state = lazylistState,
                 contentPadding = LocalPlayerAwareWindowInsets.current.asPaddingValues(),
             ) {
+                // SARASWATI: Task 7 — the "Sudhaar" banner sits above every
+                // shelf, including the chips row, so it's the first thing a
+                // family member sees when an update (especially an urgent
+                // one) is ready.
+                val readyStatus = updateStatus as? UpdateStatus.Ready
+                if (readyStatus != null) {
+                    item(key = "sudhaar_update_banner") {
+                        UpdateBanner(
+                            status = readyStatus,
+                            onClick = {
+                                val updaterPackage = "dev.diamondspark.saraswati.updater"
+                                val updaterInstalled = try {
+                                    context.packageManager.getPackageInfo(updaterPackage, 0)
+                                    true
+                                } catch (e: PackageManager.NameNotFoundException) {
+                                    false
+                                }
+                                if (updaterInstalled) {
+                                    context.startActivity(
+                                        Intent("dev.diamondspark.saraswati.updater.CHECK").apply {
+                                            setClassName(updaterPackage, "$updaterPackage.UpdateActivity")
+                                            // SARASWATI: the Updater falls back to its own
+                                            // persisted channel (default "stable") without
+                                            // this extra, so a beta tester would see this
+                                            // banner and then "no update" in the Updater.
+                                            putExtra("channel", updateChannel)
+                                        },
+                                    )
+                                } else {
+                                    showUpdaterMissingDialog = true
+                                }
+                            },
+                        )
+                    }
+                }
+
                 item {
                     ChipsRow(
                         chips = homePage?.chips?.map { it to it.title } ?: emptyList(),
@@ -2614,5 +2693,35 @@ fun HomeScreen(
                 },
             )
         }
+    }
+
+    // SARASWATI: Task 7 — shown when the "Sudhaar" banner is tapped but the
+    // Saraswati Updates app (a separate, deliberately minimal installer —
+    // see docs/superpowers/specs/2026-10-17-saraswati-design.md) isn't on
+    // this phone yet.
+    if (showUpdaterMissingDialog) {
+        AlertDialog(
+            onDismissRequest = { showUpdaterMissingDialog = false },
+            title = { Text("Sudhaar needs the Updater app") },
+            text = {
+                Text(
+                    "The Saraswati Updates app isn't installed on this phone yet. " +
+                        "Install it first, then come back here to update.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showUpdaterMissingDialog = false
+                    uriHandler.openUri("https://github.com/diamondspark/saraswati#readme")
+                }) {
+                    Text("Setup page")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showUpdaterMissingDialog = false }) {
+                    Text("Later")
+                }
+            },
+        )
     }
 }

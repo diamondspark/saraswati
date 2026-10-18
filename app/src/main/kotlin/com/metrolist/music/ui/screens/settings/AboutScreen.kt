@@ -5,8 +5,10 @@
 
 package com.metrolist.music.ui.screens.settings
 
+import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -57,6 +59,7 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -71,12 +74,14 @@ import com.metrolist.music.BuildConfig
 import com.metrolist.music.LocalPlayerAwareWindowInsets
 import com.metrolist.music.LocalPlayerConnection
 import com.metrolist.music.R
+import com.metrolist.music.constants.SaraswatiUpdateChannelKey
 import com.metrolist.music.playback.PlayerConnection
 import com.metrolist.music.playback.queues.YouTubeQueue
 import com.metrolist.music.ui.component.IconButton
 import com.metrolist.music.ui.component.Material3SettingsGroup
 import com.metrolist.music.ui.component.Material3SettingsItem
 import com.metrolist.music.ui.utils.backToMain
+import com.metrolist.music.utils.rememberPreference
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -260,7 +265,16 @@ fun AboutScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val wannaPlayStr = stringResource(R.string.wanna_play_favorite_song)
     val yeahStr = stringResource(R.string.yeah)
-    
+
+    // SARASWATI: Task 7 — seven taps on the version row below toggles the
+    // "Sudhaar" ("Update ready") banner's channel between stable and beta.
+    // Hidden rather than a visible switch: this is a stopgap for a
+    // technical family member to opt one phone into beta ahead of a proper
+    // settings screen, not something meant to be discoverable.
+    val context = LocalContext.current
+    var betaToggleTapCount by remember { mutableIntStateOf(0) }
+    var updateChannel by rememberPreference(SaraswatiUpdateChannelKey, defaultValue = "stable")
+
     val windowInsets = LocalPlayerAwareWindowInsets.current
 
     Column(
@@ -318,7 +332,21 @@ fun AboutScreen(
                     Spacer(Modifier.height(8.dp))
             
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        // SARASWATI: Task 7 — the seven-tap beta-channel toggle.
+                        modifier = Modifier.clickable {
+                            betaToggleTapCount++
+                            if (betaToggleTapCount >= 7) {
+                                betaToggleTapCount = 0
+                                val enablingBeta = updateChannel != "beta"
+                                updateChannel = if (enablingBeta) "beta" else "stable"
+                                Toast.makeText(
+                                    context,
+                                    if (enablingBeta) "Beta updates channel on" else "Beta updates channel off",
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                        },
                     ) {
                         Surface(
                             shape = RoundedCornerShape(8.dp),

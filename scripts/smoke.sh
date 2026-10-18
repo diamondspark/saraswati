@@ -225,7 +225,15 @@ check_permissions() {
   local dump expected actual diff_out
   dump="$(dump_package)"
   expected="$(expected_permissions)"
-  actual="$(printf '%s' "$dump" | extract_requested_permissions | sort -u)"
+  # android.permission.ACCESS_LOCAL_NETWORK: on API 37 devices the platform
+  # lists this as "requested" and auto-grants it for every installed app,
+  # regardless of manifest content — confirmed on the Pixel 8 Pro 2026-10-18
+  # by checking the unmodified upstream com.metrolist.music, which shows
+  # the identical entry despite never declaring it. Not a Saraswati manifest
+  # permission (apk_gate.py's static check, which reads the build's merged
+  # manifest rather than device dumpsys, correctly never sees it), so it is
+  # excluded here rather than added to the allowlist.
+  actual="$(printf '%s' "$dump" | extract_requested_permissions | grep -v '^android\.permission\.ACCESS_LOCAL_NETWORK$' | sort -u)"
   if [[ "$expected" != "$actual" ]]; then
     echo "    expected (from $MANIFEST_ALLOWLIST_JSON):" >&2
     echo "$expected" | sed 's/^/      /' >&2

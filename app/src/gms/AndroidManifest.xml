@@ -8,6 +8,17 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- SARASWATI: Task 7 — package visibility (Android 11+) for the
+         "Sudhaar" banner's tap handler: without this, PackageManager
+         queries for dev.diamondspark.saraswati.updater always report "not
+         installed" even when it is, so the app can never tell the two
+         cases apart and would always show the setup dialog. Merges
+         additively with app/src/main/AndroidManifest.xml's own <queries>
+         block (different packages/intents, no conflict). -->
+    <queries>
+        <package android:name="dev.diamondspark.saraswati.updater" />
+    </queries>
+
     <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" tools:node="remove" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" tools:node="remove" />
