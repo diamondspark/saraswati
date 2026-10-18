@@ -169,3 +169,39 @@ pushing `main` without a human's explicit say. **The owner needs to
 either remove `05ec7c67` from `main` directly
 (`git push origin e8480243:main --force`) or decide the empty, clearly-
 labeled commit is harmless to leave.**
+
+## Upstream sync bot (Task 9): sync PRs need a real merge commit — HUMAN ACTION NEEDED
+
+**Merge every `sync/upstream-<date>` PR with "Create a merge commit." Never
+"Squash and merge" or "Rebase and merge" one of these.**
+
+`scripts/sync_upstream.sh` decides whether there are "new upstream commits"
+and scopes its whole report (diffstat, the `.github/workflows/` warning
+list, the TOML/host diffs) by assuming `main`'s history actually contains
+every upstream commit a previous sync PR brought in — i.e. that the PR was
+merged with a real two-parent merge commit. If a sync PR is squashed or
+rebased instead, the squashed commit on `main` is not a descendant of
+`upstream-main`'s tip, so the next run's `git rev-list --count
+base..upstream-main` and `git merge-base` calls silently land on the wrong
+starting point: it could re-propose already-landed upstream commits as
+"new," or render a wrong/noisy diffstat. The script now has a defensive
+check for exactly this (`sync_upstream.sh`'s ancestry check, right after it
+computes the merge-base) and will refuse to run rather than compute a
+silently wrong report if it ever finds this broken — but by then a human
+already has to reconcile `main` with `upstream-main` by hand, which this
+note is here to help you avoid needing to do.
+
+GitHub's merge button defaults to "Squash and merge," and nothing stops a
+different method being picked by mistake: branch protection (applied
+above, Task 3) covers required status checks and force-push/deletion
+rules, but does not control merge methods — that's a separate
+repository-level setting, and it is still at its GitHub default (all
+three merge methods enabled) as of this writing. **A human needs to set
+this directly in GitHub: Settings → General → Pull Requests → uncheck
+"Allow squash merging" and "Allow rebase merging," leaving only "Allow
+merge commits" checked** (or, narrower, leave all three enabled and just
+always pick "Create a merge commit" by hand specifically for
+`sync/upstream-*` PRs). This is not something this bot, or an agent
+working on this repo, can or should set via `gh api` on its own
+initiative — it's a repo-wide policy change the owner should make
+deliberately.

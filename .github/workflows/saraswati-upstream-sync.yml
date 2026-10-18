@@ -1,0 +1,54 @@
+name: saraswati-upstream-sync
+
+# Daily upstream merge bot (Task 9). Merges MetrolistGroup/Metrolist's main
+# into a short-lived sync/upstream-<date> branch and opens a pull request
+# for a human to review; this workflow never merges anything itself. All
+# the actual logic (fetch, merge, the .github/workflows/-always-ours
+# conflict rule, the report, the PR, the ci.yml dispatch) lives in
+# scripts/sync_upstream.sh — this file only wires it up with the one thing
+# a plain shell script can't get for itself: a job-scoped GITHUB_TOKEN.
+on:
+  schedule:
+    # 04:17 UTC daily; an off-the-hour minute avoids the top-of-hour
+    # scheduling crush GitHub's docs warn about (same reasoning as
+    # codeql.yml's cron).
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: saraswati-upstream-sync-${{ github.workflow }}
+  # Never cancel a run that may already be mid-push: a cancelled push can
+  # leave a sync branch pushed with no PR behind it, or worse, land
+  # mid-merge-commit.
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: sync
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Raised only on this job, not at workflow level: contents to push the
+    # sync branch, pull-requests to open/label the PR, actions to dispatch
+    # ci.yml on it (a PR opened with the default token doesn't trigger
+    # workflows on its own). No stored secret is used anywhere — only the
+    # default GITHUB_TOKEN.
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run upstream sync
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: scripts/sync_upstream.sh
