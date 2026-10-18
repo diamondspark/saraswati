@@ -9,8 +9,8 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
 import android.webkit.CookieManager
-import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
+import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
@@ -43,6 +43,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,17 +73,23 @@ import com.metrolist.music.constants.DataSyncIdKey
 import com.metrolist.music.constants.InnerTubeAuthUserKey
 import com.metrolist.music.constants.InnerTubeCookieKey
 import com.metrolist.music.constants.VisitorDataKey
+import com.metrolist.music.saraswati.security.LoginUrlPolicy
+import com.metrolist.music.saraswati.security.SaraswatiVault
+import com.metrolist.music.saraswati.security.WebInputs
 import com.metrolist.music.ui.component.IconButton
 import com.metrolist.music.ui.utils.backToMain
 import com.metrolist.music.utils.reportException
 import com.metrolist.music.utils.safeDataStoreEdit
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONTokener
 import timber.log.Timber
 
 private enum class LoginStage {
@@ -100,7 +107,7 @@ private data class AuthData(
     val authUser: String,
 )
 
-@SuppressLint("SetJavaScriptEnabled", "JavascriptInterface")
+@SuppressLint("SetJavaScriptEnabled")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LoginScreen(
@@ -109,12 +116,34 @@ fun LoginScreen(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    val jsInterface = remember { LoginJsInterface() }
     var loginStage by remember { mutableStateOf(LoginStage.Authenticating) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var accounts by remember { mutableStateOf<List<YouTubeAccount>>(emptyList()) }
     var selectedAccount by remember { mutableStateOf<YouTubeAccount?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    // SARASWATI: restoreYouTubeCookies (below) writes the stored,
+    // already-sealed session cookie back into the GLOBAL WebView
+    // CookieManager singleton for a channel switch, before the user has
+    // confirmed anything. If the user backs out of this screen before
+    // finalizeLogin() runs, that plaintext copy would otherwise sit in the
+    // cookie jar indefinitely — exactly the exposure Task 7/15 exist to
+    // close. finalizeLogin's own success path already clears the jar
+    // before this screen leaves composition, so this is a no-op then;
+    // it only matters for an abandoned login/channel-switch.
+    DisposableEffect(Unit) {
+        onDispose {
+            webViewRef?.apply {
+                stopLoading()
+                clearHistory()
+                clearFormData()
+                clearCache(true)
+            }
+            CookieManager.getInstance().removeAllCookies(null)
+            CookieManager.getInstance().flush()
+            WebStorage.getInstance().deleteAllData()
+        }
+    }
 
     suspend fun extractAuthData(webView: WebView?): AuthData? {
         val view = webView ?: return null
@@ -123,44 +152,48 @@ fun LoginScreen(
         repeat(20) {
             val cookie = CookieManager.getInstance().getCookie("https://music.youtube.com").orEmpty()
             val cookieMap = runCatching { parseCookieString(cookie) }.getOrDefault(emptyMap())
-            val visitorDataDeferred = CompletableDeferred<String?>()
-            val dataSyncIdDeferred = CompletableDeferred<String?>()
-            val authUserDeferred = CompletableDeferred<String?>()
-            jsInterface.onVisitorDataReceived = { visitorData ->
-                if (!visitorDataDeferred.isCompleted) visitorDataDeferred.complete(visitorData)
-            }
-            jsInterface.onDataSyncIdReceived = { dataSyncId ->
-                if (!dataSyncIdDeferred.isCompleted) dataSyncIdDeferred.complete(dataSyncId)
-            }
-            jsInterface.onAuthUserReceived = { authUser ->
-                if (!authUserDeferred.isCompleted) authUserDeferred.complete(authUser)
-            }
 
-            view.loadUrl(
-                "javascript:Android.onRetrieveVisitorData(" +
-                    "window.yt&&window.yt.config_?window.yt.config_.VISITOR_DATA:null)",
-            )
-            view.loadUrl(
-                "javascript:Android.onRetrieveDataSyncId(" +
-                    "window.yt&&window.yt.config_?window.yt.config_.DATASYNC_ID:null)",
-            )
-            view.loadUrl(
-                "javascript:Android.onRetrieveAuthUser(" +
-                    "window.yt&&window.yt.config_?String(window.yt.config_.SESSION_INDEX||0):'0')",
-            )
-
+            // SARASWATI: no JS bridge (audit A7.2/A14-5) — read the page's own config values
+            // back through evaluateJavascript's own result callback instead of
+            // addJavascriptInterface, which was reachable from every frame on the page.
             val pageAuthData =
                 withTimeoutOrNull(1_000) {
-                    WebAuthData(
-                        visitorData = visitorDataDeferred.await(),
-                        dataSyncId = dataSyncIdDeferred.await(),
-                        authUser = authUserDeferred.await().orEmpty(),
-                    )
+                    coroutineScope {
+                        val visitorDataAsync =
+                            async {
+                                view.evaluateJsOrNull(
+                                    "(function(){return window.yt&&window.yt.config_?" +
+                                        "window.yt.config_.VISITOR_DATA:null;})()",
+                                )
+                            }
+                        val dataSyncIdAsync =
+                            async {
+                                view.evaluateJsOrNull(
+                                    "(function(){return window.yt&&window.yt.config_?" +
+                                        "window.yt.config_.DATASYNC_ID:null;})()",
+                                )
+                            }
+                        val authUserAsync =
+                            async {
+                                view.evaluateJsOrNull(
+                                    "(function(){return window.yt&&window.yt.config_?" +
+                                        "String(window.yt.config_.SESSION_INDEX||0):'0';})()",
+                                )
+                            }
+                        WebAuthData(
+                            visitorData = visitorDataAsync.await(),
+                            dataSyncId = dataSyncIdAsync.await(),
+                            authUser = authUserAsync.await().orEmpty(),
+                        )
+                    }
                 }
             hasAuthCookie = "SAPISID" in cookieMap
-            val visitorData = pageAuthData?.visitorData
-            hasVisitorData = !visitorData.isNullOrBlank()
-            if (hasAuthCookie && pageAuthData != null && !visitorData.isNullOrBlank()) {
+            // SARASWATI: visitor data is shape-checked before it is trusted for anything (audit
+            // A8.1) — an unexpected page/response can at most make login retry, never hand a
+            // malformed value downstream.
+            val visitorData = pageAuthData?.visitorData?.takeIf(WebInputs::isValidVisitorData)
+            hasVisitorData = visitorData != null
+            if (hasAuthCookie && pageAuthData != null && visitorData != null) {
                 return AuthData(
                     cookie = cookie,
                     visitorData = visitorData,
@@ -190,7 +223,8 @@ fun LoginScreen(
             val saved =
                 withContext(Dispatchers.IO) {
                     context.safeDataStoreEdit { settings ->
-                        settings[InnerTubeCookieKey] = authData.cookie
+                        // SARASWATI: seal the sign-in cookie before it ever touches disk.
+                        settings[InnerTubeCookieKey] = SaraswatiVault.cookieVault.seal(authData.cookie)
                         settings[VisitorDataKey] = authData.visitorData
                         settings[DataSyncIdKey] = authData.dataSyncId
                         settings[InnerTubeAuthUserKey] = authData.authUser
@@ -201,13 +235,21 @@ fun LoginScreen(
                 }
             check(saved) { "Failed to persist account data" }
 
+            // SARASWATI: the Google/YouTube session cookie is now sealed and persisted — only
+            // past this point is it safe to strip the WebView's own plaintext copy (audit A7.4).
+            // Order matters: clearing any earlier would risk wiping the cookie before it was
+            // captured and saved above. This also closes every channel-switch path (A7.5), since
+            // every one of them (initial login, default-account login, explicit account switch)
+            // ends by calling finalizeLogin.
             webViewRef?.apply {
                 stopLoading()
                 clearHistory()
-                clearCache(true)
                 clearFormData()
             }
+            CookieManager.getInstance().removeAllCookies(null)
             CookieManager.getInstance().flush()
+            WebStorage.getInstance().deleteAllData()
+            webViewRef?.clearCache(true)
 
             withContext(Dispatchers.Main) {
                 context.packageManager
@@ -308,23 +350,20 @@ fun LoginScreen(
                 WebView(webViewContext).apply {
                     webViewClient =
                         object : WebViewClient() {
+                            // SARASWATI: exact-host, https-only allowlist (audit A7.1) — this
+                            // WebView is where a family member types their Google password, so
+                            // navigation anywhere else is blocked rather than merely logged. The
+                            // `intent:` scheme used to be allowed to launch another app's
+                            // activity straight off the login page with no tap or prompt (audit
+                            // A7.3); there is no such carve-out any more — every non-allowlisted
+                            // URL, including `intent:`, is simply blocked.
                             override fun shouldOverrideUrlLoading(
                                 view: WebView,
                                 request: WebResourceRequest,
                             ): Boolean {
-                                val scheme = request.url.scheme
-                                if (scheme == "http" || scheme == "https") return false
-
-                                if (scheme == "intent") {
-                                    runCatching {
-                                        Intent.parseUri(request.url.toString(), Intent.URI_INTENT_SCHEME)
-                                            .apply {
-                                                addCategory(Intent.CATEGORY_BROWSABLE)
-                                                component = null
-                                                selector = null
-                                            }.let(context::startActivity)
-                                    }
-                                }
+                                val url = request.url
+                                if (LoginUrlPolicy.isAllowedNavigation(url.toString())) return false
+                                Timber.w("LoginUrlPolicy blocked host=%s", url.host)
                                 return true
                             }
 
@@ -341,11 +380,13 @@ fun LoginScreen(
                     settings.apply {
                         javaScriptEnabled = true
                         domStorageEnabled = true
+                        // SARASWATI: audit A8.3 — the sign-in page never needs to resolve a
+                        // content:// URI.
+                        allowContentAccess = false
                         setSupportZoom(true)
                         builtInZoomControls = true
                         displayZoomControls = false
                     }
-                    addJavascriptInterface(jsInterface, "Android")
                     webViewRef = this
                     if (isSwitchingChannel) {
                         restoreYouTubeCookies(YouTube.cookie)
@@ -445,6 +486,17 @@ fun LoginScreen(
                                     signinUrl.startsWith("/") -> "https://music.youtube.com$signinUrl"
                                     else -> "https://music.youtube.com/$signinUrl"
                                 }
+                            // SARASWATI: audit A7.1 — this URL comes from the YouTube accounts
+                            // list response, not a hardcoded host, so it is checked against the
+                            // same allowlist as every other navigation before it is ever loaded.
+                            if (!LoginUrlPolicy.isAllowedNavigation(absoluteUrl)) {
+                                Timber.w(
+                                    "LoginUrlPolicy blocked host=%s",
+                                    runCatching { Uri.parse(absoluteUrl).host }.getOrNull(),
+                                )
+                                errorMessage = context.getString(R.string.youtube_channels_failed)
+                                return@Button
+                            }
                             loginStage = LoginStage.SwitchingAccount
                             webViewRef?.loadUrl(absoluteUrl)
                         }
@@ -557,32 +609,29 @@ private fun YouTubeAccountPickerItem(
     }
 }
 
-private class LoginJsInterface {
-    var onVisitorDataReceived: ((String?) -> Unit)? = null
-    var onDataSyncIdReceived: ((String?) -> Unit)? = null
-    var onAuthUserReceived: ((String?) -> Unit)? = null
-
-    @JavascriptInterface
-    fun onRetrieveVisitorData(visitorData: String?) {
-        onVisitorDataReceived?.invoke(visitorData)
-    }
-
-    @JavascriptInterface
-    fun onRetrieveDataSyncId(dataSyncId: String?) {
-        onDataSyncIdReceived?.invoke(dataSyncId)
-    }
-
-    @JavascriptInterface
-    fun onRetrieveAuthUser(authUser: String?) {
-        onAuthUserReceived?.invoke(authUser)
-    }
-}
-
 private data class WebAuthData(
     val visitorData: String?,
     val dataSyncId: String?,
     val authUser: String,
 )
+
+// SARASWATI: replaces the removed `addJavascriptInterface` bridge (audit A7.2/A14-5) — reads a
+// value straight out of `evaluateJavascript`'s own result callback instead of exposing a
+// `@JavascriptInterface` object the page (or any iframe on it) could call directly. [script] is
+// always one of this file's own static literals, never built from page or server data, so no
+// splicing/escaping is needed here.
+private suspend fun WebView.evaluateJsOrNull(script: String): String? =
+    suspendCancellableCoroutine { cont ->
+        evaluateJavascript(script) { rawResult ->
+            if (cont.isActive) {
+                val value =
+                    rawResult
+                        ?.takeIf { it.isNotBlank() && it != "null" }
+                        ?.let { runCatching { JSONTokener(it).nextValue() as? String }.getOrNull() }
+                cont.resumeWith(Result.success(value))
+            }
+        }
+    }
 
 private fun restoreYouTubeCookies(cookie: String?) {
     val cookieManager = CookieManager.getInstance()

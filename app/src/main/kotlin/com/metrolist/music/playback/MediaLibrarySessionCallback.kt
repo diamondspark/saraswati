@@ -68,6 +68,9 @@ import com.metrolist.music.constants.AndroidAutoYouTubePlaylistsKey
 import com.metrolist.music.constants.AutoRadioQueueKey
 import com.metrolist.music.playback.queues.ListQueue
 import com.metrolist.music.playback.queues.YouTubeQueue
+import com.metrolist.music.saraswati.security.AndroidPackageLookup
+import com.metrolist.music.saraswati.security.CallerInfoFactory
+import com.metrolist.music.saraswati.security.ControllerPolicy
 import com.metrolist.music.ui.screens.settings.AndroidAutoSection
 import com.metrolist.music.ui.screens.settings.deserializeSections
 import com.metrolist.music.ui.screens.settings.serializeSections
@@ -81,6 +84,8 @@ constructor(
     val downloadUtil: DownloadUtil,
 ) : MediaLibrarySession.Callback {
     private val scope = CoroutineScope(Dispatchers.Main) + Job()
+    private val packageLookup = AndroidPackageLookup(context)
+    private val tag = "MediaLibrarySessionCallback"
     lateinit var service: MusicService
     var toggleLike: () -> Unit = {}
     var toggleStartRadio: () -> Unit = {}
@@ -91,10 +96,47 @@ constructor(
         scope.cancel()
     }
 
+    // SARASWATI: shared gate for onConnect and onGetLibraryRoot (audit
+    // NEW-4). Verifies the controller's claimed package name against its
+    // uid (CallerInfoFactory), then applies ControllerPolicy's allow
+    // rules; logs every denial at WARN so a real Android Auto / Bluetooth
+    // / Assistant connection that gets refused is visible immediately
+    // (Review Focus #1).
+    private fun isCallerAllowed(controller: MediaSession.ControllerInfo): Boolean {
+        val caller =
+            CallerInfoFactory.create(
+                controllerPackage = controller.packageName,
+                controllerUid = controller.uid,
+                isTrusted = controller.isTrusted,
+                lookup = packageLookup,
+            )
+        val allowed = ControllerPolicy.isAllowed(context.packageName, caller, ControllerPolicy.ANDROID_AUTO_DIGESTS)
+        if (!allowed) {
+            val reason =
+                if (caller == null) {
+                    "package name not verified"
+                } else {
+                    "not own package, trusted, Android Auto or system app"
+                }
+            // SARASWATI (I4): android.util.Log.w, not Timber — Timber.DebugTree is gated
+            // behind BuildConfig.DEBUG (Task 17), so a Timber call here would be silent in
+            // the release build family phones actually run, defeating the whole point of
+            // this line (`grep "ControllerPolicy denied"` proving zero denials during
+            // Android Auto testing). android.util.Log.w/.e are kept by proguard-rules.pro
+            // in release (verified: only Log.v/.d are stripped). Only the package name and
+            // a short reason category are logged — never the uid or anything sensitive.
+            android.util.Log.w(tag, "ControllerPolicy denied pkg=${controller.packageName} reason=$reason")
+        }
+        return allowed
+    }
+
     override fun onConnect(
         session: MediaSession,
         controller: MediaSession.ControllerInfo,
     ): MediaSession.ConnectionResult {
+        if (!isCallerAllowed(controller)) {
+            return MediaSession.ConnectionResult.reject()
+        }
         val connectionResult = super.onConnect(session, controller)
         return MediaSession.ConnectionResult.accept(
             connectionResult.availableSessionCommands
@@ -142,8 +184,11 @@ constructor(
         session: MediaLibrarySession,
         browser: MediaSession.ControllerInfo,
         params: MediaLibraryService.LibraryParams?,
-    ): ListenableFuture<LibraryResult<MediaItem>> =
-        Futures.immediateFuture(
+    ): ListenableFuture<LibraryResult<MediaItem>> {
+        if (!isCallerAllowed(browser)) {
+            return Futures.immediateFuture(LibraryResult.ofError(SessionError.ERROR_PERMISSION_DENIED, params))
+        }
+        return Futures.immediateFuture(
             LibraryResult.ofItem(
                 MediaItem
                     .Builder()
@@ -159,6 +204,7 @@ constructor(
                 params,
             ),
         )
+    }
 
     override fun onSubscribe(
         session: MediaLibrarySession,

@@ -13,6 +13,7 @@ import android.content.ComponentName
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
@@ -133,6 +134,9 @@ import coil3.toBitmap
 import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.WatchEndpoint
+import com.metrolist.music.saraswati.SaraswatiDeepLinkPolicy
+import com.metrolist.music.saraswati.SaraswatiFeatures
+import com.metrolist.music.saraswati.security.DeepLinkGuard
 import com.metrolist.music.constants.AppBarHeight
 import com.metrolist.music.constants.AppLanguageKey
 import com.metrolist.music.constants.CheckForUpdatesKey
@@ -149,7 +153,6 @@ import com.metrolist.music.constants.ExperimentalLyricsKey
 import com.metrolist.music.constants.ForceBottomNavBarKey
 import com.metrolist.music.constants.LastSeenVersionKey
 import com.metrolist.music.constants.ListenTogetherInTopBarKey
-import com.metrolist.music.constants.ListenTogetherUsernameKey
 import com.metrolist.music.constants.LyricsProviderOrderKey
 import com.metrolist.music.constants.MiniPlayerBottomSpacing
 import com.metrolist.music.constants.MiniPlayerHeight
@@ -383,7 +386,10 @@ class MainActivity : FragmentActivity() {
         super.onNewIntent(intent)
         if (::navController.isInitialized) {
             handleWidgetTargetIntent(intent, navController)
-            handleDeepLinkIntent(intent, navController)
+            // SARASWATI (audit A9.3): a malformed link (e.g. a non-hierarchical
+            // URI calling getQueryParameter) must never crash the app.
+            runCatching { handleDeepLinkIntent(intent, navController) }
+                .onFailure { Timber.w(it, "deep link ignored") }
         } else {
             pendingIntent = intent
         }
@@ -986,15 +992,18 @@ class MainActivity : FragmentActivity() {
                 val snackbarHostState = remember { SnackbarHostState() }
 
                 LaunchedEffect(Unit) {
+                    // SARASWATI (audit A9.3): a malformed link must never crash the app.
                     if (pendingIntent != null) {
                         handleWidgetTargetIntent(pendingIntent!!, navController)
                         handleRecognitionIntent(pendingIntent!!, navController)
-                        handleDeepLinkIntent(pendingIntent!!, navController)
+                        runCatching { handleDeepLinkIntent(pendingIntent!!, navController) }
+                            .onFailure { Timber.w(it, "deep link ignored") }
                         pendingIntent = null
                     } else {
                         handleWidgetTargetIntent(intent, navController)
                         handleRecognitionIntent(intent, navController)
-                        handleDeepLinkIntent(intent, navController)
+                        runCatching { handleDeepLinkIntent(intent, navController) }
+                            .onFailure { Timber.w(it, "deep link ignored") }
                     }
                 }
 
@@ -1003,7 +1012,9 @@ class MainActivity : FragmentActivity() {
                         Consumer<Intent> { intent ->
                             handleWidgetTargetIntent(intent, navController)
                             handleRecognitionIntent(intent, navController)
-                            handleDeepLinkIntent(intent, navController)
+                            // SARASWATI (audit A9.3): a malformed link must never crash the app.
+                            runCatching { handleDeepLinkIntent(intent, navController) }
+                                .onFailure { Timber.w(it, "deep link ignored") }
                         }
 
                     addOnNewIntentListener(listener)
@@ -1192,8 +1203,11 @@ class MainActivity : FragmentActivity() {
                             val onSearchLongClick: () -> Unit =
                                 remember(navController) {
                                     {
-                                        navController.navigate("recognition") {
-                                            launchSingleTop = true
+                                        // SARASWATI: music recognition is dropped.
+                                        if (SaraswatiFeatures.RECOGNITION) {
+                                            navController.navigate("recognition") {
+                                                launchSingleTop = true
+                                            }
                                         }
                                     }
                                 }
@@ -1322,8 +1336,11 @@ class MainActivity : FragmentActivity() {
                             val onRailSearchLongClick: () -> Unit =
                                 remember(navController) {
                                     {
-                                        navController.navigate("recognition") {
-                                            launchSingleTop = true
+                                        // SARASWATI: music recognition is dropped.
+                                        if (SaraswatiFeatures.RECOGNITION) {
+                                            navController.navigate("recognition") {
+                                                launchSingleTop = true
+                                            }
                                         }
                                     }
                                 }
@@ -1535,6 +1552,10 @@ class MainActivity : FragmentActivity() {
         navController: NavHostController,
     ) {
         if (intent.action != ACTION_RECOGNITION) return
+        // SARASWATI: music recognition is dropped. The manifest overlay removes
+        // the ACTION_RECOGNITION intent filter, but an explicit component start
+        // (setClassName/setComponent) would still reach this handler.
+        if (!SaraswatiFeatures.RECOGNITION) return
         val autoStart = intent.getBooleanExtra(EXTRA_AUTO_START_RECOGNITION, false)
         intent.action = null
         intent.removeExtra(EXTRA_AUTO_START_RECOGNITION)
@@ -1591,26 +1612,51 @@ class MainActivity : FragmentActivity() {
         intent: Intent,
         navController: NavHostController,
     ) {
-        val uri = intent.data ?: intent.extras?.getString(Intent.EXTRA_TEXT)?.toUri() ?: return
+        // SARASWATI (audit A9.2): EXTRA_TEXT is only trusted as a link source
+        // for ACTION_SEND (the "share to Saraswati" surface); any other
+        // action is ignored so an arbitrary intent cannot smuggle a route
+        // through a string extra. firstUrlIn also lets "Song: <url>"-style
+        // shared text resolve to the link inside it.
+        val uri =
+            intent.data
+                ?: (
+                    if (intent.action == Intent.ACTION_SEND) {
+                        intent.extras?.getString(Intent.EXTRA_TEXT)
+                            ?.let { DeepLinkGuard.firstUrlIn(it) }
+                            ?.toUri()
+                    } else {
+                        null
+                    }
+                ) ?: return
         intent.data = null
         intent.removeExtra(Intent.EXTRA_TEXT)
         val coroutineScope = lifecycle.coroutineScope
 
-        val listenCode =
-            uri.getQueryParameter("code")
-                ?: uri.getQueryParameter("room")
-                ?: uri.pathSegments.getOrNull(1)
-        val isListenLink = uri.pathSegments.firstOrNull() == "listen" || uri.host?.equals("listen", ignoreCase = true) == true
-        if (!listenCode.isNullOrBlank() && isListenLink) {
-            val username = dataStore.get(ListenTogetherUsernameKey, "").ifBlank { "Guest" }
-            listenTogetherManager.joinRoom(listenCode, username)
+        // SARASWATI (audit A9.1/NEW-5): Listen Together stays visible in the
+        // UI but must not connect anywhere until Phase 4 adds a join
+        // confirmation. Block every surface that could trigger a join here —
+        // a link, shared text, or an explicit intent — before any join logic
+        // runs. This runs in addition to, not instead of, the broader
+        // DeepLinkGuard check below.
+        if (SaraswatiDeepLinkPolicy.isListenTogetherLink(uri.host, uri.pathSegments.firstOrNull())) {
+            return
+        }
+
+        // SARASWATI (audit A9.2): only a known YouTube host/scheme is parsed
+        // any further; everything else is ignored rather than fed into the
+        // route-building logic below.
+        if (!DeepLinkGuard.isAcceptedLink(uri.scheme, uri.host, uri.isHierarchical)) {
+            Timber.w("deep link ignored: unsupported scheme or host")
             return
         }
 
         when (val path = uri.pathSegments.firstOrNull()) {
             "playlist" -> {
                 val playlistId = uri.getQueryParameter("list")
-                if (playlistId.isNullOrBlank() || playlistId.equals("null", ignoreCase = true)) {
+                if (playlistId.isNullOrBlank() ||
+                    playlistId.equals("null", ignoreCase = true) ||
+                    !DeepLinkGuard.isValidId(playlistId)
+                ) {
                     Toast.makeText(this, R.string.playlist_unavailable, Toast.LENGTH_SHORT).show()
                     return
                 }
@@ -1620,28 +1666,34 @@ class MainActivity : FragmentActivity() {
                         YouTube
                             .albumSongs(playlistId)
                             .onSuccess { songs ->
-                                songs.firstOrNull()?.album?.id?.let { browseId ->
-                                    withContext(Dispatchers.Main) {
-                                        navController.navigate("album/$browseId")
+                                songs.firstOrNull()?.album?.id
+                                    ?.takeIf { DeepLinkGuard.isValidId(it) }
+                                    ?.let { browseId ->
+                                        withContext(Dispatchers.Main) {
+                                            navController.navigate("album/${Uri.encode(browseId)}")
+                                        }
                                     }
-                                }
                             }.onFailure { reportException(it) }
                     }
                 } else {
-                    navController.navigate("online_playlist/$playlistId")
+                    navController.navigate("online_playlist/${Uri.encode(playlistId)}")
                 }
             }
 
             "browse" -> {
-                uri.lastPathSegment?.let { browseId ->
-                    navController.navigate("album/$browseId")
-                }
+                uri.lastPathSegment
+                    ?.takeIf { DeepLinkGuard.isValidId(it) }
+                    ?.let { browseId ->
+                        navController.navigate("album/${Uri.encode(browseId)}")
+                    }
             }
 
             "channel", "c" -> {
-                uri.lastPathSegment?.let { artistId ->
-                    navController.navigate("artist/$artistId")
-                }
+                uri.lastPathSegment
+                    ?.takeIf { DeepLinkGuard.isValidId(it) }
+                    ?.let { artistId ->
+                        navController.navigate("artist/${Uri.encode(artistId)}")
+                    }
             }
 
             "search" -> {
@@ -1656,9 +1708,9 @@ class MainActivity : FragmentActivity() {
                         path == "watch" -> uri.getQueryParameter("v")
                         uri.host == "youtu.be" -> uri.pathSegments.firstOrNull()
                         else -> null
-                    }
+                    }?.takeIf { DeepLinkGuard.isValidId(it) }
 
-                val playlistId = uri.getQueryParameter("list")
+                val playlistId = uri.getQueryParameter("list")?.takeIf { DeepLinkGuard.isValidId(it) }
 
                 if (videoId != null) {
                     coroutineScope.launch(Dispatchers.IO) {

@@ -28,6 +28,9 @@ import com.metrolist.innertube.models.YouTubeLocale
 import com.metrolist.kugou.KuGou
 import com.metrolist.lastfm.LastFM
 import com.metrolist.music.BuildConfig
+import com.metrolist.music.saraswati.SaraswatiFeatures
+import com.metrolist.music.saraswati.security.SaraswatiVault
+import com.metrolist.music.saraswati.security.SecretScrubber
 import com.metrolist.music.constants.*
 import com.metrolist.music.di.ApplicationScope
 import com.metrolist.music.extensions.toEnum
@@ -77,6 +80,22 @@ class App :
         CrashHandler.install(this)
         ArtistNameAliases.initialize(this)
 
+        // SARASWATI: plant logging before anything else below that might log,
+        // including the scrub try/catch a few lines down — it used to run
+        // after this block, so its failure warning silently printed nowhere
+        // in any build (no tree was planted yet to receive it). Moving the
+        // plant() call earlier, rather than moving the scrub later, keeps
+        // the scrub's "before any cookie read" ordering guarantee (Task 7)
+        // unchanged: it still runs before observeSettingsChanges() below.
+        // SARASWATI (audit A11-1): only in debug builds — unconditionally
+        // planting DebugTree sent ~990 call sites to release Logcat,
+        // including BotGuard responses and Listen Together room codes.
+        // Timber tolerates nothing ever being planted: every Timber.*() call
+        // elsewhere in the app is then simply a no-op in release.
+        if (BuildConfig.DEBUG) {
+            Timber.plant(Timber.DebugTree())
+        }
+
         // preferencesDataStore uses filesDir/datastore; proactive mkdir reduces failures on odd ROM states
         try {
             val datastoreDir = File(filesDir, "datastore")
@@ -87,8 +106,38 @@ class App :
             Timber.e(e, "Failed to ensure DataStore directory")
         }
 
-        // Plant logging before extraction services initialize.
-        Timber.plant(Timber.DebugTree())
+        // SARASWATI: scrub any plaintext secret preference (a YouTube
+        // sign-in cookie, or an AI/Last.fm/Listen-Together/proxy
+        // credential) that a restored Metrolist backup, a phone-to-phone
+        // transfer, or a hand-copied legacy datastore file could have left
+        // behind (audit NEW-3; Review Focus #4). This runs synchronously,
+        // not inside applicationScope.launch: Android does not create any
+        // Activity (and therefore cannot run any Compose code that reads
+        // InnerTubeCookieKey via rememberPreference) until
+        // Application.onCreate() returns, so blocking here guarantees the
+        // scrub finishes before observeSettingsChanges() below — or
+        // anything else in this process — ever reads the cookie.
+        //
+        // SARASWATI (fix round 1; updated for I5): a broken/custom-ROM
+        // Keystore implementation (seen on some Samsung/Xiaomi phones) can
+        // make AndroidKeystoreKeyProvider.key() throw even after the
+        // StrongBox fallback — e.g. a java.security.ProviderException.
+        // CookieVault.open() (which scrub() calls) now also catches
+        // RuntimeException/ProviderException and returns null instead of
+        // propagating it (I5), so this specific failure is already covered
+        // one layer down; this outer try/catch is kept as defense-in-depth
+        // for anything else scrub() could still throw (e.g. a DataStore IO
+        // failure from the edit {} call). Uncaught, any such failure would
+        // crash the app on every single launch with no recovery short of an
+        // uninstall. Catching here instead skips this boot's scrub
+        // (SecretScrubber runs again next boot; the worst case is a secret
+        // preference surviving a little longer, not an unusable app).
+        try {
+            runBlocking { SecretScrubber.scrub(dataStore, SaraswatiVault.cookieVault) }
+        } catch (e: Exception) {
+            Timber.w(e, "SecretScrubber.scrub failed, skipping this boot's scrub")
+        }
+
         InnerTubeXPlayer.initialize(this)
 
         // Pre-read Coil cache size on background to avoid runBlocking in newImageLoader
@@ -150,7 +199,10 @@ class App :
             secret = BuildConfig.LASTFM_SECRET.takeIf { it.isNotEmpty() } ?: "",
         )
 
-        if (settings[ProxyEnabledKey] == true) {
+        // SARASWATI: proxy settings are hidden (audit A15.2); guard this too
+        // so a stored proxy config restored from a legacy backup is never
+        // honored. Task 7 scrubs any stored proxy keys on startup.
+        if (SaraswatiFeatures.PROXY && settings[ProxyEnabledKey] == true) {
             val username = settings[ProxyUsernameKey].orEmpty()
             val password = settings[ProxyPasswordKey].orEmpty()
             val type = settings[ProxyTypeKey].toEnum(defaultValue = Proxy.Type.HTTP)
@@ -240,9 +292,13 @@ class App :
             dataStore.data
                 .map { it[InnerTubeCookieKey] }
                 .distinctUntilChanged()
-                .collect { cookie ->
+                .collect { stored ->
                     try {
-                        YouTube.cookie = cookie
+                        // SARASWATI: stored is vault-sealed; open it before handing
+                        // it to YouTube.cookie. SecretScrubber already ran above, so
+                        // in the normal case this is just the hot-reload path for a
+                        // cookie this app itself sealed.
+                        YouTube.cookie = stored?.let { SaraswatiVault.cookieVault.open(it) }
                     } catch (e: Exception) {
                         Timber.e(e, "Could not parse cookie. Clearing existing cookie.")
                         forgetAccount(this@App)
@@ -365,6 +421,10 @@ class App :
                     }
                     flush()
                 }
+                // SARASWATI: audit A6.8/A7.4 — the login WebView's DOM/local storage can hold a
+                // second copy of the session independent of the cookie jar above; clear it too
+                // on logout.
+                android.webkit.WebStorage.getInstance().deleteAllData()
             }
             Timber.d("forgetAccount: Logout process complete")
         }

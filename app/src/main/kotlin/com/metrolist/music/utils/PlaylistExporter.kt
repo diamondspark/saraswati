@@ -9,6 +9,7 @@ import android.provider.MediaStore
 import androidx.core.content.FileProvider
 import com.metrolist.innertube.models.SongItem
 import com.metrolist.music.db.entities.PlaylistSong
+import com.metrolist.music.saraswati.security.ExportNames
 import java.io.File
 import java.io.FileWriter
 import java.io.IOException
@@ -42,11 +43,16 @@ object PlaylistExporter {
                 }
 
             // Save to file
-            val file = createExportFile(context, "$playlistName.csv")
+            // SARASWATI: sanitize the playlist name before it becomes a file
+            // name (audit NEW-7); a hostile title like "../../etc" must not
+            // escape the export directory.
+            val file = createExportFile(context, "${ExportNames.sanitize(playlistName)}.csv")
             FileWriter(file).use { it.write(csvContent) }
 
             Result.success(file)
         } catch (e: IOException) {
+            Result.failure(e)
+        } catch (e: IllegalArgumentException) {
             Result.failure(e)
         }
 
@@ -73,11 +79,16 @@ object PlaylistExporter {
                 }
 
             // Save to file
-            val file = createExportFile(context, "$playlistName.m3u")
+            // SARASWATI: sanitize the playlist name before it becomes a file
+            // name (audit NEW-7); a hostile title like "../../etc" must not
+            // escape the export directory.
+            val file = createExportFile(context, "${ExportNames.sanitize(playlistName)}.m3u")
             FileWriter(file).use { it.write(m3uContent) }
 
             Result.success(file)
         } catch (e: IOException) {
+            Result.failure(e)
+        } catch (e: IllegalArgumentException) {
             Result.failure(e)
         }
 }
@@ -107,11 +118,16 @@ fun exportYouTubePlaylistAsCSV(
             }
 
         // Save to file
-        val file = createExportFile(context, "$playlistName.csv")
+        // SARASWATI: sanitize the playlist name before it becomes a file
+        // name (audit NEW-7); a hostile title like "../../etc" must not
+        // escape the export directory.
+        val file = createExportFile(context, "${ExportNames.sanitize(playlistName)}.csv")
         FileWriter(file).use { it.write(csvContent) }
 
         Result.success(file)
     } catch (e: IOException) {
+        Result.failure(e)
+    } catch (e: IllegalArgumentException) {
         Result.failure(e)
     }
 
@@ -138,11 +154,16 @@ fun exportYouTubePlaylistAsM3U(
             }
 
         // Save to file
-        val file = createExportFile(context, "$playlistName.m3u")
+        // SARASWATI: sanitize the playlist name before it becomes a file
+        // name (audit NEW-7); a hostile title like "../../etc" must not
+        // escape the export directory.
+        val file = createExportFile(context, "${ExportNames.sanitize(playlistName)}.m3u")
         FileWriter(file).use { it.write(m3uContent) }
 
         Result.success(file)
     } catch (e: IOException) {
+        Result.failure(e)
+    } catch (e: IllegalArgumentException) {
         Result.failure(e)
     }
 
@@ -171,6 +192,17 @@ private fun createExportFile(
             }
         exportFile = File(exportDir, newFilename)
         counter++
+    }
+
+    // SARASWATI: defense in depth against a hostile playlist title (audit
+    // NEW-7). ExportNames.sanitize already strips path separators from the
+    // name this file was built from, so this should never trip, but require
+    // the resolved file to still be directly inside exportDir before it is
+    // created and handed to FileProvider.
+    val canonicalExportDir = exportDir.canonicalFile
+    val canonicalFile = exportFile.canonicalFile
+    require(canonicalFile.parentFile == canonicalExportDir) {
+        "export file escaped the export directory: $canonicalFile"
     }
 
     exportFile.createNewFile()

@@ -5,7 +5,14 @@
 
 package com.metrolist.music.lyrics
 
+import com.metrolist.music.saraswati.SaraswatiFeatures
+
 object LyricsProviderRegistry {
+    // SARASWATI: filtered to SaraswatiFeatures.ALLOWED_LYRICS_PROVIDER_KEYS.
+    // Each extra lyrics host this fork queries would learn every song the
+    // family plays. Dropped: KuGou, Paxsenix, LyricsPlus (six community
+    // mirrors) and Zemer (also calls jewishmusic.fm:8443). See
+    // docs/strip-checklist.md to re-add one later.
     private val providerMap = mapOf(
         "BetterLyrics" to BetterLyricsProvider,
         "Paxsenix" to PaxsenixLyricsProvider,
@@ -15,7 +22,7 @@ object LyricsProviderRegistry {
         "Zemer" to ZemerLyricsProvider,
         "YouTubeSubtitle" to YouTubeSubtitleLyricsProvider,
         "YouTube" to YouTubeLyricsProvider,
-    )
+    ).filterKeys { it in SaraswatiFeatures.ALLOWED_LYRICS_PROVIDER_KEYS }
 
     val providerNames = providerMap.keys.toList()
 
@@ -45,7 +52,10 @@ object LyricsProviderRegistry {
         "Zemer",
         "YouTubeSubtitle",
         "YouTube",
-    )
+        // SARASWATI: filtered to the allowed four so a blank saved order
+        // (deserializeProviderOrder's blank-string branch returns this list
+        // verbatim) never re-surfaces a dropped provider.
+    ).filter { it in SaraswatiFeatures.ALLOWED_LYRICS_PROVIDER_KEYS }
 
     fun getOrderedProviders(orderString: String): List<LyricsProvider> {
         val order = deserializeProviderOrder(orderString)

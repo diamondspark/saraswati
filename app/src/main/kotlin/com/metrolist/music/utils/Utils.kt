@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.res.Configuration
 import com.metrolist.music.R
 import java.util.Locale
+import timber.log.Timber
 
 fun getArtistSeparator(context: Context): String = " ${context.getString(R.string.and)} "
 
@@ -22,8 +23,12 @@ fun <T> List<T>.joinToArtistString(
     else -> dropLast(1).joinToString(", ") { transform(it) } + "$conjunction${transform(last())}"
 }
 
+// SARASWATI (audit A11-1): printStackTrace() always writes to stderr/Logcat,
+// release build or not. Routing through Timber instead means the stack
+// trace only reaches Logcat in debug builds (App.kt only plants
+// Timber.DebugTree when BuildConfig.DEBUG).
 fun reportException(throwable: Throwable) {
-    throwable.printStackTrace()
+    Timber.e(throwable)
 }
 
 @Suppress("DEPRECATION")

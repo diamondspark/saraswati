@@ -730,9 +730,18 @@ fun YouTubePlaylistMenu(
                         }
                     result
                         .onSuccess { file ->
-                            val uri = getExportFileUri(context, file)
-                            val mime = if (format == "csv") "text/csv" else "audio/x-mpegurl"
-                            shareFile(context, uri, mime)
+                            // SARASWATI: a playlist title is attacker-controlled
+                            // (audit NEW-7); FileProvider.getUriForFile throws
+                            // IllegalArgumentException if the resolved file
+                            // somehow falls outside provider_paths.xml's
+                            // declared paths, which would otherwise crash here.
+                            try {
+                                val uri = getExportFileUri(context, file)
+                                val mime = if (format == "csv") "text/csv" else "audio/x-mpegurl"
+                                shareFile(context, uri, mime)
+                            } catch (e: IllegalArgumentException) {
+                                Toast.makeText(context, R.string.export_failed, Toast.LENGTH_SHORT).show()
+                            }
                         }.onFailure {
                             Toast.makeText(context, R.string.export_failed, Toast.LENGTH_SHORT).show()
                         }

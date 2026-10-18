@@ -24,6 +24,7 @@ import com.metrolist.innertubex.extraction.YtConfigParserImpl
 import com.metrolist.innertubex.extraction.generateClientPlaybackNonce
 import com.metrolist.innertubex.extraction.strategy.PoTokenProviderKind
 import com.metrolist.music.constants.AudioQuality
+import com.metrolist.music.saraswati.SaraswatiFeatures
 import com.metrolist.music.utils.potoken.PoTokenGenerator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
@@ -241,10 +242,21 @@ object InnerTubeXPlayer {
         val failedAtMs: Long,
     )
 
-    private class AndroidPlayerConfigRepository(context: Context) : PlayerConfigRepository {
+    // SARASWATI: internal (not private) so InnerTubeXPlayerCipherConfigTest
+    // can instantiate it directly and assert `enabled` stays off (audit A12-b).
+    internal class AndroidPlayerConfigRepository(context: Context) : PlayerConfigRepository {
         private val preferences = context.getSharedPreferences("innertubex_player_config", Context.MODE_PRIVATE)
 
-        override val enabled: Boolean = true
+        // SARASWATI: was `true`. InnerTubeX's live remote path downloads a
+        // complete, unsigned JS program per player from a third-party repo
+        // (MetrolistGroup/faraday via cdn.jsdelivr.net, fallback
+        // raw.githubusercontent.com) and runs it in the app's QuickJS
+        // runtime, bypassing every gate in this project (audit A12-b, High).
+        // Reading SaraswatiFeatures.REMOTE_CIPHER_CODE (false) keeps this
+        // off; playback instead uses InnerTubeX's local solver on YouTube's
+        // own player script (the approach yt-dlp uses). Task 12 blocks both
+        // hosts at the network layer as a second line of defense.
+        override val enabled: Boolean = SaraswatiFeatures.REMOTE_CIPHER_CODE
         override val sourceUrl: String = PLAYER_CONFIG_URL
         override val defaultSourceUrl: String = PLAYER_CONFIG_URL
         override var cachedJson: String

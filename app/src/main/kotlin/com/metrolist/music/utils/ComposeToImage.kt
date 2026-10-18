@@ -618,7 +618,9 @@ object ComposeToImage {
             }
             uri
         } else {
-            val cachePath = File(context.cacheDir, "images")
+            // SARASWATI: "shared/" is the only subdirectory provider_paths.xml's
+            // cache-path exposes (Task 6); narrowed from the whole cache dir.
+            val cachePath = File(context.cacheDir, "shared")
             cachePath.mkdirs()
             val imageFile = File(cachePath, "$fileName.png")
             FileOutputStream(imageFile).use { outputStream ->

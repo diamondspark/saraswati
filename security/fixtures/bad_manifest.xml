@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!--
+  Fixture: deliberately violates every rule check() enforces, so
+  test_apk_gate.py can assert each exact violation string in one place.
+  Based on clean_manifest.xml with five injected problems:
+    - package does not match the allowlist
+    - an extra, unallowlisted permission (READ_CONTACTS)
+    - RECORD_AUDIO present, which is both forbidden AND (deliberately, in
+      the test allowlist) also listed under "permissions"; forbidden
+      must still win
+    - an extra exported receiver (a home-screen widget receiver) not in
+      the exported_components allowlist
+    - allowBackup="true"
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.evil.fork.app"
+    platformBuildVersionCode="36"
+    platformBuildVersionName="16">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="dev.diamondspark.saraswati.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <application android:allowBackup="true" android:label="Saraswati">
+
+        <activity android:name="com.metrolist.music.MainActivity" android:exported="true" />
+
+        <activity-alias
+            android:name="com.metrolist.music.MainActivityAlias"
+            android:exported="true"
+            android:targetActivity="com.metrolist.music.MainActivity" />
+
+        <activity-alias
+            android:name="com.metrolist.music.MainActivityStatic"
+            android:enabled="false"
+            android:exported="true"
+            android:targetActivity="com.metrolist.music.MainActivity" />
+
+        <activity android:name="com.yalantis.ucrop.UCropActivity" android:exported="false" />
+
+        <service android:name="com.metrolist.music.playback.MusicService" android:exported="true" />
+
+        <service android:name="com.metrolist.music.playback.ExoDownloadService" android:exported="false" />
+
+        <receiver android:name="androidx.media3.session.MediaButtonReceiver" android:exported="true" />
+
+        <receiver
+            android:name="androidx.profileinstaller.ProfileInstallReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+
+        <receiver
+            android:name="com.metrolist.music.widget.MusicWidgetReceiver"
+            android:exported="true" />
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.evil.fork.app.FileProvider"
+            android:exported="false" />
+
+    </application>
+</manifest>

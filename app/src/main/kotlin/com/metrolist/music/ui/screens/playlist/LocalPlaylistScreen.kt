@@ -923,7 +923,11 @@ fun LocalPlaylistHeader(
             ActivityResultContracts.PickVisualMedia(),
         ) { uri ->
             uri?.let { sourceUri ->
-                val destFile = java.io.File(context.cacheDir, "playlist_cover_crop_${System.currentTimeMillis()}.jpg")
+                // SARASWATI: write into the "shared/" subdirectory, the only
+                // one provider_paths.xml's cache-path exposes (Task 6), not
+                // the cache root.
+                val sharedDir = java.io.File(context.cacheDir, "shared").apply { mkdirs() }
+                val destFile = java.io.File(sharedDir, "playlist_cover_crop_${System.currentTimeMillis()}.jpg")
                 val destUri = FileProvider.getUriForFile(context, "${context.packageName}.FileProvider", destFile)
                 pendingCropDestUri = destUri
 

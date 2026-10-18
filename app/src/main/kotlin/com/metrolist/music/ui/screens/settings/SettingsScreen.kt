@@ -37,6 +37,7 @@ import com.metrolist.music.ui.component.Material3SettingsGroup
 import com.metrolist.music.ui.component.Material3SettingsItem
 import com.metrolist.music.ui.component.ReleaseNotesCard
 import com.metrolist.music.ui.utils.backToMain
+import com.metrolist.music.saraswati.SaraswatiFeatures
 import com.metrolist.music.utils.Updater
 import androidx.compose.runtime.remember
 
@@ -91,23 +92,33 @@ fun SettingsScreen(
         // Player & Content Section (moved up and combined with content)
         Material3SettingsGroup(
             title = stringResource(R.string.settings_section_player_content),
-            items = listOf(
-                Material3SettingsItem(
-                    icon = painterResource(R.drawable.play),
-                    title = { Text(stringResource(R.string.player_and_audio)) },
-                    onClick = { navController.navigate("settings/player") }
-                ),
-                Material3SettingsItem(
-                    icon = painterResource(R.drawable.language),
-                    title = { Text(stringResource(R.string.content)) },
-                    onClick = { navController.navigate("settings/content") }
-                ),
-                Material3SettingsItem(
-                    icon = painterResource(R.drawable.translate),
-                    title = { Text(stringResource(R.string.ai_lyrics_translation)) },
-                    onClick = { navController.navigate("settings/ai") }
+            items = buildList {
+                add(
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.play),
+                        title = { Text(stringResource(R.string.player_and_audio)) },
+                        onClick = { navController.navigate("settings/player") }
+                    )
                 )
-            )
+                add(
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.language),
+                        title = { Text(stringResource(R.string.content)) },
+                        onClick = { navController.navigate("settings/content") }
+                    )
+                )
+                // SARASWATI: AI lyrics translation is dropped (unvetted
+                // third-party translation calls on every song's lyrics).
+                if (SaraswatiFeatures.AI_LYRICS) {
+                    add(
+                        Material3SettingsItem(
+                            icon = painterResource(R.drawable.translate),
+                            title = { Text(stringResource(R.string.ai_lyrics_translation)) },
+                            onClick = { navController.navigate("settings/ai") }
+                        )
+                    )
+                }
+            }
         )
 
         Spacer(modifier = Modifier.height(16.dp))

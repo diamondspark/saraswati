@@ -6,23 +6,11 @@
 package com.metrolist.music.viewmodels
 
 import android.content.Context
-import android.content.Intent
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import com.metrolist.music.App
-import com.metrolist.music.constants.AccountChannelHandleKey
-import com.metrolist.music.constants.AccountEmailKey
-import com.metrolist.music.constants.AccountNameKey
-import com.metrolist.music.constants.DataSyncIdKey
-import com.metrolist.music.constants.InnerTubeAuthUserKey
-import com.metrolist.music.constants.InnerTubeCookieKey
-import com.metrolist.music.constants.VisitorDataKey
 import com.metrolist.music.utils.SyncUtils
-import com.metrolist.music.utils.dataStore
-import com.metrolist.music.utils.safeDataStoreEdit
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import javax.inject.Inject
@@ -72,42 +60,8 @@ class AccountSettingsViewModel @Inject constructor(
         onCookieChange("")
     }
 
-    /**
-     * Save token credentials atomically to DataStore, then restart the app.
-     * This ensures all writes complete before the process is killed,
-     * preventing the race condition where Runtime.exit(0) kills the process
-     * before async DataStore coroutines finish writing.
-     */
-    fun saveTokenAndRestart(
-        context: Context,
-        cookie: String,
-        visitorData: String,
-        dataSyncId: String,
-        authUser: String,
-        accountName: String,
-        accountEmail: String,
-        accountChannelHandle: String,
-    ) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val saved = context.safeDataStoreEdit { settings ->
-                settings[InnerTubeCookieKey] = cookie
-                settings[VisitorDataKey] = visitorData
-                settings[DataSyncIdKey] = dataSyncId
-                settings[InnerTubeAuthUserKey] = authUser.filter(Char::isDigit).ifBlank { "0" }
-                settings[AccountNameKey] = accountName
-                settings[AccountEmailKey] = accountEmail
-                settings[AccountChannelHandleKey] = accountChannelHandle
-            }
-            if (!saved) {
-                Timber.e("saveTokenAndRestart: DataStore write failed — skipping restart to avoid losing credentials")
-                return@launch
-            }
-            withContext(Dispatchers.Main) {
-                val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-                intent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                context.startActivity(intent)
-                Runtime.getRuntime().exit(0)
-            }
-        }
-    }
+    // SARASWATI: the raw-cookie token editor this method served (`saveTokenAndRestart`) is
+    // removed entirely (audit A6.4/A11-4, ruling R18) — Saraswati signs in only through the
+    // login WebView, so nothing in the app accepts a pasted cookie/visitor-data/data-sync-id
+    // any more. See docs/strip-checklist.md and AccountSettings.kt.
 }

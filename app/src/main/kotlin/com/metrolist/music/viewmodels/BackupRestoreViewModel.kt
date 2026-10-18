@@ -9,31 +9,22 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.PreferencesSerializer
 import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
-import com.metrolist.innertube.utils.parseCookieString
-import com.metrolist.innertube.utils.sha1
 import com.metrolist.music.R
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import com.metrolist.music.constants.DataSyncIdKey
-import com.metrolist.music.constants.InnerTubeAuthUserKey
+import okio.Buffer
+import com.metrolist.music.constants.AccountEmailKey
+import com.metrolist.music.constants.AccountNameKey
 import com.metrolist.music.constants.InnerTubeCookieKey
-import com.metrolist.music.constants.VisitorDataKey
 import com.metrolist.music.db.InternalDatabase
 import com.metrolist.music.db.MusicDatabase
 import com.metrolist.music.db.entities.ArtistEntity
 import com.metrolist.music.db.entities.Song
 import com.metrolist.music.db.entities.SongEntity
-import com.metrolist.music.extensions.div
 import com.metrolist.music.extensions.tryOrNull
 import com.metrolist.music.extensions.zipInputStream
 import com.metrolist.music.extensions.zipOutputStream
@@ -41,15 +32,22 @@ import com.metrolist.music.playback.MusicService
 import com.metrolist.music.playback.MusicService.Companion.PERSISTENT_AUTOMIX_FILE
 import com.metrolist.music.playback.MusicService.Companion.PERSISTENT_PLAYER_STATE_FILE
 import com.metrolist.music.playback.MusicService.Companion.PERSISTENT_QUEUE_FILE
+import com.metrolist.music.saraswati.backup.BackupPolicy
+import com.metrolist.music.saraswati.backup.BackupTooLargeException
+import com.metrolist.music.saraswati.backup.RestoredDbValidator
+import com.metrolist.music.utils.dataStore
 import com.metrolist.music.utils.reportException
 import com.metrolist.music.utils.ArtistNameAliases
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import timber.log.Timber
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.InputStream
+import java.io.OutputStream
 import java.util.zip.ZipEntry
 import javax.inject.Inject
 
@@ -82,11 +80,18 @@ class BackupRestoreViewModel @Inject constructor(
         runCatching {
             context.applicationContext.contentResolver.openOutputStream(uri)?.use {
                 it.buffered().zipOutputStream().use { outputStream ->
-                    (context.filesDir / "datastore" / SETTINGS_FILENAME).inputStream().buffered()
-                        .use { inputStream ->
-                            outputStream.putNextEntry(ZipEntry(SETTINGS_FILENAME))
-                            inputStream.copyTo(outputStream)
-                        }
+                    // SARASWATI: audit A6.3/A10-3 — the settings entry used to be a raw
+                    // copy of the live preferences file, so a shared/cloud-synced backup
+                    // carried the plaintext proxy password, the AI/Last.fm credentials and
+                    // the signed-in account's name/email/visitor id in the clear (the cookie
+                    // itself is already Keystore-sealed by Task 7, but everything else
+                    // wasn't). BackupPolicy.sanitize() drops every key in
+                    // NEVER_EXPORT_OR_RESTORE before it's ever serialized into the ZIP.
+                    val sanitizedSettings = BackupPolicy.sanitize(runBlocking(Dispatchers.IO) { context.dataStore.data.first() })
+                    val sanitizedBytes = serializePreferences(sanitizedSettings)
+                    outputStream.putNextEntry(ZipEntry(SETTINGS_FILENAME))
+                    outputStream.write(sanitizedBytes)
+
                     outputStream.putNextEntry(ZipEntry(ArtistNameAliases.BACKUP_FILENAME))
                     outputStream.write(ArtistNameAliases.serialize().encodeToByteArray())
                     runBlocking(Dispatchers.IO) {
@@ -123,15 +128,19 @@ class BackupRestoreViewModel @Inject constructor(
         }
     }
 
-    fun restore(context: Context, uri: Uri, clearAuthData: Boolean = false) {
+    // SARASWATI: the restore no longer takes a clearAuthData flag (audit A10-2). Every
+    // restored settings entry is parsed, then unconditionally run through
+    // BackupPolicy.sanitize() before it touches the live DataStore — the cookie, proxy,
+    // AI/server URLs and account-identity keys never survive a restore, legacy backup or
+    // hostile file alike, so there is no longer a "keep auth data" branch to opt out of.
+    fun restore(context: Context, uri: Uri) {
         // Run in viewModelScope to allow suspending
         viewModelScope.launch(Dispatchers.IO) {
             val restoreDbName = "restored_${InternalDatabase.DB_NAME}"
             val restoreDbPath = context.getDatabasePath(restoreDbName).absolutePath
-            val tempSettings = File(context.filesDir, "datastore/$SETTINGS_FILENAME.restore")
 
             runCatching {
-                Timber.tag("RESTORE").i("Starting restore from URI: $uri, clearAuthData: $clearAuthData")
+                Timber.tag("RESTORE").i("Starting restore from URI: $uri")
 
                 val currentDbPath = database.openHelper.writableDatabase.path
                 if (currentDbPath == null) {
@@ -142,11 +151,16 @@ class BackupRestoreViewModel @Inject constructor(
                 File(restoreDbPath).delete()
                 File("$restoreDbPath-wal").delete()
                 File("$restoreDbPath-shm").delete()
-                tempSettings.delete()
 
                 var foundDb = false
                 var foundSettings = false
                 var restoredArtistNameAliases: Map<String, String>? = null
+                // SARASWATI: parsed via PreferencesSerializer.readFrom below, so a
+                // malformed settings entry throws here — before the DB swap section
+                // further down ever runs — and the whole restore aborts via the
+                // runCatching/onFailure at the bottom of this function without having
+                // replaced anything (audit A10-6).
+                var sanitizedSettings: Preferences? = null
 
                 context.applicationContext.contentResolver.openInputStream(uri)?.use { raw ->
                     raw.zipInputStream().use { inputStream ->
@@ -156,15 +170,19 @@ class BackupRestoreViewModel @Inject constructor(
                             when (entry.name) {
                                 SETTINGS_FILENAME -> {
                                     foundSettings = true
-                                    tempSettings.outputStream().use { it.write(inputStream.readBytes()) }
+                                    val bytes = BackupPolicy.readLimited(inputStream, BackupPolicy.MAX_SETTINGS_BYTES)
+                                    val parsed = deserializePreferences(bytes)
+                                    sanitizedSettings = BackupPolicy.sanitize(parsed)
                                 }
                                 ArtistNameAliases.BACKUP_FILENAME -> {
-                                    restoredArtistNameAliases =
-                                        ArtistNameAliases.deserialize(inputStream.readBytes().decodeToString())
+                                    val bytes = BackupPolicy.readLimited(inputStream, BackupPolicy.MAX_ALIASES_BYTES)
+                                    restoredArtistNameAliases = ArtistNameAliases.deserialize(bytes.decodeToString())
                                 }
                                 InternalDatabase.DB_NAME -> {
                                     foundDb = true
-                                    FileOutputStream(restoreDbPath).use { inputStream.copyTo(it) }
+                                    FileOutputStream(restoreDbPath).use { out ->
+                                        copyLimited(inputStream, out, BackupPolicy.MAX_DB_BYTES)
+                                    }
                                 }
                                 "${InternalDatabase.DB_NAME}-wal" -> {
                                     // Skip WAL — we'll open cleanly
@@ -211,6 +229,31 @@ class BackupRestoreViewModel @Inject constructor(
                         )
                         kotlinx.coroutines.withContext(Dispatchers.Main) {
                             Toast.makeText(context, R.string.restore_database_incompatible, Toast.LENGTH_LONG).show()
+                        }
+                        return@launch
+                    }
+
+                    // SARASWATI: audit A10-5 — PRAGMA quick_check plus a trigger/view
+                    // allowlist against the live app's own schema, on top of the
+                    // user_version check above. The restored file is read-only here; it
+                    // never gets near the live database path unless this passes. Fails
+                    // closed: if the live schema itself can't be read for comparison, the
+                    // restore is rejected rather than silently skipping the check.
+                    val liveObjects =
+                        tryOrNull {
+                            android.database.sqlite.SQLiteDatabase.openDatabase(
+                                currentDbPath,
+                                null,
+                                android.database.sqlite.SQLiteDatabase.OPEN_READONLY,
+                            ).use { RestoredDbValidator.schemaObjects(it) }
+                        }
+                    val validation =
+                        liveObjects?.let { RestoredDbValidator.validate(File(restoreDbPath), it) }
+                            ?: RestoredDbValidator.Result.Rejected("could not read the live schema to validate against")
+                    if (validation is RestoredDbValidator.Result.Rejected) {
+                        Timber.tag("RESTORE").e("Restored database rejected: ${validation.reason}")
+                        kotlinx.coroutines.withContext(Dispatchers.Main) {
+                            Toast.makeText(context, R.string.restore_failed, Toast.LENGTH_SHORT).show()
                         }
                         return@launch
                     }
@@ -265,54 +308,24 @@ class BackupRestoreViewModel @Inject constructor(
                 }
 
                 if (dbSwapSucceeded) {
+                    // SARASWATI: audit A10-2 — write the sanitized settings into the live
+                    // DataStore via edit {} instead of replacing settings.preferences_pb on
+                    // disk. sanitize() has already dropped the cookie/proxy/server/AI/
+                    // account-identity keys from `restored`, so this can never plant one of
+                    // them. I1: that also means a plain `prefs.clear(); prefs += restored`
+                    // would WIPE those same live keys (the sealed cookie, VisitorData,
+                    // DataSyncId, account name/email/handle) instead of leaving them alone —
+                    // BackupPolicy.mergeRestoreOntoLive snapshots `prefs` (the current live
+                    // preferences, which `edit {}` hands this transform before any change)
+                    // and writes those exact live values back in on top of the restored
+                    // settings, so the restore truly never sets or clears the cookie.
                     if (foundSettings) {
-                        // If auth data needs clearing, strip auth keys from the temp file
-                        // before copying to actualSettings. This avoids issues with
-                        // DataStore's in-memory cache being stale after a raw file swap.
-                        if (clearAuthData) {
-                            runCatching {
-                                // Open a temporary DataStore for the staged settings file
-                                // to remove auth keys before promoting it to the live path.
-                                val settingsBaseName = SETTINGS_FILENAME.removeSuffix(".preferences_pb")
-                                val stageSettings = File(
-                                    context.filesDir,
-                                    "datastore/${settingsBaseName}.stage.preferences_pb",
-                                )
-                                stageSettings.delete()
-                                tempSettings.copyTo(stageSettings, overwrite = true)
-
-                                val stageDataStore =
-                                    androidx.datastore.preferences.core.PreferenceDataStoreFactory.create {
-                                        stageSettings
-                                    }
-                                kotlinx.coroutines.runBlocking {
-                                    stageDataStore.edit { prefs ->
-                                        prefs.remove(InnerTubeCookieKey)
-                                        prefs.remove(VisitorDataKey)
-                                        prefs.remove(DataSyncIdKey)
-                                        prefs.remove(InnerTubeAuthUserKey)
-                                    }
-                                }
-
-                                val actualSettings = File(
-                                    context.filesDir,
-                                    "datastore/$SETTINGS_FILENAME",
-                                )
-                                stageSettings.copyTo(actualSettings, overwrite = true)
-                                stageSettings.delete()
-                            }.onFailure {
-                                Timber.tag("RESTORE").e(it, "Failed to clear auth from restored settings")
-                                kotlinx.coroutines.withContext(Dispatchers.Main) {
-                                    Toast.makeText(context, R.string.restore_failed, Toast.LENGTH_SHORT).show()
-                                }
-                                return@launch
+                        sanitizedSettings?.let { restored ->
+                            context.dataStore.edit { prefs ->
+                                val merged = BackupPolicy.mergeRestoreOntoLive(live = prefs.toPreferences(), restored = restored)
+                                prefs.clear()
+                                prefs += merged
                             }
-                        } else {
-                            val actualSettings = File(
-                                context.filesDir,
-                                "datastore/$SETTINGS_FILENAME",
-                            )
-                            tempSettings.copyTo(actualSettings, overwrite = true)
                         }
                     }
 
@@ -343,10 +356,17 @@ class BackupRestoreViewModel @Inject constructor(
             File(restoreDbPath).delete()
             File("$restoreDbPath-wal").delete()
             File("$restoreDbPath-shm").delete()
-            tempSettings.delete()
         }
     }
 
+    // SARASWATI: audit A10-4/A10-9 — reads the entry through BackupPolicy.readLimited and
+    // parses it with the real PreferencesSerializer instead of regex-scanning raw proto
+    // bytes for cookie-shaped substrings. The practical effect: a backup this app itself
+    // exported now has no InnerTubeCookieKey entry at all (BackupPolicy.sanitize strips it
+    // at export time, see backup() above), so hasAuthData is correctly false and the
+    // cookie-to-music.youtube.com account-name lookup below never fires for it. Only a
+    // legacy, pre-fork Metrolist backup (plaintext cookie) still has auth data to preview.
+    // Call sites now run this on Dispatchers.IO (BackupAndRestore.kt), not the main thread.
     fun previewBackup(context: Context, uri: Uri): BackupPreviewInfo {
         return runCatching {
             context.applicationContext.contentResolver.openInputStream(uri)?.use { raw ->
@@ -354,25 +374,16 @@ class BackupRestoreViewModel @Inject constructor(
                     var entry = tryOrNull { inputStream.nextEntry }
                     while (entry != null) {
                         if (entry.name == SETTINGS_FILENAME) {
-                            val bytes = inputStream.readBytes()
-                            val content = bytes.decodeToString(throwOnInvalidSequence = false)
+                            val bytes = BackupPolicy.readLimited(inputStream, BackupPolicy.MAX_SETTINGS_BYTES)
+                            val prefs = deserializePreferences(bytes)
 
-                            // Check for auth data (SAPISID cookie indicates logged in)
-                            val hasAuthData = content.contains("SAPISID=")
-
-                            // Extract cookie string from backup
-                            val cookie = if (hasAuthData) {
-                                extractCookieFromPrefs(content)
-                            } else null
-
-                            val accountName = if (hasAuthData) {
-                                extractAccountNameFromPrefs(content) ?: "YouTube Account"
-                            } else null
+                            val cookie = prefs[InnerTubeCookieKey]
+                            val hasAuthData = !cookie.isNullOrEmpty()
 
                             return BackupPreviewInfo(
                                 hasAuthData = hasAuthData,
-                                accountName = accountName,
-                                accountEmail = null,
+                                accountName = if (hasAuthData) prefs[AccountNameKey] ?: "YouTube Account" else null,
+                                accountEmail = if (hasAuthData) prefs[AccountEmailKey] else null,
                                 accountImageUrl = null,
                                 cookie = cookie,
                             )
@@ -388,133 +399,16 @@ class BackupRestoreViewModel @Inject constructor(
         }
     }
 
-    private fun extractAccountNameFromPrefs(content: String): String? {
-        val sessionPattern = Regex("""(?:SESSION_INDEX|sessionIndex|session)_?\s*["':]*\s*(\d+)""")
-        val index = sessionPattern.find(content)?.groupValues?.getOrNull(1)
-        return if (index != null) "Account #$index" else null
-    }
-
-    private fun extractCookieFromPrefs(content: String): String? {
-        // Find innerTubeCookie key and extract the cookie value.
-        // The proto format has the key followed by type markers and then the string value.
-        val keyMarker = "innerTubeCookie"
-        val keyIndex = content.indexOf(keyMarker)
-        if (keyIndex == -1) return null
-
-        val afterKey = content.substring(keyIndex + keyMarker.length)
-
-        // Cookie starts after some proto markers and contains semicolon-separated values.
-        // Look for the first cookie key pattern like "__Secure-" or "HSID=" etc.
-        val cookiePatterns = listOf("__Secure-", "HSID=", "SSID=", "SID=", "SAPISID=")
-        var cookieStart = -1
-        for (pattern in cookiePatterns) {
-            val idx = afterKey.indexOf(pattern)
-            if (idx != -1 && (cookieStart == -1 || idx < cookieStart)) {
-                cookieStart = idx
-            }
-        }
-        if (cookieStart == -1) return null
-
-        // Find the end of the cookie (next control character or next key).
-        val cookieContent = afterKey.substring(cookieStart)
-        val cookieEnd = cookieContent.indexOfFirst {
-            it.code < 32 && it != '\t' && it != '\n' && it != '\r'
-        }
-
-        val rawCookie = if (cookieEnd > 0) {
-            cookieContent.substring(0, cookieEnd)
-        } else {
-            cookieContent.take(5000) // Reasonable max length
-        }
-        // Remove any control characters (newlines, etc.) that are invalid in HTTP headers.
-        return rawCookie.replace(Regex("[\\x00-\\x1F\\x7F]"), "").trim()
-    }
-
-    suspend fun fetchAccountInfoFromBackup(cookie: String): BackupPreviewInfo? {
-        return runCatching {
-            // Parse cookie to get SAPISID for auth header
-            val cookieMap = parseCookieString(cookie)
-            val sapisid = cookieMap["SAPISID"] ?: return@runCatching null
-
-            // Generate SAPISIDHASH auth header
-            val origin = "https://music.youtube.com"
-            val currentTime = System.currentTimeMillis() / 1000
-            val sapisidHash = sha1("$currentTime $sapisid $origin")
-            val authHeader = "SAPISIDHASH ${currentTime}_$sapisidHash"
-
-            val client = OkHttpClient()
-            val requestBody = """{"context":{"client":{"clientName":"WEB_REMIX","clientVersion":"1.20240101.01.00"}}}"""
-                .toRequestBody("application/json".toMediaType())
-
-            val request = Request.Builder()
-                .url("https://music.youtube.com/youtubei/v1/account/account_menu?prettyPrint=false")
-                .post(requestBody)
-                .header("Cookie", cookie)
-                .header("Authorization", authHeader)
-                .header("Origin", origin)
-                .header("Referer", "$origin/")
-                .header("X-Origin", origin)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                .build()
-
-            val response = client.newCall(request).execute()
-            val responseBody = response.body?.string() ?: return@runCatching null
-
-            // Parse the JSON response
-            val json = Json { ignoreUnknownKeys = true }
-            val jsonResponse = json.parseToJsonElement(responseBody).jsonObject
-
-            // Navigate to activeAccountHeaderRenderer
-            val header = jsonResponse["actions"]
-                ?.jsonArray?.getOrNull(0)
-                ?.jsonObject?.get("openPopupAction")
-                ?.jsonObject?.get("popup")
-                ?.jsonObject?.get("multiPageMenuRenderer")
-                ?.jsonObject?.get("header")
-                ?.jsonObject?.get("activeAccountHeaderRenderer")
-                ?.jsonObject
-
-            if (header != null) {
-                val name = header["accountName"]
-                    ?.jsonObject?.get("runs")
-                    ?.jsonArray?.getOrNull(0)
-                    ?.jsonObject?.get("text")
-                    ?.jsonPrimitive?.content
-
-                val email = header["email"]
-                    ?.jsonObject?.get("runs")
-                    ?.jsonArray?.getOrNull(0)
-                    ?.jsonObject?.get("text")
-                    ?.jsonPrimitive?.content
-
-                val thumbnailUrl = header["accountPhoto"]
-                    ?.jsonObject?.get("thumbnails")
-                    ?.jsonArray?.getOrNull(0)
-                    ?.jsonObject?.get("url")
-                    ?.jsonPrimitive?.content
-
-                if (name != null) {
-                    BackupPreviewInfo(
-                        hasAuthData = true,
-                        accountName = name,
-                        accountEmail = email,
-                        accountImageUrl = thumbnailUrl,
-                        cookie = cookie,
-                    )
-                } else null
-            } else null
-        }.getOrElse {
-            Timber.tag("BACKUP_PREVIEW").e(it, "Failed to fetch account info from backup")
-            null
-        }
-    }
-
+    // SARASWATI: audit A10-4 — bounded via BackupPolicy.readLimited instead of an
+    // unbounded readLines(). The call site (BackupAndRestore.kt) now runs this on
+    // Dispatchers.IO instead of the main thread.
     fun previewCsvFile(context: Context, uri: Uri): CsvImportState {
         val previewRows = mutableListOf<List<String>>()
         val csvState: CsvImportState
         runCatching {
             context.contentResolver.openInputStream(uri)?.use { stream ->
-                val lines = stream.bufferedReader().readLines()
+                val bytes = BackupPolicy.readLimited(stream, BackupPolicy.MAX_IMPORT_TEXT_BYTES)
+                val lines = bytes.decodeToString().lineSequence().toList()
                 val rowsToPreview = lines.take(6).map { parseCsvLine(it) }
                 previewRows.addAll(rowsToPreview)
 
@@ -544,7 +438,10 @@ class BackupRestoreViewModel @Inject constructor(
 
         runCatching {
             context.contentResolver.openInputStream(uri)?.use { stream ->
-                val lines = stream.bufferedReader().readLines()
+                // SARASWATI: audit A10-4 — bounded via BackupPolicy.readLimited instead of
+                // an unbounded readLines().
+                val bytes = BackupPolicy.readLimited(stream, BackupPolicy.MAX_IMPORT_TEXT_BYTES)
+                val lines = bytes.decodeToString().lineSequence().toList()
                 val startIndex = if (columnMapping.hasHeader) 1 else 0
                 val totalLines = lines.size - startIndex
 
@@ -617,6 +514,9 @@ class BackupRestoreViewModel @Inject constructor(
         return result.map { it.trim().trim('"') }
     }
 
+    // SARASWATI: audit A10-4 — bounded via BackupPolicy.readLimited instead of an
+    // unbounded readLines(). The call site (BackupAndRestore.kt) now runs this on
+    // Dispatchers.IO instead of the main thread.
     fun loadM3UOnline(
         context: Context,
         uri: Uri,
@@ -625,7 +525,8 @@ class BackupRestoreViewModel @Inject constructor(
 
         runCatching {
             context.applicationContext.contentResolver.openInputStream(uri)?.use { stream ->
-                val lines = stream.bufferedReader().readLines()
+                val bytes = BackupPolicy.readLimited(stream, BackupPolicy.MAX_IMPORT_TEXT_BYTES)
+                val lines = bytes.decodeToString().lineSequence().toList()
                 if (lines.isNotEmpty() && lines.first().startsWith("#EXTM3U")) {
                     lines.forEachIndexed { _, rawLine ->
                         if (rawLine.startsWith("#EXTINF:")) {
@@ -659,5 +560,40 @@ class BackupRestoreViewModel @Inject constructor(
 
     companion object {
         const val SETTINGS_FILENAME = "settings.preferences_pb"
+    }
+}
+
+// SARASWATI: shared helpers so both export (backup()) and restore
+// (restore()/previewBackup()) go through the exact same proto encoding —
+// androidx.datastore.preferences.core.PreferencesSerializer — instead of
+// hand-rolled byte copying or regex scanning.
+private fun serializePreferences(prefs: Preferences): ByteArray {
+    val buffer = Buffer()
+    runBlocking { PreferencesSerializer.writeTo(prefs, buffer) }
+    return buffer.readByteArray()
+}
+
+private fun deserializePreferences(bytes: ByteArray): Preferences =
+    runBlocking { PreferencesSerializer.readFrom(Buffer().write(bytes)) }
+
+// SARASWATI: audit A10-4 — streams the database entry straight to [output] instead of
+// buffering it in memory, aborting (and deleting nothing extra; the caller's existing
+// cleanup handles the partial file) the instant more than [maxBytes] would be written.
+private fun copyLimited(
+    input: InputStream,
+    output: OutputStream,
+    maxBytes: Long,
+) {
+    val chunk = ByteArray(8192)
+    var total = 0L
+    while (true) {
+        val remaining = maxBytes + 1 - total
+        if (remaining <= 0) throw BackupTooLargeException()
+        val toRead = minOf(chunk.size.toLong(), remaining).toInt()
+        val n = input.read(chunk, 0, toRead)
+        if (n < 0) break
+        output.write(chunk, 0, n)
+        total += n
+        if (total > maxBytes) throw BackupTooLargeException()
     }
 }

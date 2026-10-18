@@ -56,6 +56,7 @@ import androidx.navigation.NavController
 import com.metrolist.music.LocalDatabase
 import com.metrolist.music.LocalPlayerAwareWindowInsets
 import com.metrolist.music.R
+import com.metrolist.music.saraswati.SaraswatiFeatures
 import com.metrolist.music.constants.AddToPlaylistPosition
 import com.metrolist.music.constants.AddToPlaylistPositionKey
 import com.metrolist.music.constants.AppLanguageKey
@@ -951,44 +952,48 @@ fun ContentSettings(
             )
         )
 
-        Spacer(modifier = Modifier.height(27.dp))
+        // SARASWATI: proxy settings dropped (audit A15.2); hide the whole
+        // section so there is no live entry point left for it.
+        if (SaraswatiFeatures.PROXY) {
+            Spacer(modifier = Modifier.height(27.dp))
 
-        Material3SettingsGroup(
-            title = stringResource(R.string.proxy),
-            items = buildList {
-                add(
-                    Material3SettingsItem(
-                        icon = painterResource(R.drawable.wifi_proxy),
-                        title = { Text(stringResource(R.string.enable_proxy)) },
-                        trailingContent = {
-                            Switch(
-                                checked = proxyEnabled,
-                                onCheckedChange = onProxyEnabledChange,
-                                thumbContent = {
-                                    Icon(
-                                        painter = painterResource(
-                                            id = if (proxyEnabled) R.drawable.check else R.drawable.close
-                                        ),
-                                        contentDescription = null,
-                                        modifier = Modifier.size(SwitchDefaults.IconSize)
-                                    )
-                                }
-                            )
-                        },
-                        onClick = { onProxyEnabledChange(!proxyEnabled) }
-                    )
-                )
-                if (proxyEnabled) {
+            Material3SettingsGroup(
+                title = stringResource(R.string.proxy),
+                items = buildList {
                     add(
                         Material3SettingsItem(
-                            icon = painterResource(R.drawable.settings),
-                            title = { Text(stringResource(R.string.config_proxy)) },
-                            onClick = { showProxyConfigurationDialog = true }
+                            icon = painterResource(R.drawable.wifi_proxy),
+                            title = { Text(stringResource(R.string.enable_proxy)) },
+                            trailingContent = {
+                                Switch(
+                                    checked = proxyEnabled,
+                                    onCheckedChange = onProxyEnabledChange,
+                                    thumbContent = {
+                                        Icon(
+                                            painter = painterResource(
+                                                id = if (proxyEnabled) R.drawable.check else R.drawable.close
+                                            ),
+                                            contentDescription = null,
+                                            modifier = Modifier.size(SwitchDefaults.IconSize)
+                                        )
+                                    }
+                                )
+                            },
+                            onClick = { onProxyEnabledChange(!proxyEnabled) }
                         )
                     )
+                    if (proxyEnabled) {
+                        add(
+                            Material3SettingsItem(
+                                icon = painterResource(R.drawable.settings),
+                                title = { Text(stringResource(R.string.config_proxy)) },
+                                onClick = { showProxyConfigurationDialog = true }
+                            )
+                        )
+                    }
                 }
-            }
-        )
+            )
+        }
 
         Spacer(modifier = Modifier.height(27.dp))
 

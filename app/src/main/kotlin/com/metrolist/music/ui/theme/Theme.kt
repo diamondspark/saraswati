@@ -25,7 +25,9 @@ import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.rememberDynamicColorScheme
 import com.materialkolor.score.Score
 
-val DefaultThemeColor = Color(0xFFED5564)
+// SARASWATI: placeholder marigold accent, was Metrolist's 0xFFED5564; the
+// real brand color comes with the Phase 3 design pass.
+val DefaultThemeColor = Color(0xFFF5B301)
 
 @Composable
 fun MetrolistTheme(

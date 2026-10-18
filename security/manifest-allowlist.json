@@ -1,0 +1,49 @@
+{
+  "package": "dev.diamondspark.saraswati",
+  "permissions": [
+    "android.permission.INTERNET",
+    "android.permission.ACCESS_NETWORK_STATE",
+    "android.permission.WAKE_LOCK",
+    "android.permission.POST_NOTIFICATIONS",
+    "android.permission.FOREGROUND_SERVICE",
+    "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+    "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+    "dev.diamondspark.saraswati.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+  ],
+  "exported_components": [
+    "activity:com.metrolist.music.MainActivity",
+    "activity-alias:com.metrolist.music.MainActivityAlias",
+    "activity-alias:com.metrolist.music.MainActivityStatic",
+    "service:com.metrolist.music.playback.MusicService",
+    "receiver:androidx.media3.session.MediaButtonReceiver",
+    "receiver:androidx.profileinstaller.ProfileInstallReceiver"
+  ],
+  "forbidden_permissions": [
+    "android.permission.RECORD_AUDIO",
+    "android.permission.FOREGROUND_SERVICE_MICROPHONE",
+    "android.permission.SCHEDULE_EXACT_ALARM",
+    "android.permission.RECEIVE_BOOT_COMPLETED",
+    "android.permission.REQUEST_INSTALL_PACKAGES",
+    "android.permission.QUERY_ALL_PACKAGES",
+    "android.permission.SEND_SMS",
+    "android.permission.RECEIVE_SMS",
+    "android.permission.READ_SMS",
+    "android.permission.RECEIVE_MMS",
+    "android.permission.RECEIVE_WAP_PUSH",
+    "android.permission.READ_CONTACTS",
+    "android.permission.WRITE_CONTACTS",
+    "android.permission.GET_ACCOUNTS",
+    "android.permission.ACCESS_FINE_LOCATION",
+    "android.permission.ACCESS_COARSE_LOCATION",
+    "android.permission.ACCESS_BACKGROUND_LOCATION",
+    "android.permission.READ_PHONE_STATE",
+    "android.permission.READ_PHONE_NUMBERS",
+    "android.permission.CALL_PHONE",
+    "android.permission.ANSWER_PHONE_CALLS",
+    "android.permission.PROCESS_OUTGOING_CALLS",
+    "android.permission.CAMERA",
+    "android.permission.BIND_ACCESSIBILITY_SERVICE",
+    "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE",
+    "android.permission.SYSTEM_ALERT_WINDOW"
+  ]
+}

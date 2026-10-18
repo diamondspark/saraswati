@@ -1,7 +1,6 @@
+<!-- SARASWATI: placeholder flat marigold background, was a gradient between
+     the system's dynamic Material You accent colors. Kept simple for a
+     temporary mark; the real mark comes with the Phase 3 design pass. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <gradient
-        android:angle="45.0"
-        android:endColor="@android:color/system_accent2_400"
-        android:startColor="@android:color/system_accent1_800"
-        android:type="linear" />
+    <solid android:color="#FFF5B301" />
 </shape>

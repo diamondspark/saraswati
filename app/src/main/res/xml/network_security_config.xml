@@ -1,10 +1,116 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- SARASWATI: deny-by-default network egress allowlist (Task 12). Upstream
+     trusted system CAs for every host, so the app could talk HTTPS to
+     anything; this fork's base-config trusts no certificate authority at
+     all (an empty <trust-anchors/>), so any host without its own
+     domain-config below fails the TLS handshake with
+     "Trust anchor for certification path not found", before a single byte
+     of the request is sent. Cleartext stays refused everywhere (Task 6).
+     Each domain-config is one entry of security/egress-allowlist.json,
+     restored to system trust for that host only; security/test_egress_policy.py
+     asserts the two files never drift apart, and
+     EgressPolicyInstrumentedTest proves the mechanism on-device. GitHub,
+     jsDelivr and githubusercontent.com are deliberately absent: the faraday
+     remote-cipher path they served is switched off in code (Task 5,
+     SaraswatiFeatures.REMOTE_CIPHER_CODE) and this is the second,
+     independent layer against it (audit A12-b/A12-i); the About-screen
+     contributor avatars (Coil loading github.com/<handle>.png) fail closed
+     to a placeholder as an accepted consequence. jnn-pa.googleapis.com and
+     www.googleapis.com are left out too: the host inventory found no call
+     site that needs them (PoToken uses www.youtube.com/api/jnn/v1), and the
+     whole of googleapis.com is never allowlisted because that would also
+     cover generativelanguage.googleapis.com (Gemini). lrclib.net and
+     lyrics-api.boidu.dev are exact hosts, not subdomain wildcards (Ruling
+     R20), since only the apex and the one "lyrics-api." host are ever
+     called. -->
 <network-security-config>
-    <!-- Allow cleartext traffic for Listen Together local servers -->
-    <!-- We're already using WSS for the prod server -->
-    <base-config cleartextTrafficPermitted="true">
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors/>
+    </base-config>
+
+    <!-- YouTube / YouTube Music API, playback, streaming, downloads, stats,
+         uploads, the login WebView's main frames. -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">youtube.com</domain>
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
-    </base-config>
+    </domain-config>
+
+    <!-- Audio/video stream delivery (videoplayback, redirector, the "rN dash
+         dash dash sn" edge-server subdomains). -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">googlevideo.com</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+
+    <!-- Thumbnail/artwork CDN (i.ytimg.com, i1-i9.ytimg.com, s.ytimg.com). -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">ytimg.com</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+
+    <!-- Channel/artist art (yt3.ggpht.com and ytN.ggpht.com). -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">ggpht.com</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+
+    <!-- Album/artist art and Google account avatars (lh3-lh6.googleusercontent.com,
+         yt3.googleusercontent.com). -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">googleusercontent.com</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+
+    <!-- Static assets the Google sign-in WebView loads (ssl.gstatic.com,
+         www.gstatic.com, fonts.gstatic.com). -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">gstatic.com</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+
+    <!-- Google sign-in (accounts.google.com, accounts.youtube.com hops through
+         here too) and the WebView's own sub-resources on this same root domain
+         (apis.google.com, play.google.com, www.google.com, ogs.google.com).
+         SARASWATI: fonts.googleapis.com is a DIFFERENT root domain
+         (googleapis.com, not google.com) and is NOT covered by this
+         domain-config or any other entry here — it is not currently
+         allowlisted at all (see docs/pending-human-steps.md's DEFERRED
+         checklist for that decision; this comment previously, incorrectly,
+         claimed it was covered). -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">google.com</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+
+    <!-- LrcLib lyrics. Exact host only (Ruling R20): the app calls the apex,
+         never a subdomain. -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="false">lrclib.net</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+
+    <!-- BetterLyrics. Exact host only (Ruling R20): the app calls exactly
+         this one subdomain, never the boidu.dev apex or any other sibling. -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="false">lyrics-api.boidu.dev</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
 </network-security-config>

@@ -41,6 +41,7 @@ import com.metrolist.music.db.entities.SpeedDialItem
 import com.metrolist.music.extensions.filterVideoSongs
 import com.metrolist.music.extensions.toEnum
 import com.metrolist.music.models.SimilarRecommendation
+import com.metrolist.music.saraswati.security.SaraswatiVault
 import com.metrolist.music.ui.screens.wrapped.WrappedAudioService
 import com.metrolist.music.ui.screens.wrapped.WrappedManager
 import com.metrolist.music.utils.NetworkConnectivityObserver
@@ -759,6 +760,10 @@ class HomeViewModel @Inject constructor(
             context.dataStore.data
                 .map { it[InnerTubeCookieKey] to it[AccountNameKey] }
                 .distinctUntilChanged()
+                // SARASWATI: the stored value is vault-sealed; open it before use.
+                .map { (stored, savedAccountName) ->
+                    stored?.let { SaraswatiVault.cookieVault.open(it) } to savedAccountName
+                }
                 .collect { (cookie, savedAccountName) ->
                     if (!cookie.isNullOrEmpty()) {
                         YouTube.cookie = cookie
@@ -791,10 +796,12 @@ class HomeViewModel @Inject constructor(
         if (isHomeDataLoaded) return
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val cookie = context.dataStore.data
+                // SARASWATI: the stored value is vault-sealed; open it before use.
+                val stored = context.dataStore.data
                     .map { it[InnerTubeCookieKey] }
                     .distinctUntilChanged()
                     .first()
+                val cookie = stored?.let { SaraswatiVault.cookieVault.open(it) }
 
                 if (!cookie.isNullOrEmpty()) {
                     YouTube.cookie = cookie

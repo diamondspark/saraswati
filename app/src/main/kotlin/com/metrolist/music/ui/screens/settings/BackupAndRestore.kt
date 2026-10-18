@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -104,8 +103,6 @@ fun BackupAndRestore(
     var showRestoreConfirmDialog by rememberSaveable { mutableStateOf(false) }
     var pendingRestoreUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var backupPreviewInfo by remember { mutableStateOf<BackupPreviewInfo?>(null) }
-    var isLoadingAccountInfo by remember { mutableStateOf(false) }
-    var accountCheckFailed by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -117,46 +114,47 @@ fun BackupAndRestore(
             }
         }
     val restoreLauncher =
+        // SARASWATI (audit A10-4, A10-9): previewBackup() reads and parses the whole
+        // settings entry on Dispatchers.IO instead of the main thread, and describes the
+        // backup's contents entirely from what's already in the file — this dialog must
+        // never make a network call using the backup's cookie before the user has even
+        // confirmed they want to restore it (A10-9: the preview used to POST that cookie
+        // to music.youtube.com to look up the account name/photo).
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) {
                 pendingRestoreUri = uri
-                val preview = viewModel.previewBackup(context, uri)
-                backupPreviewInfo = preview
-                showRestoreConfirmDialog = true
-
-                // Fetch account info asynchronously if backup has auth data
-                accountCheckFailed = false
-                if (preview.hasAuthData && preview.cookie != null) {
-                    isLoadingAccountInfo = true
-                    coroutineScope.launch(Dispatchers.IO) {
-                        val accountInfo = viewModel.fetchAccountInfoFromBackup(preview.cookie)
-                        if (accountInfo != null) {
-                            backupPreviewInfo = accountInfo
-                        } else {
-                            accountCheckFailed = true
-                        }
-                        isLoadingAccountInfo = false
-                    }
+                coroutineScope.launch(Dispatchers.IO) {
+                    val preview = viewModel.previewBackup(context, uri)
+                    backupPreviewInfo = preview
+                    showRestoreConfirmDialog = true
                 }
             }
         }
     val importPlaylistFromCsv =
+        // SARASWATI: audit A10-4 — previewCsvFile() now runs on Dispatchers.IO instead of
+        // the main thread.
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri == null) return@rememberLauncherForActivityResult
             pendingCsvUri = uri
-            val previewState = viewModel.previewCsvFile(context, uri)
-            csvImportState = previewState
-            showCsvColumnMapping = true
+            coroutineScope.launch(Dispatchers.IO) {
+                val previewState = viewModel.previewCsvFile(context, uri)
+                csvImportState = previewState
+                showCsvColumnMapping = true
+            }
         }
     val importM3uLauncherOnline =
+        // SARASWATI: audit A10-4 — loadM3UOnline() now runs on Dispatchers.IO instead of
+        // the main thread.
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri == null) return@rememberLauncherForActivityResult
-            val result = viewModel.loadM3UOnline(context, uri)
-            importedSongs.clear()
-            importedSongs.addAll(result)
+            coroutineScope.launch(Dispatchers.IO) {
+                val result = viewModel.loadM3UOnline(context, uri)
+                importedSongs.clear()
+                importedSongs.addAll(result)
 
-            if (importedSongs.isNotEmpty()) {
-                showChoosePlaylistDialogOnline = true
+                if (importedSongs.isNotEmpty()) {
+                    showChoosePlaylistDialogOnline = true
+                }
             }
         }
 
@@ -308,7 +306,6 @@ fun BackupAndRestore(
                 showRestoreConfirmDialog = false
                 pendingRestoreUri = null
                 backupPreviewInfo = null
-                accountCheckFailed = false
             },
             icon = {
                 Icon(
@@ -323,7 +320,6 @@ fun BackupAndRestore(
                         showRestoreConfirmDialog = false
                         pendingRestoreUri = null
                         backupPreviewInfo = null
-                        accountCheckFailed = false
                     },
                 ) {
                     Text(stringResource(android.R.string.cancel))
@@ -332,11 +328,16 @@ fun BackupAndRestore(
                     onClick = {
                         showRestoreConfirmDialog = false
                         pendingRestoreUri?.let { uri ->
-                            viewModel.restore(context, uri, clearAuthData = false)
+                            // SARASWATI: audit A10-2 — restore() always sanitizes the
+                            // settings it applies now (BackupPolicy.NEVER_EXPORT_OR_RESTORE),
+                            // so there is no longer a clearAuthData flag to pass. I1: the
+                            // live sealed cookie and signed-in account identity are also
+                            // preserved across the restore (BackupPolicy.mergeRestoreOntoLive),
+                            // never set from nor cleared by the backup.
+                            viewModel.restore(context, uri)
                         }
                         pendingRestoreUri = null
                         backupPreviewInfo = null
-                        accountCheckFailed = false
                     },
                 ) {
                     Text(stringResource(R.string.restore))
@@ -350,7 +351,12 @@ fun BackupAndRestore(
                 style = MaterialTheme.typography.bodyMedium,
             )
 
-            // Show warning about account sign out if account found
+            // SARASWATI (I1/A10-9): this account info is read straight out of the backup
+            // file locally — no network call is made to confirm it — and is shown only so
+            // the person restoring can recognize which backup this is. Restoring never
+            // changes who's signed in on this device (BackupPolicy.mergeRestoreOntoLive
+            // preserves the live cookie and account identity), so the copy below must not
+            // claim the backup's account will be applied.
             if (backupPreviewInfo?.accountName != null) {
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
@@ -360,38 +366,10 @@ fun BackupAndRestore(
                 )
             }
 
-            // Show loading or account info
-            if (isLoadingAccountInfo) {
-                Spacer(modifier = Modifier.height(16.dp))
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
-                        strokeWidth = 2.dp,
-                    )
-                    Spacer(modifier = Modifier.size(16.dp))
-                    Text(
-                        text = stringResource(R.string.checking_previous_account),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            }
-
-            // Show "No account found" if check failed OR backup has no auth data
-            val hasNoAccount =
-                backupPreviewInfo?.let {
-                    !it.hasAuthData || (it.hasAuthData && it.accountName == null && !isLoadingAccountInfo)
-                } ?: false
-            if (!isLoadingAccountInfo && (accountCheckFailed || hasNoAccount)) {
+            // Show "No account found" if the backup carries no auth data at all — true for
+            // every Saraswati-created backup (BackupPolicy.sanitize strips it at export).
+            val hasNoAccount = backupPreviewInfo?.let { !it.hasAuthData } ?: false
+            if (hasNoAccount) {
                 Spacer(modifier = Modifier.height(16.dp))
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Spacer(modifier = Modifier.height(16.dp))
@@ -408,7 +386,7 @@ fun BackupAndRestore(
 
             // Show account info if backup contains auth data and we have account details
             backupPreviewInfo?.let { preview ->
-                if (!isLoadingAccountInfo && preview.hasAuthData && preview.accountName != null) {
+                if (preview.hasAuthData && preview.accountName != null) {
                     Spacer(modifier = Modifier.height(16.dp))
 
                     HorizontalDivider(

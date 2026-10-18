@@ -5,11 +5,13 @@ plugins {
 }
 
 buildscript {
+    // SARASWATI: supply-chain hardening (Task 9) — dropped the aliyun mirror
+    // (unneeded trust surface) and the generic JitPack entry: neither
+    // buildscript dependency below (the Android Gradle Plugin, the Kotlin
+    // Gradle plugin) resolves from JitPack, so it had no reason to be here.
     repositories {
         google()
         mavenCentral()
-        maven { setUrl("https://jitpack.io") }
-        maven { setUrl("https://maven.aliyun.com/repository/public") }
     }
     dependencies {
         classpath(libs.gradle)
