@@ -17,6 +17,7 @@ import androidx.datastore.preferences.core.PreferencesSerializer
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.mutablePreferencesOf
 import com.metrolist.music.constants.DarkModeKey
+import com.metrolist.music.constants.DiscordButton1UrlKey
 import com.metrolist.music.constants.InnerTubeCookieKey
 import com.metrolist.music.constants.ProxyPasswordKey
 import com.metrolist.music.constants.ProxyUrlKey
@@ -102,14 +103,16 @@ class BackupRoundTripTest {
     @Test
     fun `restoring a hostile settings entry never plants a cookie`() =
         runBlocking {
-            // Simulates a crafted backup file that tries to plant a cookie and a proxy
-            // redirect directly (not via the app's own export path at all).
+            // Simulates a crafted backup file that tries to plant a cookie, a proxy
+            // redirect, and a Discord Rich Presence button URL directly (not via the
+            // app's own export path at all).
             val hostileBytes =
                 serialize(
                     mutablePreferencesOf(
                         DarkModeKey to "LIGHT",
                         InnerTubeCookieKey to "SAPISID=stolen; HSID=stolen",
                         com.metrolist.music.constants.ProxyUrlKey to "attacker.example.com:9999",
+                        DiscordButton1UrlKey to "https://attacker.example.com/phish",
                     ).toPreferences(),
                 )
 
@@ -124,6 +127,13 @@ class BackupRoundTripTest {
             assertEquals("LIGHT", after[DarkModeKey])
             assertNull(after[InnerTubeCookieKey])
             assertNull(after[com.metrolist.music.constants.ProxyUrlKey])
+            // SARASWATI (fix round 1): DiscordRpcManager reconnects automatically from a
+            // Keystore-persisted token on every MusicService creation (no
+            // SaraswatiFeatures.DISCORD check in that file) and publishes whatever is in
+            // DataStore as the Rich Presence buttons on the next song play — so a planted
+            // URL here would otherwise reach a live Discord presence on restart, no fresh
+            // login required. This must never survive the restore's sanitize step.
+            assertNull(after[DiscordButton1UrlKey])
         }
 
     @Test
@@ -140,6 +150,7 @@ class BackupRoundTripTest {
                     InnerTubeCookieKey to "SAPISID=realcookie; HSID=realcookie456",
                     ProxyUrlKey to "proxy.example.com:8080",
                     ProxyPasswordKey to "hunter2",
+                    DiscordButton1UrlKey to "https://discord.example.com/mine",
                 ).toPreferences()
 
             val zipBytes =
@@ -164,6 +175,7 @@ class BackupRoundTripTest {
                         assertNull(restored[InnerTubeCookieKey])
                         assertNull(restored[ProxyUrlKey])
                         assertNull(restored[ProxyPasswordKey])
+                        assertNull(restored[DiscordButton1UrlKey])
 
                         // Byte-level check, independent of the proto field parser above:
                         // the literal cookie/password strings must not appear anywhere in
@@ -171,6 +183,7 @@ class BackupRoundTripTest {
                         val raw = bytes.decodeToString(throwOnInvalidSequence = false)
                         assertTrue(!raw.contains("realcookie"))
                         assertTrue(!raw.contains("hunter2"))
+                        assertTrue(!raw.contains("discord.example.com"))
                     }
                     entry = zip.nextEntry
                 }

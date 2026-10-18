@@ -96,6 +96,25 @@ object BackupPolicy {
                 DiscordUsernameKey,
                 DiscordNameKey,
                 DiscordAvatarKey,
+                // SARASWATI (fix round 1): NOT safe to restore. Originally
+                // classified SAFE on the (wrong) assumption that Discord's
+                // OAuth token never survives a restart — it does:
+                // DiscordTokenStore persists it Keystore-encrypted, and
+                // DiscordRpcManager.init() (called unconditionally by
+                // MusicService on every service creation, with no
+                // SaraswatiFeatures.DISCORD check anywhere in that file)
+                // retrieves it and reconnects automatically. MusicService
+                // then reads these two keys straight from DataStore to
+                // build the Rich Presence activity published on the next
+                // song play. On a phone where Discord was already
+                // connected, a hostile backup planting these would get
+                // auto-published to the family member's live Discord
+                // presence on the very next reconnect/song-play — no fresh
+                // login needed, triggered by the restore's own app
+                // restart. Exactly the "plant a URL into a live phone"
+                // scenario this file exists to prevent.
+                DiscordButton1UrlKey,
+                DiscordButton2UrlKey,
                 // Cache size caps (MB). A hostile backup setting these to
                 // an oversized value doesn't leak anything, but it does
                 // raise the eviction threshold the image/song cache uses —
@@ -108,13 +127,16 @@ object BackupPolicy {
             )
 
     // Preference keys the coverage test's wider regex flags as
-    // sensitive-shaped, but which sanitize() deliberately keeps.
+    // sensitive-shaped, but which sanitize() deliberately keeps. Kept as a
+    // Map (not a Set) even with one entry so a future addition follows the
+    // same "key to reason" shape as SecretPreferenceKeys.NOT_SECRET.
     val SAFE: Map<Preferences.Key<*>, String> =
         mapOf(
             // SARASWATI: Preferences.Key<T> declares its own `to(value: T)` returning a
             // Preferences.Pair, which shadows kotlin.to() whenever the reason string's type
-            // happens to match T (every key below is a String key) — so these use the
-            // Pair(...) constructor directly instead of `key to reason`.
+            // happens to match T — this key's value type is Long, so kotlin.to() still wins
+            // here, but the Pair(...) constructor is used anyway for consistency with
+            // NEVER_EXPORT_OR_RESTORE's own fix-round-1 history (see git log on this file).
             Pair(
                 ListenTogetherSessionTimestampKey,
                 "paired with ListenTogetherSessionTokenKey, which is already in " +
@@ -122,15 +144,6 @@ object BackupPolicy {
                     "credential or address by itself (same reasoning as " +
                     "SecretPreferenceKeys.NOT_SECRET)",
             ),
-            Pair(
-                DiscordButton1UrlKey,
-                "a Discord Rich Presence button URL template; SaraswatiFeatures.DISCORD " +
-                    "is false (the settings screen that reaches it is unreachable) and the " +
-                    "gateway's OAuth access token lives only in DiscordRpcManager's " +
-                    "in-memory state, never in DataStore, so a restored URL cannot be " +
-                    "published to Discord without a fresh, user-initiated login first",
-            ),
-            Pair(DiscordButton2UrlKey, "same reasoning as DiscordButton1UrlKey"),
         )
 
     /** Returns a copy of [prefs] with every [NEVER_EXPORT_OR_RESTORE] key removed. */

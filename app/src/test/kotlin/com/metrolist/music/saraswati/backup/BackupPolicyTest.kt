@@ -18,6 +18,8 @@ import com.metrolist.music.constants.DarkModeKey
 import com.metrolist.music.constants.DataSyncIdKey
 import com.metrolist.music.constants.DeeplApiKey
 import com.metrolist.music.constants.DiscordAvatarKey
+import com.metrolist.music.constants.DiscordButton1UrlKey
+import com.metrolist.music.constants.DiscordButton2UrlKey
 import com.metrolist.music.constants.InnerTubeCookieKey
 import com.metrolist.music.constants.LastFMSessionKey
 import com.metrolist.music.constants.ListenTogetherServerUrlKey
@@ -85,6 +87,8 @@ class BackupPolicyTest {
                 DeeplApiKey to "deepl-xyz789",
                 LastFMSessionKey to "lastfm-session-token",
                 DiscordAvatarKey to "https://cdn.discordapp.com/avatars/12345/abcdef.png",
+                DiscordButton1UrlKey to "https://attacker.example.com/phish",
+                DiscordButton2UrlKey to "https://attacker.example.com/phish2",
             ).toPreferences()
 
         val sanitized = BackupPolicy.sanitize(prefs)
@@ -94,6 +98,14 @@ class BackupPolicyTest {
         assertNull(sanitized[DeeplApiKey])
         assertNull(sanitized[LastFMSessionKey])
         assertNull(sanitized[DiscordAvatarKey])
+        // SARASWATI (fix round 1): these two are NOT dead config — DiscordRpcManager
+        // reconnects automatically from a Keystore-persisted token on every
+        // MusicService creation, with no SaraswatiFeatures.DISCORD check, and
+        // publishes whatever is in DataStore as the Rich Presence buttons on the
+        // next song play. A restored value here really does reach a live Discord
+        // presence with no fresh login required.
+        assertNull(sanitized[DiscordButton1UrlKey])
+        assertNull(sanitized[DiscordButton2UrlKey])
     }
 
     @Test
