@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- SARASWATI: Task 5 — app identity. "Sudhaar" (सुधार, "fix/improvement")
+         is the family's name for "an update is ready", continuing the
+         design's Hindi-name-plus-English-subtitle pattern (Sangat, Parivaar
+         Mix, Saral, Veena); it is the headline on the one screen where it
+         actually matters (update ready) rather than forced into the app
+         name or every string. -->
+    <string name="app_name">Saraswati Updates</string>
+
+    <string name="sudhaar_headline">Sudhaar</string>
+    <string name="update_ready">Update ready</string>
+    <string name="urgent_update_ready">Sudhaar — this fixes music playback</string>
+
+    <string name="checking">Checking for updates…</string>
+    <string name="up_to_date">You\'re already up to date.</string>
+    <string name="already_ahead">You already have a newer test version.</string>
+    <string name="downloading">Downloading… %1$d%%</string>
+    <string name="installing">Installing…</string>
+
+    <string name="allow_installing_one_time">Allow installing (one time)</string>
+    <string name="install">Install</string>
+    <string name="retry">Retry</string>
+    <string name="check_now">Check now</string>
+
+    <string name="turn_permission_off">All done. Now switch the permission off.</string>
+    <string name="permission_off_hint">Settings → Apps → Saraswati Updates → Allow installing unknown apps → turn off.</string>
+    <string name="open_settings">Open settings</string>
+    <string name="done_on_version">Updated to %1$s.</string>
+
+    <string name="cant_reach_update_server">Can\'t reach the update server</string>
+
+    <!-- SARASWATI: Task 5 — Samsung's Auto Blocker (One UI 6+) silently
+         blocks sideloaded installs even with REQUEST_INSTALL_PACKAGES
+         granted, so family phones on Samsung need this one extra step
+         called out explicitly rather than just failing mysteriously. -->
+    <string name="samsung_auto_blocker_block">Samsung phones: switch Auto Blocker off first (Settings → Security and privacy → Auto Blocker), and back on after.</string>
+</resources>
