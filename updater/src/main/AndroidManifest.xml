@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SARASWATI: Task 5 — Saraswati Updates ("Sudhaar"), the ONLY app on a
+  family phone ever allowed to hold REQUEST_INSTALL_PACKAGES. Permissions
+  are exactly the two the Global Constraints allow (INTERNET,
+  REQUEST_INSTALL_PACKAGES) — nothing else, no ACCESS_NETWORK_STATE, no
+  WAKE_LOCK: a failed connectivity check just surfaces as a retryable
+  network error instead. The single <queries> entry is the narrowest
+  package-visibility grant that lets this app read Saraswati's installed
+  versionCode on Android 11+ without QUERY_ALL_PACKAGES.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <queries>
+        <package android:name="dev.diamondspark.saraswati" />
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.SaraswatiUpdater">
+
+        <activity
+            android:name=".UpdateActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.SaraswatiUpdater">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="dev.diamondspark.saraswati.updater.CHECK" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- Not exported: only ever reached through the explicit PendingIntent
+             handed to PackageInstaller.Session#commit. -->
+        <receiver
+            android:name=".InstallResultReceiver"
+            android:exported="false" />
+
+    </application>
+</manifest>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- SARASWATI: Task 5 — placeholder marigold, same family mark as :app's
+         own placeholder launcher background (app/src/main/res/values/ic_launcher_background.xml);
+         the real mark comes with the Phase 3 design pass. -->
+    <color name="ic_launcher_background">#F5B301</color>
+    <color name="text_primary">#1C1B1F</color>
+    <color name="text_error">#B3261E</color>
+</resources>

@@ -15,6 +15,16 @@ kotlin = "2.4.20"
 # already trusts (resolved transitively elsewhere in the graph already), so
 # this adds no new, previously-unvetted artifact.
 kotlinxSerializationJson = "1.11.0"
+# SARASWATI: Task 5 (:updater) — the installer app's own download client.
+# 5.5.0 is not a new, previously-unvetted artifact: gradle/verification-metadata.xml
+# already carries full jar/module hashes for "okhttp-android" 5.5.0 (the
+# Android-target variant actually resolved here), trusted transitively via
+# :app's existing coil/media3/ktor-okhttp dependencies. OkHttp is also the
+# HTTP client Task 4's DownloadPolicy review was verified against (no
+# second percent-decode pass before path resolution), so this choice keeps
+# that verification valid rather than introducing a different client whose
+# redirect/decoding behavior would need separately auditing.
+okhttp = "5.5.0"
 compose = "1.12.1"
 lifecycle = "2.11.0"
 material3 = "1.5.0-alpha28"
@@ -60,6 +70,7 @@ guava = { module = "com.google.guava:guava", version.ref = "guava" }
 coroutines-guava = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-guava", version.ref = "coroutinesGuava" }
 
 gradle = { module = "com.android.tools.build:gradle", version.ref = "androidGradlePlugin" }
+okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 activity = { module = "androidx.activity:activity-compose", version.ref = "activity" }
 hilt-navigation = { module = "androidx.hilt:hilt-navigation-compose", version.ref = "hiltNavigation" }
 datastore = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }

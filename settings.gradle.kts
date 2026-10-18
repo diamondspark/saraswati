@@ -68,3 +68,6 @@ include(":innertube")
 // decision, APK verification, download allowlisting) for the separate
 // Saraswati Updates installer app landing in a later task.
 include(":update-core")
+// SARASWATI: Task 5 — the Saraswati Updates installer app, the only app on
+// the family phones ever allowed to hold REQUEST_INSTALL_PACKAGES.
+include(":updater")
