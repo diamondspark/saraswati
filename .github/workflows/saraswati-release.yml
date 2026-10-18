@@ -6,9 +6,11 @@ name: saraswati-release
 # one-tap approval of the `release` GitHub environment (set up in Task 1,
 # restricted to the `main` branch) before the signing key is ever touched.
 #
-# Pipeline: verify (re-run the full `ci` gate) -> build (unsigned APKs) ->
-# sign (environment: release; apksigner, verified against
-# security/release-cert.sha256, then apk_gate.py) -> publish (GitHub
+# Pipeline: verify (re-run the full `ci` gate, including its secret-free
+# release-dry-run of the signing scripts) -> build (unsigned APKs) ->
+# sign (environment: release; scripts/sign_release.sh, verified against
+# security/release-cert.sha256 by scripts/verify_apk_signer.sh, then
+# apk_gate.py on both APKs) -> publish (GitHub
 # Release with both signed APKs, then the channel manifest pushed to
 # gh-pages). No job before `sign` ever sees a secret.
 on:
@@ -124,10 +126,15 @@ jobs:
           cp app/build/outputs/apk/gms/release/app-gms-release-unsigned.apk "$RUNNER_TEMP/unsigned/app-unsigned.apk"
           cp updater/build/outputs/apk/release/updater-release-unsigned.apk "$RUNNER_TEMP/unsigned/updater-unsigned.apk"
 
+      # Not "unsigned-apks": `verify` runs saraswati-ci.yml in this same
+      # workflow run, and its build-test job already uploads an artifact by
+      # that name. upload-artifact v4+ rejects a duplicate name within one
+      # run, so this job's upload must not collide with any of CI's
+      # (unsigned-apks, unsigned-updater-apk, reports, mobsf-report).
       - name: Upload unsigned APKs
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: unsigned-apks
+          name: release-unsigned-apks
           path: ${{ runner.temp }}/unsigned
           retention-days: 7
 
@@ -159,7 +166,7 @@ jobs:
       - name: Download unsigned APKs
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: unsigned-apks
+          name: release-unsigned-apks
           path: unsigned
 
       - name: Add Android build-tools to PATH
@@ -172,6 +179,23 @@ jobs:
           fi
           echo "$build_tools_dir" >> "$GITHUB_PATH"
 
+      # apk_gate.py (the manifest gate below) runs `apkanalyzer`, which lives
+      # under cmdline-tools — a different SDK directory from build-tools
+      # above, and not on PATH by default on this runner. Same step as
+      # saraswati-ci.yml's build-test and this workflow's `build` job.
+      - name: Add Android cmdline-tools to PATH
+        run: |
+          if [ -d "$ANDROID_HOME/cmdline-tools/latest/bin" ]; then
+            echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          else
+            apkanalyzer_path="$(find "$ANDROID_HOME" -maxdepth 6 -type f -name apkanalyzer 2>/dev/null | head -1)"
+            if [ -z "$apkanalyzer_path" ]; then
+              echo "apkanalyzer not found under ANDROID_HOME=$ANDROID_HOME" >&2
+              exit 1
+            fi
+            dirname "$apkanalyzer_path" >> "$GITHUB_PATH"
+          fi
+
       # The keystore only ever exists on this runner's ephemeral disk, for
       # the lifetime of this one job, and is deleted (see the last step)
       # before the job ends either way.
@@ -183,37 +207,19 @@ jobs:
           umask 077
           printf '%s' "$RELEASE_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
 
-      - name: Sign the Saraswati APK
+      # The same script saraswati-ci.yml's `release-dry-run` job runs with a
+      # throwaway keystore on every push/PR, so these exact commands have
+      # already been proven before a real release ever reaches this step.
+      - name: Sign both APKs
         env:
           KS_PASS: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           KEY_PASS: ${{ secrets.RELEASE_KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
         run: |
-          set -euo pipefail
-          zipalign -p 4 unsigned/app-unsigned.apk "$RUNNER_TEMP/app-aligned.apk"
-          apksigner sign \
-            --ks "$RUNNER_TEMP/release.keystore" \
-            --ks-pass env:KS_PASS \
-            --ks-key-alias "$KEY_ALIAS" \
-            --key-pass env:KEY_PASS \
-            --out "$RUNNER_TEMP/app-signed.apk" \
-            "$RUNNER_TEMP/app-aligned.apk"
-
-      - name: Sign the Saraswati Updates APK
-        env:
-          KS_PASS: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
-          KEY_PASS: ${{ secrets.RELEASE_KEY_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
-        run: |
-          set -euo pipefail
-          zipalign -p 4 unsigned/updater-unsigned.apk "$RUNNER_TEMP/updater-aligned.apk"
-          apksigner sign \
-            --ks "$RUNNER_TEMP/release.keystore" \
-            --ks-pass env:KS_PASS \
-            --ks-key-alias "$KEY_ALIAS" \
-            --key-pass env:KEY_PASS \
-            --out "$RUNNER_TEMP/updater-signed.apk" \
-            "$RUNNER_TEMP/updater-aligned.apk"
+          scripts/sign_release.sh \
+            --keystore "$RUNNER_TEMP/release.keystore" \
+            --in unsigned/app-unsigned.apk --out "$RUNNER_TEMP/app-signed.apk" \
+            --in unsigned/updater-unsigned.apk --out "$RUNNER_TEMP/updater-signed.apk"
 
       # The manifest is never trusted for identity (Global Constraints) —
       # this is the one place that is: the actual signer of both freshly
@@ -228,33 +234,26 @@ jobs:
             echo "security/release-cert.sha256 is empty or missing — run scripts/key-ceremony.sh first" >&2
             exit 1
           fi
-          for apk in "$RUNNER_TEMP/app-signed.apk" "$RUNNER_TEMP/updater-signed.apk"; do
-            # apksigner labels the line with the signature scheme it is
-            # reporting under (observed: "V3.0 Signer: certificate SHA-256
-            # digest: <hex>" for an APK verified under v2+v3 — both report
-            # the same signer, so matching loosely on the trailing
-            # "Signer: certificate SHA-256 digest:" and taking the first
-            # hit is robust to which scheme label apksigner picks).
-            actual="$(apksigner verify --print-certs "$apk" \
-              | sed -n 's/^.*Signer: certificate SHA-256 digest: *//p' \
-              | head -1 \
-              | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
-            if [ -z "$actual" ]; then
-              echo "could not read a signer SHA-256 digest from $apk" >&2
-              exit 1
-            fi
-            if [ "$actual" != "$expected" ]; then
-              echo "signer mismatch on $apk: expected $expected, got $actual" >&2
-              exit 1
-            fi
-            echo "$apk: signer verified ($actual)"
-          done
+          # scripts/verify_apk_signer.sh matches apksigner's
+          # "certificate SHA-256 digest:" line under every build-tools
+          # label seen so far ("V3.0 Signer: ..." on 37.x, "Signer #1 ..."
+          # on 36.x), so a runner image picking a different build-tools
+          # version doesn't silently break this check.
+          scripts/verify_apk_signer.sh --expected "$expected" \
+            "$RUNNER_TEMP/app-signed.apk" \
+            "$RUNNER_TEMP/updater-signed.apk"
 
       - name: APK manifest gate (signed Saraswati APK)
         run: |
           python3 -I security/apk_gate.py check \
             --apk "$RUNNER_TEMP/app-signed.apk" \
             --allowlist security/manifest-allowlist.json
+
+      - name: APK manifest gate (signed Saraswati Updates APK)
+        run: |
+          python3 -I security/apk_gate.py check \
+            --apk "$RUNNER_TEMP/updater-signed.apk" \
+            --allowlist security/updater-allowlist.json
 
       - name: Delete the keystore
         if: always()
@@ -330,6 +329,9 @@ jobs:
             echo "published_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           } >> "$GITHUB_OUTPUT"
 
+      # --target pins the new tag to the exact commit `build` built from.
+      # Without it the tag lands on main's HEAD at publish time, which can
+      # be hours later (sign waits on approval) and include a sync-bot merge.
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -344,6 +346,7 @@ jobs:
             "$RUNNER_TEMP/$APP_APK.sha256" \
             "$RUNNER_TEMP/$UPDATER_APK" \
             "$RUNNER_TEMP/$UPDATER_APK.sha256" \
+            --target "$GITHUB_SHA" \
             --title "Saraswati v${VERSION_CODE}" \
             --notes "$RELEASE_NOTES"
 
