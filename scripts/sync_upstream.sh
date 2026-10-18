@@ -124,6 +124,27 @@ if [[ "$new_commit_count" -eq 0 ]]; then
 fi
 echo "sync_upstream.sh: $new_commit_count new upstream commit(s) ($UPSTREAM_LOCAL_BRANCH now at $new_upstream_sha)"
 
+# --- 2b. skip if a sync PR from a previous run is still open ---------------
+# $BASE_BRANCH only advances once a human actually merges a sync PR, so
+# without this check, every day review is pending this bot would open
+# another near-duplicate PR proposing the same still-unmerged upstream
+# commits: a bot with contents:write/pull-requests:write flooding the
+# queue with near-duplicates is exactly the kind of thing that erodes the
+# "a human reviews each PR carefully" safety net the rest of this design
+# relies on. Simplest fix: just skip, with a log line, and let the
+# existing PR pick up any later commits once it's merged.
+if [[ -n "${GITHUB_REPOSITORY:-}" ]] && command -v gh >/dev/null 2>&1; then
+  export GH_TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+  existing_sync_pr="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open \
+    --json headRefName,url \
+    --jq '[.[] | select(.headRefName | startswith("sync/upstream-"))] | .[0].url // empty' \
+    2>/dev/null || true)"
+  if [[ -n "$existing_sync_pr" ]]; then
+    echo "sync_upstream.sh: a sync PR is already open ($existing_sync_pr); skipping until it is merged or closed" >&2
+    exit 0
+  fi
+fi
+
 # --- 3. branch, and capture the report material before merging -------------
 # Captured against the base/upstream branches directly, so the report
 # reflects what upstream is proposing even if the merge is later aborted.
@@ -144,6 +165,25 @@ sync_branch="sync/upstream-$(date -u +%Y%m%d)"
 git checkout -B "$sync_branch" "$BASE_BRANCH"
 
 common_ancestor="$(git merge-base "$BASE_BRANCH" "$UPSTREAM_LOCAL_BRANCH")"
+
+# Defensive check: everything from here on (the "no new commits" check
+# above included) trusts that $BASE_BRANCH actually contains upstream's
+# history, which only stays true if every previous sync PR was merged
+# into it with a real merge commit — never squashed or rebased (see
+# docs/release-runbook.md for why, and for the branch-settings change a
+# human needs to make to enforce it; nothing here can enforce it from the
+# GitHub Settings side). If origin/$UPSTREAM_LOCAL_BRANCH (the upstream
+# tip this bot itself recorded after the last successful sync) is not an
+# ancestor of today's merge-base, that assumption just broke — likely a
+# squash/rebase merge — and every diff below would be silently computed
+# against the wrong starting point. Fail loudly here instead.
+git fetch origin "$UPSTREAM_LOCAL_BRANCH" 2>/dev/null || true
+if git rev-parse --verify --quiet "refs/remotes/origin/$UPSTREAM_LOCAL_BRANCH" >/dev/null 2>&1; then
+  recorded_upstream_tip="$(git rev-parse "origin/$UPSTREAM_LOCAL_BRANCH")"
+  if ! git merge-base --is-ancestor "$recorded_upstream_tip" "$common_ancestor" 2>/dev/null; then
+    die "ancestry check failed: origin/$UPSTREAM_LOCAL_BRANCH ($recorded_upstream_tip) is not an ancestor of merge-base($BASE_BRANCH, $UPSTREAM_LOCAL_BRANCH) ($common_ancestor). A previous upstream-sync PR was most likely merged into $BASE_BRANCH with a squash or rebase instead of a real merge commit, which breaks the ancestry this bot's \"new commits\" and diff logic both depend on. Refusing to compute a silently wrong report — a human needs to reconcile $BASE_BRANCH with $UPSTREAM_LOCAL_BRANCH by hand (and see docs/release-runbook.md on merging sync PRs) before this bot runs again."
+  fi
+fi
 
 git log --no-color "$BASE_BRANCH..$UPSTREAM_LOCAL_BRANCH" >"$WORKDIR/commits.log"
 git diff --no-color --stat "$common_ancestor" "$UPSTREAM_LOCAL_BRANCH" >"$WORKDIR/diffstat.txt" || true
@@ -216,7 +256,7 @@ EOF
   if [[ -n "${GITHUB_REPOSITORY:-}" ]] && command -v gh >/dev/null 2>&1; then
     export GH_TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
     if ! gh issue create --repo "$GITHUB_REPOSITORY" --title "$issue_title" --body "$issue_body"; then
-      echo "sync_upstream.sh: could not open a GitHub issue (this job's token has no 'issues: write'?); the message above is the only record" >&2
+      echo "sync_upstream.sh: could not open a GitHub issue (Issues may be disabled on this repo, or this job's token lacks 'issues: write' — the conflict details above are the only record either way)" >&2
     fi
   else
     echo "sync_upstream.sh: GITHUB_REPOSITORY/gh not available; the message above is the only record" >&2
@@ -290,11 +330,17 @@ if pr_url="$(gh pr create --repo "$GITHUB_REPOSITORY" \
 else
   echo "sync_upstream.sh: PR create with the needs-security-review label failed, retrying without a label:" >&2
   cat "$WORKDIR/pr_create.err" >&2
-  pr_url="$(gh pr create --repo "$GITHUB_REPOSITORY" \
+  if pr_url="$(gh pr create --repo "$GITHUB_REPOSITORY" \
     --base "$BASE_BRANCH" --head "$sync_branch" \
     --title "Upstream sync: $sync_branch" \
-    --body "$pr_body")"
-  echo "sync_upstream.sh: opened $pr_url (without a label; create needs-security-review by hand and label it)" >&2
+    --body "$pr_body" 2>"$WORKDIR/pr_create_retry.err")"; then
+    echo "sync_upstream.sh: opened $pr_url (without a label; create needs-security-review by hand and label it)" >&2
+  else
+    echo "sync_upstream.sh: PR create failed entirely; $sync_branch (and the updated $UPSTREAM_LOCAL_BRANCH ref) are already pushed with no PR behind them — open one by hand or delete the branch before the next run:" >&2
+    cat "$WORKDIR/pr_create_retry.err" >&2
+    echo "$pr_body"
+    exit 1
+  fi
 fi
 
 # Pull requests opened with the default GITHUB_TOKEN don't trigger

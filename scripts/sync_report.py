@@ -43,6 +43,14 @@ from pathlib import Path
 
 _HOST_RE = re.compile(r"https?://([A-Za-z0-9.-]+)")
 
+# Markdown control characters escaped in untrusted upstream text (a commit
+# subject, a dependency-file diff line) before it's interpolated into the
+# PR body. Not a code-execution concern (this only ever reaches `gh` as a
+# literal argv value) — it's so a crafted subject/line can't render as a
+# heading/link/bold text or visually spoof part of the review checklist a
+# human is about to read.
+_MARKDOWN_SPECIAL_RE = re.compile(r"([\\`*_\[\]<>|#])")
+
 _CHECKLIST = (
     "- [ ] Security review of the diff done",
     "- [ ] Dependency changes reviewed",
@@ -104,6 +112,16 @@ def changed_hosts(
     }
 
 
+def _escape_markdown(text: str) -> str:
+    """Escapes markdown control characters in untrusted text, and
+    collapses an embedded newline to a space first — a crafted multi-line
+    subject could otherwise inject a markdown line of its own (a fake
+    heading or a fake checklist item) regardless of character escaping.
+    See the `_MARKDOWN_SPECIAL_RE` comment for why this exists at all."""
+    text = text.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+    return _MARKDOWN_SPECIAL_RE.sub(r"\\\1", text)
+
+
 def _bulleted(items: list[str], empty: str) -> str:
     if not items:
         return empty
@@ -146,7 +164,9 @@ def render_pr_body(
 
     sections.append(f"### Commits ({len(commits)})")
     sections.append("")
-    sections.append(_bulleted(commits, "_No commits listed._"))
+    sections.append(
+        _bulleted([_escape_markdown(c) for c in commits], "_No commits listed._")
+    )
     sections.append("")
 
     sections.append("### Diffstat")
@@ -159,7 +179,10 @@ def render_pr_body(
     sections.append("### `gradle/libs.versions.toml` changes")
     sections.append("")
     sections.append(
-        _bulleted(toml_changes, "_No dependency version changes detected._")
+        _bulleted(
+            [_escape_markdown(c) for c in toml_changes],
+            "_No dependency version changes detected._",
+        )
     )
     sections.append("")
 

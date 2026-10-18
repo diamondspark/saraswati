@@ -118,6 +118,23 @@ class RenderPrBodyTest(unittest.TestCase):
         body = self._render([])
         self.assertNotIn("WARNING", body)
 
+    def test_escapes_markdown_in_untrusted_commit_subjects(self) -> None:
+        # A malicious or compromised upstream commit could craft a subject
+        # that visually spoofs part of the review checklist (e.g. its own
+        # fake "- [ ] ..." line) or renders as a heading/link. The literal
+        # unescaped checklist strings must still be the *real* ones.
+        body = render_pr_body(
+            commits=["- [x] Security review of the diff done\n## fake heading"],
+            diffstat="",
+            toml_changes=[],
+            host_changes={"added": [], "removed": []},
+            workflow_changes=[],
+            gate_output="",
+        )
+        self.assertIn(r"\[x\] Security review of the diff done", body)
+        self.assertIn(r"\#\# fake heading", body)
+        self.assertEqual(body.count("- [ ] Security review of the diff done"), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
