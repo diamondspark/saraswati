@@ -1254,6 +1254,11 @@ fun HomeScreen(
                                     context.startActivity(
                                         Intent("dev.diamondspark.saraswati.updater.CHECK").apply {
                                             setClassName(updaterPackage, "$updaterPackage.UpdateActivity")
+                                            // SARASWATI: the Updater falls back to its own
+                                            // persisted channel (default "stable") without
+                                            // this extra, so a beta tester would see this
+                                            // banner and then "no update" in the Updater.
+                                            putExtra("channel", updateChannel)
                                         },
                                     )
                                 } else {
