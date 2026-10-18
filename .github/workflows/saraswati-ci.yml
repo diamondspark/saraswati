@@ -117,3 +117,121 @@ jobs:
             app/build/test-results/**/*.xml
             ${{ runner.temp }}/gitleaks-report.sarif
           if-no-files-found: warn
+
+  # MobSF APK scan (Task 10). REPORT-ONLY for now: Steps 3-4 of the task
+  # (triaging the first real report with a human into
+  # security/mobsf-baseline.json, then switching this job to gate on
+  # scripts/mobsf_scan.py's `new_findings`) are deliberately not done yet.
+  # `continue-on-error: true` means nothing in this job -- a High finding,
+  # or an infrastructure hiccup starting MobSF -- can turn the overall
+  # workflow run red while it stays report-only.
+  mobsf:
+    name: mobsf-scan
+    needs: build-test
+    # Report-only (Steps 3-4 not done yet, see the block comment above):
+    # scoped to a manual run only, not every push/PR, so this ~30-minute
+    # Docker-based scan doesn't add real time to every ordinary CI run for
+    # a job that can't fail anything yet. Drop this `if:` once Step 4
+    # switches the job to gating -- at that point it should run on every
+    # push/PR like the rest of this workflow.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    services:
+      mobsf:
+        # opensecurity/mobile-security-framework-mobsf:v4.5.3, pinned by
+        # digest (this is a job-level `services:` image reference, not a
+        # marketplace `uses:` action -- security/check_workflows.py only
+        # gates `uses:` lines). Digest obtained and verified with:
+        #   docker pull opensecurity/mobile-security-framework-mobsf:v4.5.3
+        #   docker inspect --format '{{index .RepoDigests 0}}' \
+        #     opensecurity/mobile-security-framework-mobsf:v4.5.3
+        # which matched Docker Hub's own tag metadata for v4.5.3. A future
+        # version bump means repeating those two commands and editing this
+        # digest deliberately -- never re-pulling ":latest".
+        image: opensecurity/mobile-security-framework-mobsf@sha256:5113fbad0727445dda01afdccafea5e107bfa8632ead8a169492f5caa8aa1b7c # v4.5.3
+        ports:
+          - 8000:8000
+        env:
+          # Not a secret: a job-scoped token for the loopback-only REST API
+          # of a container that lives only for this one job and is never
+          # reachable outside this runner. Setting it up front (per MobSF's
+          # mobsf/MobSF/init.py `api_key()`) avoids having to `docker exec`
+          # into the service container to read its auto-generated key.
+          MOBSF_API_KEY: saraswati-ci-mobsf-report-only
+    env:
+      MOBSF_API_KEY: saraswati-ci-mobsf-report-only
+      MOBSF_URL: http://localhost:8000
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download unsigned APK
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: unsigned-apks
+          path: unsigned-apk
+
+      - name: Wait for MobSF
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -sf -o /dev/null "$MOBSF_URL/"; then
+              echo "MobSF is up"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "MobSF did not become ready in time" >&2
+          exit 1
+
+      - name: Upload APK to MobSF
+        id: upload
+        run: |
+          apk="$(find unsigned-apk -name '*.apk' | head -1)"
+          if [ -z "$apk" ]; then
+            echo "no unsigned APK found to scan" >&2
+            exit 1
+          fi
+          curl -sf -F "file=@${apk};type=application/octet-stream" \
+            -H "X-Mobsf-Api-Key: $MOBSF_API_KEY" \
+            "$MOBSF_URL/api/v1/upload" -o upload.json
+          cat upload.json
+          hash="$(python3 -I -c "import json; print(json.load(open('upload.json'))['hash'])")"
+          echo "hash=$hash" >> "$GITHUB_OUTPUT"
+
+      - name: Run MobSF static scan
+        run: |
+          curl -sf -X POST \
+            -H "X-Mobsf-Api-Key: $MOBSF_API_KEY" \
+            --data "scan_type=apk&hash=${{ steps.upload.outputs.hash }}&re_scan=0" \
+            "$MOBSF_URL/api/v1/scan" -o scan.json
+
+      - name: Fetch full JSON report
+        run: |
+          curl -sf -X POST \
+            -H "X-Mobsf-Api-Key: $MOBSF_API_KEY" \
+            --data "hash=${{ steps.upload.outputs.hash }}" \
+            "$MOBSF_URL/api/v1/report_json" -o report.json
+
+      - name: Fetch AppSec scorecard
+        run: |
+          curl -sf -X POST \
+            -H "X-Mobsf-Api-Key: $MOBSF_API_KEY" \
+            --data "hash=${{ steps.upload.outputs.hash }}" \
+            "$MOBSF_URL/api/v1/scorecard" -o scorecard.json
+
+      - name: Summarize findings (report-only)
+        run: python3 -I scripts/mobsf_scan.py --report scorecard.json --baseline security/mobsf-baseline.json
+
+      - name: Upload MobSF report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mobsf-report
+          path: |
+            report.json
+            scorecard.json
+          if-no-files-found: warn
