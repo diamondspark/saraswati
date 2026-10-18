@@ -117,18 +117,22 @@ fun BackupAndRestore(
             }
         }
     val restoreLauncher =
+        // SARASWATI: audit A10-4 — previewBackup() reads and parses the whole settings
+        // entry, which used to happen directly in this activity-result callback (the main
+        // thread). Both it and the account-info network lookup below now run inside the
+        // same Dispatchers.IO coroutine.
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) {
                 pendingRestoreUri = uri
-                val preview = viewModel.previewBackup(context, uri)
-                backupPreviewInfo = preview
-                showRestoreConfirmDialog = true
-
-                // Fetch account info asynchronously if backup has auth data
                 accountCheckFailed = false
-                if (preview.hasAuthData && preview.cookie != null) {
-                    isLoadingAccountInfo = true
-                    coroutineScope.launch(Dispatchers.IO) {
+                coroutineScope.launch(Dispatchers.IO) {
+                    val preview = viewModel.previewBackup(context, uri)
+                    backupPreviewInfo = preview
+                    showRestoreConfirmDialog = true
+
+                    // Fetch account info asynchronously if backup has auth data
+                    if (preview.hasAuthData && preview.cookie != null) {
+                        isLoadingAccountInfo = true
                         val accountInfo = viewModel.fetchAccountInfoFromBackup(preview.cookie)
                         if (accountInfo != null) {
                             backupPreviewInfo = accountInfo
@@ -141,22 +145,30 @@ fun BackupAndRestore(
             }
         }
     val importPlaylistFromCsv =
+        // SARASWATI: audit A10-4 — previewCsvFile() now runs on Dispatchers.IO instead of
+        // the main thread.
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri == null) return@rememberLauncherForActivityResult
             pendingCsvUri = uri
-            val previewState = viewModel.previewCsvFile(context, uri)
-            csvImportState = previewState
-            showCsvColumnMapping = true
+            coroutineScope.launch(Dispatchers.IO) {
+                val previewState = viewModel.previewCsvFile(context, uri)
+                csvImportState = previewState
+                showCsvColumnMapping = true
+            }
         }
     val importM3uLauncherOnline =
+        // SARASWATI: audit A10-4 — loadM3UOnline() now runs on Dispatchers.IO instead of
+        // the main thread.
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri == null) return@rememberLauncherForActivityResult
-            val result = viewModel.loadM3UOnline(context, uri)
-            importedSongs.clear()
-            importedSongs.addAll(result)
+            coroutineScope.launch(Dispatchers.IO) {
+                val result = viewModel.loadM3UOnline(context, uri)
+                importedSongs.clear()
+                importedSongs.addAll(result)
 
-            if (importedSongs.isNotEmpty()) {
-                showChoosePlaylistDialogOnline = true
+                if (importedSongs.isNotEmpty()) {
+                    showChoosePlaylistDialogOnline = true
+                }
             }
         }
 
@@ -332,7 +344,10 @@ fun BackupAndRestore(
                     onClick = {
                         showRestoreConfirmDialog = false
                         pendingRestoreUri?.let { uri ->
-                            viewModel.restore(context, uri, clearAuthData = false)
+                            // SARASWATI: audit A10-2 — restore() always sanitizes the
+                            // settings it applies now (BackupPolicy.NEVER_EXPORT_OR_RESTORE),
+                            // so there is no longer a clearAuthData flag to pass.
+                            viewModel.restore(context, uri)
                         }
                         pendingRestoreUri = null
                         backupPreviewInfo = null
