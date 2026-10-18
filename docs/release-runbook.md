@@ -195,28 +195,30 @@ labeled commit is harmless to leave.**
 
 ## Signing ceremony, release, and promotion (Task 6)
 
-### Status: ceremony done; one secret needs correcting
+### Status: done — first signed release shipped
 
 The ceremony has run: `security/release-cert.sha256` is committed
 (landed with `c95fa1ac`) and the four `release`-environment secrets are
 set. `:updater`'s release build embeds that digest as
 `PINNED_CERT_SHA256`, and `sign` verifies every signed APK against it.
+Release `v3902` (2026-10-18, `beta` channel) completed the full
+`verify → build → sign → publish` pipeline successfully, confirming the
+secrets are correct end to end.
 
-**Known issue from the original run (fixed in the script since):** the
-script used to generate two *different* random passwords for the store
-and the key. keytool's default keystore type, PKCS12, has a single
-password for the whole store — keytool printed "Different store and key
-passwords not supported for PKCS12 KeyStores. Ignoring user-specified
--keypass value." and protected the key with the store password. The
-uploaded `RELEASE_KEY_PASSWORD` therefore doesn't unlock the key, and
-`sign` fails with `UnrecoverableKeyException` (`sign_release.sh` adds a
-"KS_PASS and KEY_PASS differ" hint) until the owner re-sets
-`RELEASE_KEY_PASSWORD` to the **store password's** value, e.g.
-`gh secret set RELEASE_KEY_PASSWORD --env release < <store-password file
-from the backup>` — never echoed or typed onto a command line. The keystore,
-the key and the committed digest are all fine; only that secret's value is
-wrong. `scripts/key-ceremony.sh` now writes one password to both files, so a
-future ceremony (key rotation) can't repeat this.
+**Known issue from the original run (fixed in the script, and the
+live secret, since):** the script used to generate two *different*
+random passwords for the store and the key. keytool's default keystore
+type, PKCS12, has a single password for the whole store — keytool
+printed "Different store and key passwords not supported for PKCS12
+KeyStores. Ignoring user-specified -keypass value." and protected the
+key with the store password. The uploaded `RELEASE_KEY_PASSWORD`
+therefore didn't unlock the key, and `sign` failed with
+`UnrecoverableKeyException` (`sign_release.sh` adds a "KS_PASS and
+KEY_PASS differ" hint) until the owner re-set `RELEASE_KEY_PASSWORD` to
+the **store password's** value — done, and confirmed by `v3902`'s
+successful `sign` job. `scripts/key-ceremony.sh` now writes one
+password to both files, so a future ceremony (key rotation) can't
+repeat this.
 
 The ceremony instructions below are kept as the reference for how the key
 was made and for a future rotation.
@@ -328,6 +330,28 @@ entirely in the owner's hands.
    right before pushing.
 4. On success, `stable.json` on `gh-pages` becomes `beta.json` with
    `"channel"` rewritten to `"stable"`.
+
+## Developer verification (Task 13)
+
+Full detail (what Google's pages actually say, the registration sheet, and
+registration status) lives in [`docs/developer-verification.md`](developer-verification.md).
+Summary for Phase 3 rollout:
+
+1. Both package names (`dev.diamondspark.saraswati`,
+   `dev.diamondspark.saraswati.updater`) must be registered under a free
+   Limited Distribution Android Developer Console account — a human
+   checkpoint, done by the owner signing in themselves, never by an agent.
+2. Each family phone then needs its own **device authorization** before
+   Saraswati can be installed there under enforcement: generate that
+   phone's QR code or link from the Developer Console, open/scan it on the
+   phone, and confirm the on-device consent prompt. This is a per-phone
+   step, capped at 20 authorized devices total.
+3. Fold this into the Phase 3 remote-setup flow, alongside the existing
+   "Unknown sources"/Auto Blocker/battery steps, before the family member
+   installs Saraswati Updates.
+4. Track authorized-device count against the 20-device cap in the family
+   hub's health view (Phase 3) so there's headroom visibility before a
+   phone upgrade or replacement needs a slot freed up.
 
 ### If the signing key is lost
 
