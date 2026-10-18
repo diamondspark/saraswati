@@ -43,6 +43,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -120,6 +121,29 @@ fun LoginScreen(
     var accounts by remember { mutableStateOf<List<YouTubeAccount>>(emptyList()) }
     var selectedAccount by remember { mutableStateOf<YouTubeAccount?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    // SARASWATI: restoreYouTubeCookies (below) writes the stored,
+    // already-sealed session cookie back into the GLOBAL WebView
+    // CookieManager singleton for a channel switch, before the user has
+    // confirmed anything. If the user backs out of this screen before
+    // finalizeLogin() runs, that plaintext copy would otherwise sit in the
+    // cookie jar indefinitely — exactly the exposure Task 7/15 exist to
+    // close. finalizeLogin's own success path already clears the jar
+    // before this screen leaves composition, so this is a no-op then;
+    // it only matters for an abandoned login/channel-switch.
+    DisposableEffect(Unit) {
+        onDispose {
+            webViewRef?.apply {
+                stopLoading()
+                clearHistory()
+                clearFormData()
+                clearCache(true)
+            }
+            CookieManager.getInstance().removeAllCookies(null)
+            CookieManager.getInstance().flush()
+            WebStorage.getInstance().deleteAllData()
+        }
+    }
 
     suspend fun extractAuthData(webView: WebView?): AuthData? {
         val view = webView ?: return null

@@ -24,7 +24,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.security.ProviderException
 import javax.crypto.SecretKey
@@ -108,18 +107,25 @@ class SecretScrubberTest {
             assertEquals(true, dataStore.data.first()[PureBlackKey])
         }
 
-    // SARASWATI (fix round 1): a broken/custom-ROM Keystore implementation
-    // can make AesGcmKeyProvider.key() throw a java.security.ProviderException
-    // — a RuntimeException, not a GeneralSecurityException — which
-    // CookieVault.open()'s catch blocks do not cover, so it propagates
-    // straight out of scrub(). That is real and expected; the fix is that
-    // App.onCreate now wraps its SecretScrubber.scrub(...) call in a plain
-    // try/catch (Exception) so a broken Keystore degrades to "skip this
-    // boot's scrub" instead of crashing every single app launch. This test
-    // pins both halves: scrub() really does throw with a broken provider,
-    // and App.onCreate's catch pattern really does stop it from escaping.
+    // SARASWATI (fix round 1; superseded by I5): a broken/custom-ROM
+    // Keystore implementation can make AesGcmKeyProvider.key() throw a
+    // java.security.ProviderException — a RuntimeException. This test used
+    // to pin that CookieVault.open()'s catch blocks did NOT cover that, so
+    // it escaped straight out of scrub(), relying on App.onCreate's own
+    // try/catch as the only thing standing between a broken Keystore and a
+    // crash on every single launch. I5 closed that gap one layer down
+    // instead: CookieVault.open() now also catches
+    // RuntimeException/ProviderException and returns null, matching its
+    // documented "never throws" contract — so scrub() no longer throws at
+    // all with a broken provider. The degraded cookie is scrubbed like any
+    // other value open() can't verify (the safe default — see
+    // SecretScrubber.kt's own "wiped, not repaired" doc comment).
+    // App.onCreate's try/catch around scrub() in App.kt remains as
+    // defense-in-depth for anything else scrub() could still throw (e.g. a
+    // DataStore IO error), but a broken Keystore specifically no longer
+    // needs it.
     @Test
-    fun `a broken keystore during scrub does not escape App onCreate's guard`() =
+    fun `a broken keystore during scrub does not throw and scrubs the unverifiable cookie`() =
         runBlocking {
             val brokenVault =
                 CookieVault(
@@ -132,18 +138,14 @@ class SecretScrubberTest {
                     mutablePreferencesOf(InnerTubeCookieKey to vault.seal("SAPISID=abc; HSID=def456")),
                 )
 
-            var caught: Throwable? = null
-            try {
-                SecretScrubber.scrub(dataStore, brokenVault)
-            } catch (e: Exception) {
-                caught = e
-            }
+            // Must not throw — this is the call App.onCreate makes
+            // unguarded in spirit, even though App.kt itself still wraps it
+            // in a try/catch for defense-in-depth.
+            SecretScrubber.scrub(dataStore, brokenVault)
 
-            assertTrue(
-                "expected scrub() to throw a ProviderException with a broken Keystore " +
-                    "(that's the real gap App.onCreate's try/catch now guards against) " +
-                    "but got: $caught",
-                caught is ProviderException,
+            assertNull(
+                "a cookie that can't be verified through a broken Keystore must be scrubbed, not kept",
+                dataStore.data.first()[InnerTubeCookieKey],
             )
         }
 }

@@ -86,7 +86,9 @@ private fun <T> unsealIfCookie(
     }
 
 // SARASWATI: the write-side counterpart of unsealIfCookie — seal the
-// cookie before it ever touches disk.
+// cookie before it ever touches disk, and write it through
+// writeMaybeSealed (below) rather than a plain `prefs[key] = ...` so an
+// empty cookie removes the key instead of sealing "".
 @Suppress("UNCHECKED_CAST")
 private fun <T> sealIfCookie(
     key: Preferences.Key<T>,
@@ -97,6 +99,25 @@ private fun <T> sealIfCookie(
     } else {
         value
     }
+
+// SARASWATI: an empty cookie means "no cookie" — both logout paths
+// (AccountSettings.kt's sign-out and logoutKeepData) write "" through
+// rememberPreference. Remove the key instead of sealing an empty
+// string: there is no secret to protect, so sealing it is unnecessary
+// churn, and it keeps unsealIfCookie from ever opening a sealed "" for
+// no reason.
+@Suppress("UNCHECKED_CAST")
+private fun <T> writeMaybeSealed(
+    prefs: MutablePreferences,
+    key: Preferences.Key<T>,
+    value: T,
+) {
+    if (key == InnerTubeCookieKey && (value as String).isEmpty()) {
+        prefs.remove(key)
+        return
+    }
+    prefs[key] = sealIfCookie(key, value)
+}
 
 operator fun <T> DataStore<Preferences>.get(key: Preferences.Key<T>): T? =
     runBlocking(Dispatchers.IO) {
@@ -145,7 +166,7 @@ fun <T> rememberPreference(
                 set(value) {
                     coroutineScope.launch {
                         context.safeDataStoreEdit {
-                            it[key] = sealIfCookie(key, value)
+                            writeMaybeSealed(it, key, value)
                         }
                     }
                 }

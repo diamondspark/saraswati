@@ -13,7 +13,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
+import java.security.ProviderException
 import java.util.Base64
+import javax.crypto.SecretKey
 
 class CookieVaultTest {
     private val vault = CookieVault(SoftwareKeyProvider())
@@ -59,5 +61,28 @@ class CookieVaultTest {
     fun `empty string round-trips`() {
         val sealed = vault.seal("")
         assertEquals("", vault.open(sealed))
+    }
+
+    @Test
+    fun `open returns null instead of throwing when the Keystore is broken`() {
+        // SARASWATI (I5): a broken real Keystore can throw an unchecked
+        // java.security.ProviderException from cipher operations, not just
+        // from key generation. open() is documented as "never throws" —
+        // this proves that contract holds even for a RuntimeException.
+        val sealed = vault.seal("SAPISID=abc")
+        val brokenVault = CookieVault(ThrowingKeyProvider())
+
+        assertNull(brokenVault.open(sealed))
+    }
+
+    private class ThrowingKeyProvider : AesGcmKeyProvider {
+        // Models a Keystore provider that fails on every crypto operation
+        // (e.g. a corrupted keystore.db) by throwing from key() itself —
+        // CookieVault.open() calls keys.key() before any Cipher call, so
+        // this reaches the same catch block a Cipher-level ProviderException
+        // would.
+        override fun key(): SecretKey {
+            throw ProviderException("Keystore is broken")
+        }
     }
 }

@@ -15,7 +15,6 @@
 package com.metrolist.music.saraswati.security
 
 import java.security.GeneralSecurityException
-import java.security.SecureRandom
 import java.util.Base64
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
@@ -23,12 +22,21 @@ import javax.crypto.spec.GCMParameterSpec
 class CookieVault(
     private val keys: AesGcmKeyProvider,
 ) {
-    private val secureRandom = SecureRandom()
-
     fun seal(plain: String): String {
-        val iv = ByteArray(IV_LENGTH_BYTES).also(secureRandom::nextBytes)
+        // SARASWATI: a real Android Keystore key defaults to
+        // setRandomizedEncryptionRequired(true) and REJECTS a caller-
+        // supplied IV (InvalidAlgorithmParameterException: "Caller-provided
+        // IV not permitted") — only JCE software keys tolerate it, which is
+        // why this was invisible under SoftwareKeyProvider-only tests. Let
+        // the provider generate the IV and read back whatever it actually
+        // used; do not weaken the key by requesting unrandomized
+        // encryption just to keep a caller-supplied IV.
         val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, keys.key(), GCMParameterSpec(TAG_LENGTH_BITS, iv))
+        cipher.init(Cipher.ENCRYPT_MODE, keys.key())
+        val iv = cipher.iv
+        require(iv.size == IV_LENGTH_BYTES) {
+            "Expected a ${IV_LENGTH_BYTES}-byte GCM IV from the provider, got ${iv.size}"
+        }
         cipher.updateAAD(AAD)
         val cipherTextAndTag = cipher.doFinal(plain.toByteArray(Charsets.UTF_8))
         val payload = iv + cipherTextAndTag
@@ -56,6 +64,14 @@ class CookieVault(
             null
         } catch (e: IllegalArgumentException) {
             // Malformed Base64.
+            null
+        } catch (e: RuntimeException) {
+            // SARASWATI: a broken Keystore (corrupted keystore.db, a
+            // provider crash, etc.) can throw an unchecked
+            // java.security.ProviderException from cipher init/doFinal, not
+            // just from key generation. open() is documented to never
+            // throw — callers on the main thread (rememberPreference,
+            // HomeViewModel's collector) must not crash on a bad Keystore.
             null
         }
     }
