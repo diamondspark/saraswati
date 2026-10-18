@@ -105,6 +105,20 @@ class ManifestParserTest {
     }
 
     @Test
+    fun `rejects a dot-segment path traversal out of the release prefix`() {
+        // A literal startsWith(RELEASE_URL_PREFIX) check (this module's
+        // original approach) passes this character-for-character, but a
+        // real HTTP client resolves the ".." segments to a different
+        // repository entirely. Covered in depth in DownloadPolicyTest;
+        // asserted here too since ManifestParser has its own call site for
+        // this check.
+        val traversalApk = VALID_APK.copy(
+            url = "https://github.com/diamondspark/saraswati/releases/download/../../../../attacker/repo/releases/download/v1/evil.apk",
+        )
+        assertTrue(ManifestParser.parse(manifestJson(apk = traversalApk)).isFailure)
+    }
+
+    @Test
     fun `rejects a sha256 that is not 64 lowercase hex`() {
         val tooShort = VALID_APK.copy(sha256 = "a".repeat(63))
         val tooLong = VALID_APK.copy(sha256 = "a".repeat(65))

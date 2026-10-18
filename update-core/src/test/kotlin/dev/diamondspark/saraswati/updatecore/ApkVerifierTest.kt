@@ -103,6 +103,28 @@ class ApkVerifierTest {
     }
 
     @Test
+    fun `signer pinning is case-insensitive, matching the sha256 check`() {
+        // Harmless if wrong (fail-closed, never a wrongly-accepted signer),
+        // but should behave consistently with the sha256 comparison above,
+        // which already normalizes case.
+        val bytes = "real apk bytes".toByteArray()
+        val file = tempApkFile(bytes, tempDir)
+        val asset = assetFor(bytes)
+        val uppercaseInfo = matchingInfo().copy(signerSha256 = setOf("F".repeat(64)))
+
+        val result = ApkVerifier.verify(
+            file = file,
+            asset = asset,
+            expectedPackage = EXPECTED_PACKAGE,
+            expectedVersionCode = EXPECTED_VERSION_CODE,
+            pinnedSignerSha256 = PINNED_SIGNER, // lowercase "f" x 64
+            inspector = fakeInspector(uppercaseInfo),
+        )
+
+        assertEquals(VerifyResult.Ok, result)
+    }
+
+    @Test
     fun `empty signer set fails even with an empty pinned set`() {
         // An "anything goes" signer policy is never correct here: an empty
         // actual signer set means the archive looks unsigned/unparseable,

@@ -45,6 +45,45 @@ class DownloadPolicyTest {
     }
 
     @Test
+    fun `rejects a dot-segment path traversal to another repo`() {
+        // A literal startsWith(RELEASE_URL_PREFIX) check passes this
+        // character-for-character, but a real HTTP client (verified
+        // against this project's own OkHttp) resolves the ".." segments
+        // and actually requests "https://github.com/attacker/repo/...".
+        val traversal =
+            "https://github.com/diamondspark/saraswati/releases/download/../../../../attacker/repo/releases/download/v1/evil.apk"
+        assertFalse(DownloadPolicy.isAllowedStartUrl(traversal))
+    }
+
+    @Test
+    fun `rejects a percent-encoded dot-segment path traversal`() {
+        // "%2e%2e" decodes to "..": java.net.URI.getPath() performs that
+        // decode for us, so this must be caught exactly like the literal
+        // "../" case above, not slip through as an opaque segment the way
+        // java.net.URI.normalize() alone would leave it (normalize() never
+        // decodes before collapsing dot segments).
+        val encodedTraversal =
+            "https://github.com/diamondspark/saraswati/releases/download/%2e%2e/%2e%2e/attacker/repo/releases/download/v1/evil.apk"
+        assertFalse(DownloadPolicy.isAllowedStartUrl(encodedTraversal))
+    }
+
+    @Test
+    fun `rejects a single dot-segment that only partially escapes the release path`() {
+        // Only one ".." — nowhere near enough to reach a different repo —
+        // must still be rejected: this module never tries to resolve where
+        // a dot segment "actually" ends up, it refuses any URL containing
+        // one outright.
+        val partialEscape = RELEASE_URL_PREFIX + "../evil/v1/evil.apk"
+        assertFalse(DownloadPolicy.isAllowedStartUrl(partialEscape))
+    }
+
+    @Test
+    fun `rejects a lone dot segment in the path`() {
+        val dotSegment = RELEASE_URL_PREFIX + "./v1.0.0/evil.apk"
+        assertFalse(DownloadPolicy.isAllowedStartUrl(dotSegment))
+    }
+
+    @Test
     fun `allows a redirect to objects githubusercontent com`() {
         assertTrue(DownloadPolicy.isAllowedRedirect(RELEASE_URL, "https://objects.githubusercontent.com/some/asset/path"))
     }

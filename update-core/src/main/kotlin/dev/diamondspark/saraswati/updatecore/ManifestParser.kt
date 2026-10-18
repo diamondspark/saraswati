@@ -5,13 +5,21 @@
 
 // SARASWATI: Task 4 — strict parsing of the update manifest. "Strict" here
 // means: unknown schema versions are rejected rather than best-effort
-// read, the APK URL must be a literal match for our own release prefix
-// (never just "looks like GitHub"), the hash must be a well-formed sha256
-// and nothing else, and the declared size can never exceed what
-// DownloadPolicy is willing to fetch. A manifest that fails any of these is
-// exactly as dangerous as a manifest that was never signed in the first
-// place, because every one of these fields ends up driving a download and
-// an install on a device that also holds banking apps.
+// read, the APK URL must sit under our own release prefix with no dot
+// segment anywhere in its path (see DownloadPolicy.isAllowedStartUrl — a
+// "../" or its percent-encoded form can otherwise walk a literal
+// prefix-matched URL to a different repository once an HTTP client
+// actually resolves it), the hash must be a well-formed sha256 and nothing
+// else, and the declared size can never exceed what DownloadPolicy is
+// willing to fetch. A manifest that fails any of these is exactly as
+// dangerous as a manifest that was never signed in the first place,
+// because every one of these fields ends up driving a download and an
+// install on a device that also holds banking apps.
+//
+// The URL check delegates to DownloadPolicy.isAllowedStartUrl rather than
+// re-implementing its own prefix match, so there is exactly one place in
+// this module that decides "is this APK URL one of our own release
+// assets" — not two copies that could silently drift apart.
 package dev.diamondspark.saraswati.updatecore
 
 import kotlinx.serialization.SerializationException
@@ -68,7 +76,7 @@ object ManifestParser {
     }
 
     private fun validateApkAsset(apk: ApkAsset): String? {
-        if (!apk.url.startsWith(RELEASE_URL_PREFIX)) {
+        if (!DownloadPolicy.isAllowedStartUrl(apk.url)) {
             return "apk url outside the release prefix"
         }
         if (!SHA256_HEX.matches(apk.sha256)) {

@@ -51,8 +51,14 @@ object ApkVerifier {
         // and there must be at least one: an empty signer set means the
         // archive looks unsigned (or the inspector couldn't read the
         // signing block), which must never pass regardless of what's
-        // pinned.
-        if (info.signerSha256.isEmpty() || !pinnedSignerSha256.containsAll(info.signerSha256)) {
+        // pinned. Case-normalized the same way the sha256 comparison above
+        // is: a case mismatch here is fail-closed either way (never a
+        // wrongly-accepted signer), but a future ArchiveInspector that
+        // happens to emit uppercase hex shouldn't have legitimate updates
+        // rejected over letter case alone.
+        val actualSigners = info.signerSha256.mapTo(mutableSetOf()) { it.lowercase() }
+        val pinnedSigners = pinnedSignerSha256.mapTo(mutableSetOf()) { it.lowercase() }
+        if (actualSigners.isEmpty() || !pinnedSigners.containsAll(actualSigners)) {
             return VerifyResult.Failed("signer not pinned")
         }
 
