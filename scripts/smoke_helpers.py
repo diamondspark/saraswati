@@ -32,8 +32,14 @@ import sys
 # (one per app currently holding a MediaSession); a block runs from its
 # `package=` line up to (not including) the next `package=` line, or to the
 # end of the text.
+#
+# Real devices (confirmed on a Pixel 8 Pro, Android API 37, 2026-10-18)
+# print a human-readable label before the parenthesized int, e.g.
+# `state=PlaybackState {state=PLAYING(3), ...}`, not the bare `state=3`
+# this file originally assumed from AOSP source alone. The regex accepts
+# both an optional label so it matches either shape.
 _PACKAGE_LINE_RE = re.compile(r"^\s*package=(\S+)\s*$", re.MULTILINE)
-_STATE_RE = re.compile(r"state=PlaybackState\s*\{state=(\d+)")
+_STATE_RE = re.compile(r"state=PlaybackState\s*\{state=[A-Za-z_]*\(?(\d+)\)?")
 _STATE_PLAYING = 3
 
 

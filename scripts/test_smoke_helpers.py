@@ -102,6 +102,25 @@ class ParsePlayingStateTest(unittest.TestCase):
     def test_playing_state_package_absent_from_dump(self) -> None:
         self.assertFalse(parse_playing_state("", "dev.diamondspark.saraswati"))
 
+    def test_playing_state_real_device_labeled_state(self) -> None:
+        # Captured on a Pixel 8 Pro, Android API 37, 2026-10-18: the real
+        # dumpsys output labels the int, e.g. `state=PLAYING(3)`, not the
+        # bare `state=3` the other fixtures above assume from AOSP source.
+        real_device_sample = (
+            "Sessions Stack - have 1 sessions:\n"
+            "    androidx.media3.session.id. dev.diamondspark.saraswati.debug/androidx.media3.session.id./125 (userId=0)\n"
+            "      package=dev.diamondspark.saraswati.debug\n"
+            "      active=true\n"
+            "      state=PlaybackState {state=PLAYING(3), position=35543, "
+            "buffered position=72841, speed=1.0, updated=123071859, "
+            "actions=7340027, custom actions=[], active item id=0, error=null}\n"
+        )
+        self.assertTrue(
+            parse_playing_state(
+                real_device_sample, "dev.diamondspark.saraswati.debug"
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
