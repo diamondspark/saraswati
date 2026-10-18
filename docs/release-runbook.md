@@ -170,6 +170,177 @@ either remove `05ec7c67` from `main` directly
 (`git push origin e8480243:main --force`) or decide the empty, clearly-
 labeled commit is harmless to leave.**
 
+## Signing ceremony, release, and promotion (Task 6)
+
+### Status: key ceremony not yet run — HUMAN ACTION NEEDED
+
+`security/release-cert.sha256` does not exist in this repository yet.
+Until it does, `saraswati-release.yml`'s `sign` job cannot succeed (its
+"Verify the signer against the pinned release certificate" step
+deliberately refuses to sign against an empty or missing pinned digest
+rather than skip the check), and `:updater`'s release build type embeds
+an empty `PINNED_CERT_SHA256`, which trusts nothing — both fail closed,
+not open, in the absence of a real key.
+
+**The owner needs to run the ceremony themselves, in their own
+terminal, on a machine they trust — never an agent, never a shared or
+ephemeral machine:**
+
+```bash
+cd <repo root>
+bash scripts/key-ceremony.sh
+```
+
+It creates `~/saraswati-keys` (mode 700); generates two random
+passwords (store password, key password) into files that are never
+printed, logged, or placed on a command line; generates the RSA-4096
+release key with `keytool -genkeypair` (alias `saraswati`, 10000-day
+validity, `CN=Saraswati Family`); writes the certificate's SHA-256
+digest to `security/release-cert.sha256` (public information — the
+digest cannot be used to derive the private key); uploads the four
+secrets to the `release` GitHub environment with `gh secret set
+<NAME> --env release` — `RELEASE_KEYSTORE_B64`,
+`RELEASE_KEYSTORE_PASSWORD`, `RELEASE_KEY_ALIAS`,
+`RELEASE_KEY_PASSWORD`, each piped from a file or `base64 -w0`, never
+echoed; and makes one encrypted backup with `gpg --symmetric
+--cipher-algo AES256` (gpg prompts for a passphrase interactively — it
+is never scripted or stored by this tool).
+
+No agent runs this script and no agent reads the password files it
+creates. This is the one step in the whole release pipeline that stays
+entirely in the owner's hands.
+
+**After running it:**
+
+1. Copy the printed `release-key-backup.tar.gz.gpg` to **two separate
+   offline media** (two different USB drives, not both in the same
+   bag) and confirm both copies' `sha256sum` match the fingerprint the
+   script printed.
+2. Save the gpg passphrase in your password manager — not alongside
+   either backup copy.
+3. Verify: `gh secret list --env release` lists exactly
+   `RELEASE_KEYSTORE_B64`, `RELEASE_KEYSTORE_PASSWORD`,
+   `RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD`; `cat
+   security/release-cert.sha256` is 64 lowercase hex characters;
+   `git status` shows no keystore or password file (only
+   `security/release-cert.sha256` as a new tracked file).
+4. Only once both backups are confirmed, securely delete the working
+   directory: `shred -u ~/saraswati-keys/*; rmdir ~/saraswati-keys`.
+5. Commit `security/release-cert.sha256`.
+
+### How to release
+
+1. In GitHub: **Actions → saraswati-release → Run workflow**, on
+   `main`. Choose `channel` (`beta` or `stable` — almost always
+   `beta`; `stable` is reached through promotion below, not a direct
+   release), `urgent` (only for a fix that must skip promotion's
+   48-hour wait), and `notes` (shown to users, ≤1000 chars — the
+   `publish` job's manifest build fails if this is exceeded).
+2. `verify` re-runs the full `ci` gate against the dispatched ref;
+   `build` assembles both unsigned APKs. Both run unattended.
+3. `sign` stops and waits: **approve the `release` environment in the
+   GitHub mobile app** (a push notification, or Actions → the run →
+   Review deployments). This is the only point the signing key is ever
+   touched — it is base64-decoded from secrets into the runner's
+   `$RUNNER_TEMP` for the lifetime of this one job and deleted (via
+   `shred -u`, falling back to `rm -f`) before the job ends either way.
+4. `sign` zipaligns and signs both APKs with `apksigner`, then compares
+   the signer's SHA-256 against the committed
+   `security/release-cert.sha256` — **the job fails outright on any
+   difference**, so a release can never ship signed with the wrong
+   key — and runs `apk_gate.py check` on the signed Saraswati APK.
+5. `publish` creates a GitHub Release `v<versionCode>` with both signed
+   APKs and their `.sha256` checksum files, builds the channel
+   manifest with `scripts/make_manifest.py`, and pushes
+   `<channel>.json` to the `gh-pages` branch.
+6. Verify: `curl -sI https://diamondspark.github.io/saraswati/<channel>.json`
+   returns 200 with a JSON content type (once Pages is enabled — Task
+   8); both released APKs pass `apksigner verify --print-certs`
+   against `security/release-cert.sha256` and, for the Saraswati APK,
+   `python3 -I security/apk_gate.py check`.
+
+### How to promote (beta → stable)
+
+1. **Actions → saraswati-promote → Run workflow**, with
+   `version_code` set to the beta release's `versionCode` (from its
+   GitHub Release tag or `beta.json`).
+2. **Approve the `release` environment**, the same gate as a release —
+   promotion reaches the same protected environment even though it
+   signs nothing.
+3. The job refuses unless `beta.json`'s `publishedAt` is at least 48
+   hours old, *unless* `beta.json.urgent` is `true` (Review Focus item
+   6 of the phase 2 plan: a phone must never be silently pushed an
+   untested beta onto stable without either time for problems to
+   surface or an explicit urgency call). It also refuses if the given
+   `version_code` doesn't match `beta.json`'s actual `versionCode` — a
+   guard against promoting a different build than the one that was
+   reviewed, in case a newer beta shipped in between.
+4. On success, `stable.json` on `gh-pages` becomes `beta.json` with
+   `"channel"` rewritten to `"stable"`.
+
+### If the signing key is lost
+
+Every installed Saraswati and Saraswati Updates pins
+(`:updater`'s `BuildConfig.PINNED_CERT_SHA256`, sourced from
+`security/release-cert.sha256`) the *current* release certificate's
+SHA-256. If the private key and **both** encrypted backups are gone,
+nothing can sign an update Android will accept as an upgrade of the
+existing install — Android refuses to install an APK signed by a
+different key over an existing package of the same name
+(`INSTALL_FAILED_UPDATE_INCOMPATIBLE`).
+
+Recovery needs a new key ceremony (`scripts/key-ceremony.sh` again,
+after moving or deleting the old `security/release-cert.sha256` — the
+script refuses to run over an existing non-empty one) and, on **every**
+family phone:
+
+1. Uninstall Saraswati. This loses local-only app state (the sign-in
+   cookie in particular; music library data synced from YouTube Music
+   is unaffected) — the user signs in again after reinstalling.
+2. Uninstall Saraswati Updates.
+3. Reinstall Saraswati Updates (via `adb install`, or however a fresh
+   phone is normally set up — Phase 3 owns that flow), then use it to
+   install the new Saraswati build signed by the new key.
+
+This is exactly why there are two offline backups on separate media:
+the uninstall/reinstall path above is the fallback for losing *all* of
+them at once, not the expected outcome of an ordinary key ceremony.
+
+### Key rotation (a planned key change, not a loss)
+
+APK Signature Scheme v3 supports **key rotation**: a new signing key
+can take over while phones that still only trust the old key keep
+working, by having the new certificate carry a signed lineage back to
+the old one. For Saraswati:
+
+1. **Add the new key's certificate digest to `:updater` first.**
+   `:updater`'s `PINNED_CERT_SHA256` (comma-separated — see its debug
+   build type in `updater/build.gradle.kts` for the existing pattern of
+   accepting more than one digest at once) must already include the
+   digest the *next* release will be signed with, and that build of
+   `:updater` must have reached every phone, **before** any release
+   actually switches to signing with the new key. A phone running an
+   `:updater` build that doesn't yet recognize the new digest would
+   refuse the very release meant to deliver it.
+2. Run a fresh key ceremony for the new key material (a new
+   `~/saraswati-keys`, a new RSA-4096 pair) — but this is a lineage,
+   not a fresh issue, so `security/release-cert.sha256` is not simply
+   overwritten the normal first-ceremony way.
+3. Build the rotation lineage with `apksigner rotate` (consult
+   `apksigner rotate --help` for the exact flags on the apksigner
+   version in use at the time): the old keystore and the new keystore
+   both sign the lineage, producing a `lineage.bin` that `apksigner
+   sign --lineage lineage.bin --rotation-min-sdk-version <n>` then
+   needs alongside the new key for every subsequent release.
+4. Release as normal only after confirming the `:updater` build
+   carrying the new digest has actually propagated to every phone —
+   ship the digest update first, confirm it, then switch signing keys;
+   doing it in the other order is exactly the scenario `:updater`'s
+   pinning exists to prevent.
+5. Once the rotation is confirmed working on real phones, retire the
+   old key's secrets from the `release` environment and its own
+   encrypted backup.
+
 ## Upstream sync bot (Task 9): sync PRs need a real merge commit — HUMAN ACTION NEEDED
 
 **Merge every `sync/upstream-<date>` PR with "Create a merge commit." Never

@@ -1,0 +1,392 @@
+name: saraswati-release
+
+# Signed release pipeline (Task 6). A human dispatches this by hand, picking
+# the channel and whether the release is urgent; everything up to signing
+# runs unattended, then the `sign` job stops and waits for the owner's
+# one-tap approval of the `release` GitHub environment (set up in Task 1,
+# restricted to the `main` branch) before the signing key is ever touched.
+#
+# Pipeline: verify (re-run the full `ci` gate) -> build (unsigned APKs) ->
+# sign (environment: release; apksigner, verified against
+# security/release-cert.sha256, then apk_gate.py) -> publish (GitHub
+# Release with both signed APKs, then the channel manifest pushed to
+# gh-pages). No job before `sign` ever sees a secret.
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Release channel"
+        type: choice
+        options:
+          - beta
+          - stable
+        default: beta
+      urgent:
+        description: "Mark this release urgent (lets saraswati-promote.yml skip the 48h wait)"
+        type: boolean
+        default: false
+      notes:
+        description: "Release notes shown to users (max 1000 chars)"
+        type: string
+        default: ""
+
+concurrency:
+  group: saraswati-release-${{ github.workflow }}
+  # A release that is cancelled mid-flight could leave a half-signed key on
+  # disk or a GitHub Release missing one of its two APKs — never cancel,
+  # same reasoning as saraswati-upstream-sync.yml's mid-push protection.
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Re-runs the exact same build/test/gate pipeline a push to main would —
+  # a release is never built from a commit that hasn't passed it.
+  verify:
+    name: verify
+    uses: ./.github/workflows/saraswati-ci.yml
+
+  build:
+    name: build
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    outputs:
+      version_code: ${{ steps.app_version.outputs.version_code }}
+      app_version_name: ${{ steps.app_version.outputs.version_name }}
+      updater_version_code: ${{ steps.updater_version.outputs.version_code }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      # Both app and updater build types have no signingConfig assigned
+      # (see app/build.gradle.kts, updater/build.gradle.kts — confirmed in
+      # docs/device-checks.md), so assemble*Release always produces an
+      # unsigned APK. Real signing happens in the `sign` job via apksigner,
+      # not through Gradle.
+      - name: Build unsigned release APKs
+        run: ./gradlew --dependency-verification strict :app:assembleGmsRelease :updater:assembleRelease
+
+      # Same PATH gap as saraswati-ci.yml's "APK manifest gate" step: the
+      # runner's Android SDK has apkanalyzer under cmdline-tools, which
+      # isn't on PATH by default here.
+      - name: Add Android cmdline-tools to PATH
+        run: |
+          if [ -d "$ANDROID_HOME/cmdline-tools/latest/bin" ]; then
+            echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          else
+            apkanalyzer_path="$(find "$ANDROID_HOME" -maxdepth 6 -type f -name apkanalyzer 2>/dev/null | head -1)"
+            if [ -z "$apkanalyzer_path" ]; then
+              echo "apkanalyzer not found under ANDROID_HOME=$ANDROID_HOME" >&2
+              exit 1
+            fi
+            dirname "$apkanalyzer_path" >> "$GITHUB_PATH"
+          fi
+
+      # Read the version actually embedded in the built APK (both app and
+      # updater derive versionCode from scripts/version.py's git commit
+      # count — see app/build.gradle.kts and updater/build.gradle.kts —
+      # so this is authoritative rather than recomputed separately here).
+      - name: Read the app's version
+        id: app_version
+        run: |
+          set -euo pipefail
+          apk="app/build/outputs/apk/gms/release/app-gms-release-unsigned.apk"
+          echo "version_code=$(apkanalyzer manifest version-code "$apk")" >> "$GITHUB_OUTPUT"
+          echo "version_name=$(apkanalyzer manifest version-name "$apk")" >> "$GITHUB_OUTPUT"
+
+      - name: Read the updater's version
+        id: updater_version
+        run: |
+          set -euo pipefail
+          apk="updater/build/outputs/apk/release/updater-release-unsigned.apk"
+          echo "version_code=$(apkanalyzer manifest version-code "$apk")" >> "$GITHUB_OUTPUT"
+
+      - name: Stage unsigned APKs for upload
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/unsigned"
+          cp app/build/outputs/apk/gms/release/app-gms-release-unsigned.apk "$RUNNER_TEMP/unsigned/app-unsigned.apk"
+          cp updater/build/outputs/apk/release/updater-release-unsigned.apk "$RUNNER_TEMP/unsigned/updater-unsigned.apk"
+
+      - name: Upload unsigned APKs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unsigned-apks
+          path: ${{ runner.temp }}/unsigned
+          retention-days: 7
+
+  sign:
+    name: sign
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The one human gate in this whole pipeline: nothing below this line
+    # runs until the owner approves it in the GitHub app (the `release`
+    # environment, set up in Task 1 with the owner as required reviewer
+    # and restricted to the `main` branch).
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 21
+        # apksigner is a Java tool; it needs `java` on PATH.
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Download unsigned APKs
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: unsigned-apks
+          path: unsigned
+
+      - name: Add Android build-tools to PATH
+        run: |
+          set -euo pipefail
+          build_tools_dir="$(find "$ANDROID_HOME/build-tools" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort -V | tail -1)"
+          if [ -z "$build_tools_dir" ] || [ ! -x "$build_tools_dir/apksigner" ] || [ ! -x "$build_tools_dir/zipalign" ]; then
+            echo "apksigner/zipalign not found under $ANDROID_HOME/build-tools" >&2
+            exit 1
+          fi
+          echo "$build_tools_dir" >> "$GITHUB_PATH"
+
+      # The keystore only ever exists on this runner's ephemeral disk, for
+      # the lifetime of this one job, and is deleted (see the last step)
+      # before the job ends either way.
+      - name: Write the release keystore
+        env:
+          RELEASE_KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$RELEASE_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+
+      - name: Sign the Saraswati APK
+        env:
+          KS_PASS: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          KEY_PASS: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          zipalign -p 4 unsigned/app-unsigned.apk "$RUNNER_TEMP/app-aligned.apk"
+          apksigner sign \
+            --ks "$RUNNER_TEMP/release.keystore" \
+            --ks-pass env:KS_PASS \
+            --ks-key-alias "$KEY_ALIAS" \
+            --key-pass env:KEY_PASS \
+            --out "$RUNNER_TEMP/app-signed.apk" \
+            "$RUNNER_TEMP/app-aligned.apk"
+
+      - name: Sign the Saraswati Updates APK
+        env:
+          KS_PASS: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          KEY_PASS: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          zipalign -p 4 unsigned/updater-unsigned.apk "$RUNNER_TEMP/updater-aligned.apk"
+          apksigner sign \
+            --ks "$RUNNER_TEMP/release.keystore" \
+            --ks-pass env:KS_PASS \
+            --ks-key-alias "$KEY_ALIAS" \
+            --key-pass env:KEY_PASS \
+            --out "$RUNNER_TEMP/updater-signed.apk" \
+            "$RUNNER_TEMP/updater-aligned.apk"
+
+      # The manifest is never trusted for identity (Global Constraints) —
+      # this is the one place that is: the actual signer of both freshly
+      # signed APKs, compared byte-for-byte against the publicly committed
+      # digest. Any difference (wrong key, corrupted secret, a future bug
+      # upstream of this step) fails the job before anything is published.
+      - name: Verify the signer against the pinned release certificate
+        run: |
+          set -euo pipefail
+          expected="$(tr -d '[:space:]' < security/release-cert.sha256 | tr '[:upper:]' '[:lower:]')"
+          if [ -z "$expected" ]; then
+            echo "security/release-cert.sha256 is empty or missing — run scripts/key-ceremony.sh first" >&2
+            exit 1
+          fi
+          for apk in "$RUNNER_TEMP/app-signed.apk" "$RUNNER_TEMP/updater-signed.apk"; do
+            # apksigner labels the line with the signature scheme it is
+            # reporting under (observed: "V3.0 Signer: certificate SHA-256
+            # digest: <hex>" for an APK verified under v2+v3 — both report
+            # the same signer, so matching loosely on the trailing
+            # "Signer: certificate SHA-256 digest:" and taking the first
+            # hit is robust to which scheme label apksigner picks).
+            actual="$(apksigner verify --print-certs "$apk" \
+              | sed -n 's/^.*Signer: certificate SHA-256 digest: *//p' \
+              | head -1 \
+              | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+            if [ -z "$actual" ]; then
+              echo "could not read a signer SHA-256 digest from $apk" >&2
+              exit 1
+            fi
+            if [ "$actual" != "$expected" ]; then
+              echo "signer mismatch on $apk: expected $expected, got $actual" >&2
+              exit 1
+            fi
+            echo "$apk: signer verified ($actual)"
+          done
+
+      - name: APK manifest gate (signed Saraswati APK)
+        run: |
+          python3 -I security/apk_gate.py check \
+            --apk "$RUNNER_TEMP/app-signed.apk" \
+            --allowlist security/manifest-allowlist.json
+
+      - name: Delete the keystore
+        if: always()
+        run: |
+          if command -v shred >/dev/null 2>&1; then
+            shred -u "$RUNNER_TEMP/release.keystore" 2>/dev/null || rm -f "$RUNNER_TEMP/release.keystore"
+          else
+            rm -f "$RUNNER_TEMP/release.keystore"
+          fi
+
+      - name: Upload signed APKs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signed-apks
+          path: |
+            ${{ runner.temp }}/app-signed.apk
+            ${{ runner.temp }}/updater-signed.apk
+          retention-days: 7
+
+  publish:
+    name: publish
+    needs: [build, sign]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Download signed APKs
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: signed-apks
+          path: signed
+
+      - name: Name and checksum the release assets
+        id: assets
+        env:
+          VERSION_CODE: ${{ needs.build.outputs.version_code }}
+        run: |
+          set -euo pipefail
+          app_apk="saraswati-v${VERSION_CODE}.apk"
+          updater_apk="saraswati-updater-v${VERSION_CODE}.apk"
+          cp signed/app-signed.apk "$RUNNER_TEMP/$app_apk"
+          cp signed/updater-signed.apk "$RUNNER_TEMP/$updater_apk"
+          ( cd "$RUNNER_TEMP" && sha256sum "$app_apk" > "$app_apk.sha256" )
+          ( cd "$RUNNER_TEMP" && sha256sum "$updater_apk" > "$updater_apk.sha256" )
+          {
+            echo "app_apk=$app_apk"
+            echo "updater_apk=$updater_apk"
+            echo "app_sha256=$(cut -d' ' -f1 "$RUNNER_TEMP/$app_apk.sha256")"
+            echo "updater_sha256=$(cut -d' ' -f1 "$RUNNER_TEMP/$updater_apk.sha256")"
+            echo "app_size=$(stat -c%s "$RUNNER_TEMP/$app_apk")"
+            echo "updater_size=$(stat -c%s "$RUNNER_TEMP/$updater_apk")"
+            echo "published_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION_CODE: ${{ needs.build.outputs.version_code }}
+          RELEASE_NOTES: ${{ inputs.notes }}
+          APP_APK: ${{ steps.assets.outputs.app_apk }}
+          UPDATER_APK: ${{ steps.assets.outputs.updater_apk }}
+        run: |
+          set -euo pipefail
+          gh release create "v${VERSION_CODE}" \
+            "$RUNNER_TEMP/$APP_APK" \
+            "$RUNNER_TEMP/$APP_APK.sha256" \
+            "$RUNNER_TEMP/$UPDATER_APK" \
+            "$RUNNER_TEMP/$UPDATER_APK.sha256" \
+            --title "Saraswati v${VERSION_CODE}" \
+            --notes "$RELEASE_NOTES"
+
+      - name: Build the channel manifest
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          URGENT: ${{ inputs.urgent }}
+          RELEASE_NOTES: ${{ inputs.notes }}
+          VERSION_CODE: ${{ needs.build.outputs.version_code }}
+          VERSION_NAME: ${{ needs.build.outputs.app_version_name }}
+          UPDATER_VERSION_CODE: ${{ needs.build.outputs.updater_version_code }}
+          APP_APK: ${{ steps.assets.outputs.app_apk }}
+          UPDATER_APK: ${{ steps.assets.outputs.updater_apk }}
+          APP_SHA256: ${{ steps.assets.outputs.app_sha256 }}
+          UPDATER_SHA256: ${{ steps.assets.outputs.updater_sha256 }}
+          APP_SIZE: ${{ steps.assets.outputs.app_size }}
+          UPDATER_SIZE: ${{ steps.assets.outputs.updater_size }}
+          PUBLISHED_AT: ${{ steps.assets.outputs.published_at }}
+        run: |
+          set -euo pipefail
+          args=(
+            --channel "$CHANNEL"
+            --version-code "$VERSION_CODE"
+            --version-name "$VERSION_NAME"
+            --apk-url "https://github.com/${{ github.repository }}/releases/download/v${VERSION_CODE}/${APP_APK}"
+            --apk-sha256 "$APP_SHA256"
+            --apk-size "$APP_SIZE"
+            --notes "$RELEASE_NOTES"
+            --published-at "$PUBLISHED_AT"
+            --updater-version-code "$UPDATER_VERSION_CODE"
+            --updater-apk-url "https://github.com/${{ github.repository }}/releases/download/v${VERSION_CODE}/${UPDATER_APK}"
+            --updater-apk-sha256 "$UPDATER_SHA256"
+            --updater-apk-size "$UPDATER_SIZE"
+            --out "$RUNNER_TEMP/${CHANNEL}.json"
+          )
+          if [ "$URGENT" = "true" ]; then
+            args+=(--urgent)
+          fi
+          python3 -I scripts/make_manifest.py "${args[@]}"
+
+      - name: Publish the manifest to gh-pages
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          VERSION_CODE: ${{ needs.build.outputs.version_code }}
+        run: |
+          set -euo pipefail
+          git fetch origin gh-pages 2>/dev/null || true
+          if git show-ref --verify --quiet refs/remotes/origin/gh-pages; then
+            git checkout -B gh-pages-publish origin/gh-pages
+          else
+            git checkout --orphan gh-pages-publish
+            git rm -rf . >/dev/null 2>&1 || true
+          fi
+          cp "$RUNNER_TEMP/${CHANNEL}.json" "./${CHANNEL}.json"
+          git add "${CHANNEL}.json"
+          git \
+            -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -m "release: publish ${CHANNEL}.json for v${VERSION_CODE}"
+          git push origin gh-pages-publish:gh-pages
