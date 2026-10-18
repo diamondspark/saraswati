@@ -65,6 +65,21 @@ innertubex = "v0.8.4"
 tinypinyin = "2.0.1"
 protobuf = "4.36.2"
 
+# SARASWATI: Task 11 (:baselineprofile) — Macrobenchmark + Baseline Profile
+# module. 1.5.0 is the latest STABLE release of the whole
+# androidx.benchmark/androidx.baselineprofile release train as of this task
+# (confirmed against Google's Maven: 1.6.0-alpha01 exists but is alpha-only,
+# so 1.5.0 is what "latest stable" resolves to). benchmarkMacro (the
+# benchmark-macro-junit4 library) and baselineProfile (the
+# androidx.baselineprofile Gradle plugin, backed by
+# benchmark-baseline-profile-gradle-plugin) are the same release train and
+# happen to share this version, kept as two names for clarity about which
+# artifact each pins.
+benchmarkMacro = "1.5.0"
+baselineProfile = "1.5.0"
+uiautomator = "2.4.0"
+profileinstaller = "1.4.1"
+
 [libraries]
 guava = { module = "com.google.guava:guava", version.ref = "guava" }
 coroutines-guava = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-guava", version.ref = "coroutinesGuava" }
@@ -146,9 +161,21 @@ tinypinyin = { module = "com.github.promeG:tinypinyin", version.ref = "tinypinyi
 protobuf-javalite = { module = "com.google.protobuf:protobuf-javalite", version.ref = "protobuf" }
 protobuf-kotlin-lite = { module = "com.google.protobuf:protobuf-kotlin-lite", version.ref = "protobuf" }
 
+# SARASWATI: Task 11 (:baselineprofile) — the macrobenchmark module's own
+# instrumented-test dependencies, plus profileinstaller for :app (reads and
+# locally compiles the committed app/src/main/baseline-prof.txt on first
+# launch; needed because Saraswati is sideloaded, not Play-distributed, so
+# there's no Play Store cloud profile delivery path).
+androidx-benchmark-macro-junit4 = { module = "androidx.benchmark:benchmark-macro-junit4", version.ref = "benchmarkMacro" }
+androidx-test-uiautomator = { module = "androidx.test.uiautomator:uiautomator", version.ref = "uiautomator" }
+androidx-profileinstaller = { module = "androidx.profileinstaller:profileinstaller", version.ref = "profileinstaller" }
+
 [plugins]
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 kotlin-ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 protobuf = { id = "com.google.protobuf", version = "0.10.0" }
+# SARASWATI: Task 11 — androidx.baselineprofile Gradle plugin, applied to
+# both :app (consumer) and :baselineprofile (producer/test module).
+baseline-profile = { id = "androidx.baselineprofile", version.ref = "baselineProfile" }
