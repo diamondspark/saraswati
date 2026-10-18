@@ -25,13 +25,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
@@ -101,6 +98,21 @@ private data class CommunityLink(
     val url: String
 )
 
+// SARASWATI: the fork notice, repo link and upstream credits shown where
+// Metrolist's own donate/social buttons used to be (see ForkCreditSection).
+private const val SARASWATI_REPO_URL = "https://github.com/diamondspark/saraswati"
+
+private data class ForkCredit(
+    val name: String,
+    val url: String,
+)
+
+private val forkCredits = listOf(
+    ForkCredit("Metrolist", "https://github.com/MetrolistGroup/Metrolist"),
+    ForkCredit("InnerTune", "https://github.com/z-huang/InnerTune"),
+    ForkCredit("OuterTune", "https://github.com/OuterTune/OuterTune"),
+)
+
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 private val leadDeveloper = Contributor(
     name = "Mo Agamy",
@@ -116,11 +128,12 @@ private val collaborators = listOf(
     Contributor(name = "Nyx", roleRes = R.string.credits_collaborator, githubHandle = "nyxiereal", sponsorUrl = "https://github.com/sponsors/nyxiereal", polygon = MaterialShapes.Cookie12Sided, favoriteSongVideoId = "zselaN6zPXw"),
 )
 
+// SARASWATI: Metrolist's own Discord and Telegram community links removed
+// (this is a private family app, not a public community); the repo and
+// license links now point at this fork instead of upstream.
 private val communityLinks = listOf(
-    CommunityLink(R.string.credits_discord, R.drawable.discord, "https://discord.com/invite/zrdbeRG2Mt"),
-    CommunityLink(R.string.credits_telegram, R.drawable.telegram, "https://t.me/metrolistapp"),
-    CommunityLink(R.string.credits_view_repo, R.drawable.github, "https://github.com/MetrolistGroup/Metrolist"),
-    CommunityLink(R.string.credits_license_name, R.drawable.info, "https://github.com/MetrolistGroup/Metrolist/blob/main/LICENSE")
+    CommunityLink(R.string.credits_view_repo, R.drawable.github, SARASWATI_REPO_URL),
+    CommunityLink(R.string.credits_license_name, R.drawable.info, "$SARASWATI_REPO_URL/blob/main/LICENSE")
 )
 
 private fun handleEasterEggClick(
@@ -182,31 +195,56 @@ private fun ContributorAvatar(
     }
 }
 
+// SARASWATI: replaces Metrolist's own donate/social-link row (website,
+// GitHub, Instagram of the upstream maintainer, and a "buy me a coffee"
+// button) with the fork notice, repo link and the three upstream credits.
 @Composable
-private fun DeveloperSocials(
+private fun ForkCreditSection(
     uriHandler: androidx.compose.ui.platform.UriHandler
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        FilledTonalButton(
-            onClick = { uriHandler.openUri("https://metrolist.cc") },
-            modifier = Modifier.weight(1f).height(48.dp)
+    Column {
+        Text(
+            text = "Saraswati is a fork of Metrolist (GPL-3.0).",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        Surface(
+            onClick = { uriHandler.openUri(SARASWATI_REPO_URL) },
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Icon(painterResource(R.drawable.language), contentDescription = null)
+            Text(
+                text = SARASWATI_REPO_URL,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            )
         }
-        FilledTonalButton(
-            onClick = { uriHandler.openUri("https://github.com/mostafaalagamy") },
-            modifier = Modifier.weight(1f).height(48.dp)
+
+        Spacer(Modifier.height(16.dp))
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Icon(painterResource(R.drawable.github), contentDescription = null)
-        }
-        FilledTonalButton(
-            onClick = { uriHandler.openUri("https://www.instagram.com/mostafaalagamy") },
-            modifier = Modifier.weight(1f).height(48.dp)
-        ) {
-            Icon(painterResource(R.drawable.instagram), contentDescription = null)
+            forkCredits.forEach { credit ->
+                Surface(
+                    onClick = { uriHandler.openUri(credit.url) },
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                ) {
+                    Text(
+                        text = credit.name,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
+                }
+            }
         }
     }
 }
@@ -384,24 +422,8 @@ fun AboutScreen(
                 }
                 
                 Spacer(Modifier.height(24.dp))
-                
-                DeveloperSocials(uriHandler)
-                
-                Spacer(Modifier.height(16.dp))
-                
-                Button(
-                    onClick = { uriHandler.openUri("https://buymeacoffee.com/mostafaalagamy") },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = CircleShape,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    )
-                ) {
-                    Icon(painterResource(R.drawable.buymeacoffee), contentDescription = null, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Text(stringResource(R.string.buy_mo_a_coffee), fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
-                }
+
+                ForkCreditSection(uriHandler)
             }
         }
 

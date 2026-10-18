@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_static_background">#000000</color>
+    <!-- SARASWATI: placeholder marigold launcher background, was #000000;
+         the real mark comes with the Phase 3 design pass. -->
+    <color name="ic_launcher_static_background">#F5B301</color>
 
     <!-- Widget colors for light mode -->
     <color name="widget_text_primary">#1C1B1F</color>

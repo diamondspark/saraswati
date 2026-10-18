@@ -1,8 +1,6 @@
 <!-- Moved to drawable-v31. Keep a fallback gradient using app colors for <31 if referenced by name. -->
+<!-- SARASWATI: placeholder flat marigold, was a teal gradient (Metrolist's
+     fallback brand colors); matches drawable-v31/ic_launcher_background_v31.xml. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <gradient
-        android:angle="45.0"
-        android:endColor="@color/teal_200"
-        android:startColor="@color/teal_700"
-        android:type="linear" />
+    <solid android:color="#FFF5B301" />
 </shape>

@@ -7,7 +7,7 @@ if (localPropertiesFile.exists()) {
     localProperties.load(localPropertiesFile.inputStream())
 }
 
-val baseApplicationId = "com.metrolist.music"
+val baseApplicationId = "dev.diamondspark.saraswati" // SARASWATI: fork identity, was "com.metrolist.music"
 val applicationIdOverride = System.getenv("METROLIST_APPLICATION_ID")?.takeIf { it.isNotBlank() }
 val appNameOverride = System.getenv("METROLIST_APP_NAME")?.takeIf { it.isNotBlank() }
 val buildCommit =
@@ -45,7 +45,7 @@ android {
         val baseVersionName = requireNotNull(versionName)
         buildConfigField("String", "BASE_VERSION_NAME", "\"$baseVersionName\"")
         buildCommit?.let { versionName = "$baseVersionName+$it" }
-        resValue("string", "app_name", appNameOverride ?: "Metrolist")
+        resValue("string", "app_name", appNameOverride ?: "Saraswati") // SARASWATI: fork identity, was "Metrolist"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -133,7 +133,7 @@ android {
             }
             isDebuggable = true
             if (appNameOverride == null) {
-                resValue("string", "app_name", "Metrolist Debug")
+                resValue("string", "app_name", "Saraswati Debug") // SARASWATI: fork identity, was "Metrolist Debug"
             }
             signingConfig =
                 if (workflowDebugKeystoreFile != null) {
@@ -319,4 +319,44 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.ktor.client.mock)
+}
+
+// SARASWATI: everything below overrides the upstream android {} block above
+// by reassignment rather than editing its lines in place (see
+// docs/superpowers/plans/2026-10-17-saraswati-phase1-fork-harden.md, Task 3):
+//  - versionCode comes from the real git commit count (scripts/version.py)
+//    instead of upstream's hand-bumped counter, so it only ever increases
+//    and a shallow clone (tiny commit count) fails the build instead of
+//    silently producing a versionCode Android would reject as a downgrade.
+//  - the shipped ABI is arm64-v8a only: every family phone is 2022+.
+//  - BuildConfig.ARCHITECTURE reflects that for the About screen / crash
+//    reports, which already read it.
+//  - the gms flavor reports no in-app updater (Task 2's updater pipeline
+//    replaces it in Phase 2); Cast support (CAST_AVAILABLE) is untouched.
+//  - the Last.fm keys are zeroed: the integration is removed, and a build
+//    must never embed a real key.
+val saraswatiVersionCode = providers.exec {
+    commandLine("python3", "-I", rootProject.file("scripts/version.py").absolutePath)
+}.standardOutput.asText.get().trim().toInt()
+
+android {
+    defaultConfig {
+        versionCode = saraswatiVersionCode
+        versionName = "${versionName}-s$versionCode"
+
+        ndk {
+            abiFilters.clear()
+            abiFilters += "arm64-v8a"
+        }
+
+        buildConfigField("String", "ARCHITECTURE", "\"arm64\"")
+        buildConfigField("String", "LASTFM_API_KEY", "\"\"")
+        buildConfigField("String", "LASTFM_SECRET", "\"\"")
+    }
+
+    productFlavors {
+        getByName("gms") {
+            buildConfigField("Boolean", "UPDATER_AVAILABLE", "false")
+        }
+    }
 }
