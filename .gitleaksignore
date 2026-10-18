@@ -1,0 +1,60 @@
+# gitleaks ignore list (fingerprint format: commit:file:rule-id:start-line).
+#
+# These are 32 fingerprints covering 16 hardcoded Google API keys already
+# in this history before the gitleaks CI gate existed, all from upstream
+# Metrolist: the public InnerTube client keys (WEB/ANDROID/IOS/etc, used
+# by every third-party YouTube client — yt-dlp, NewPipe, Metrolist itself —
+# baked into its source, extracted from Google's own official apps) in
+# innertube/.../YouTubeClient.kt and InnerTube.kt, and PoTokenWebView.kt's
+# GOOGLE_API_KEY/REQUEST_KEY pair (the equivalent public BotGuard PO-token
+# endpoint constants used identically by the community PO-token-generator
+# projects). None are account- or billing-linked secrets under this
+# project's control, and none are ours to rotate. See
+# docs/release-runbook.md's "CI pipeline (Task 3)" section for the full
+# provenance writeup and why a --baseline-path approach (gitleaks'
+# baseline-path file is excluded from scanning in its entirety, so it
+# could have hidden a real secret appended to it) was replaced with this
+# fingerprint-based ignore list instead (gitleaks still scans this file's
+# own content and every other file; only an exact, already-detected
+# finding's fingerprint is suppressed, verified empirically).
+026a1a4a919ffbe4833aa10259b874d64570bddd:innertube/src/main/java/com/metrolist/innertube/models/YouTubeClient.kt:gcp-api-key:57
+0750a63d74d69082b81ae8868b06edab51fb3875:app/src/main/kotlin/com/metrolist/music/utils/potoken/PoTokenWebView.kt:gcp-api-key:325
+0750a63d74d69082b81ae8868b06edab51fb3875:app/src/main/kotlin/com/metrolist/music/utils/potoken/PoTokenWebView.kt:generic-api-key:326
+1804fb07986e32b797be8fdb14930b7b6ad1e616:innertube/src/main/java/com/metrolist/innertube/InnerTube.kt:generic-api-key:253
+1804fb07986e32b797be8fdb14930b7b6ad1e616:innertube/src/main/java/com/metrolist/innertube/models/YouTubeClient.kt:gcp-api-key:37
+1804fb07986e32b797be8fdb14930b7b6ad1e616:innertube/src/main/java/com/metrolist/innertube/models/YouTubeClient.kt:gcp-api-key:45
+1804fb07986e32b797be8fdb14930b7b6ad1e616:innertube/src/main/java/com/metrolist/innertube/models/YouTubeClient.kt:gcp-api-key:61
+1804fb07986e32b797be8fdb14930b7b6ad1e616:innertube/src/main/java/com/metrolist/innertube/models/YouTubeClient.kt:gcp-api-key:70
+1804fb07986e32b797be8fdb14930b7b6ad1e616:innertube/src/main/java/com/metrolist/innertube/models/YouTubeClient.kt:generic-api-key:53
+82cb09d7d89d8e4247f2311c5c8b51e431c7112e:innertube/src/main/java/com/metrolist/innertube/models/YouTubeClient.kt:gcp-api-key:55
+85b414eae94f0cc952b973995677097cc7da7179:innertube/src/main/kotlin/com/metrolist/innertube/InnerTube.kt:generic-api-key:369
+98116669042d8e41d6cfbe764de3c6948d362bea:app/src/main/kotlin/com/metrolist/music/utils/potoken/PoTokenWebView.kt:gcp-api-key:325
+98116669042d8e41d6cfbe764de3c6948d362bea:app/src/main/kotlin/com/metrolist/music/utils/potoken/PoTokenWebView.kt:generic-api-key:326
+aae4bd8fab1d8d48a96823ae8bbe7016e2979983:app/src/main/java/com/metrolist/music/utils/potoken/PoTokenWebView.kt:gcp-api-key:318
+aae4bd8fab1d8d48a96823ae8bbe7016e2979983:app/src/main/java/com/metrolist/music/utils/potoken/PoTokenWebView.kt:generic-api-key:319
+bca805962fa42b4f8426e23af0a9ffd0824c44ba:innertube/src/main/kotlin/com/metrolist/innertube/InnerTube.kt:generic-api-key:787
+#
+# The 16 entries below are the same already-known-public values as above,
+# duplicated into security/gitleaks-baseline.json (the file this ignore
+# list replaces) at commit a5f1be48. That file is removed from the
+# working tree in a later commit, but removing a file in a later commit
+# does not erase it from history, and gitleaks scans full history — so
+# commit a5f1be48's version of that file (with the real secrets embedded
+# as plaintext JSON "Secret" fields) still surfaces here under its own
+# fingerprints.
+a5f1be487b92621e6b12b43f44c44024394c5032:security/gitleaks-baseline.json:gcp-api-key:157
+a5f1be487b92621e6b12b43f44c44024394c5032:security/gitleaks-baseline.json:gcp-api-key:178
+a5f1be487b92621e6b12b43f44c44024394c5032:security/gitleaks-baseline.json:gcp-api-key:199
+a5f1be487b92621e6b12b43f44c44024394c5032:security/gitleaks-baseline.json:gcp-api-key:262
+a5f1be487b92621e6b12b43f44c44024394c5032:security/gitleaks-baseline.json:gcp-api-key:283
+a5f1be487b92621e6b12b43f44c44024394c5032:security/gitleaks-baseline.json:gcp-api-key:304
+a5f1be487b92621e6b12b43f44c44024394c5032:security/gitleaks-baseline.json:gcp-api-key:31
+a5f1be487b92621e6b12b43f44c44024394c5032:security/gitleaks-baseline.json:gcp-api-key:325
+a5f1be487b92621e6b12b43f44c44024394c5032:security/gitleaks-baseline.json:gcp-api-key:73
+a5f1be487b92621e6b12b43f44c44024394c5032:security/gitleaks-baseline.json:generic-api-key:10
+a5f1be487b92621e6b12b43f44c44024394c5032:security/gitleaks-baseline.json:generic-api-key:115
+a5f1be487b92621e6b12b43f44c44024394c5032:security/gitleaks-baseline.json:generic-api-key:136
+a5f1be487b92621e6b12b43f44c44024394c5032:security/gitleaks-baseline.json:generic-api-key:220
+a5f1be487b92621e6b12b43f44c44024394c5032:security/gitleaks-baseline.json:generic-api-key:241
+a5f1be487b92621e6b12b43f44c44024394c5032:security/gitleaks-baseline.json:generic-api-key:52
+a5f1be487b92621e6b12b43f44c44024394c5032:security/gitleaks-baseline.json:generic-api-key:94
