@@ -28,6 +28,7 @@ import com.metrolist.innertube.models.YouTubeLocale
 import com.metrolist.kugou.KuGou
 import com.metrolist.lastfm.LastFM
 import com.metrolist.music.BuildConfig
+import com.metrolist.music.saraswati.SaraswatiFeatures
 import com.metrolist.music.constants.*
 import com.metrolist.music.di.ApplicationScope
 import com.metrolist.music.extensions.toEnum
@@ -150,7 +151,10 @@ class App :
             secret = BuildConfig.LASTFM_SECRET.takeIf { it.isNotEmpty() } ?: "",
         )
 
-        if (settings[ProxyEnabledKey] == true) {
+        // SARASWATI: proxy settings are hidden (audit A15.2); guard this too
+        // so a stored proxy config restored from a legacy backup is never
+        // honored. Task 7 scrubs any stored proxy keys on startup.
+        if (SaraswatiFeatures.PROXY && settings[ProxyEnabledKey] == true) {
             val username = settings[ProxyUsernameKey].orEmpty()
             val password = settings[ProxyPasswordKey].orEmpty()
             val type = settings[ProxyTypeKey].toEnum(defaultValue = Proxy.Type.HTTP)

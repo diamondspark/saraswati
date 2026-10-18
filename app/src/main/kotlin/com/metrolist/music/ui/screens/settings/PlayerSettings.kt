@@ -36,6 +36,7 @@ import androidx.navigation.NavController
 import com.metrolist.music.BuildConfig
 import com.metrolist.music.LocalPlayerAwareWindowInsets
 import com.metrolist.music.R
+import com.metrolist.music.saraswati.SaraswatiFeatures
 import com.metrolist.music.constants.AudioNormalizationKey
 import com.metrolist.music.constants.AudioOffload
 import com.metrolist.music.constants.AudioTrackPlaybackParamsKey
@@ -739,7 +740,11 @@ fun PlayerSettings(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        AlarmSettingsSection()
+        // SARASWATI: alarms are dropped (needs SCHEDULE_EXACT_ALARM and
+        // RECEIVE_BOOT_COMPLETED, both removed from the manifest).
+        if (SaraswatiFeatures.ALARMS) {
+            AlarmSettingsSection()
+        }
 
         Spacer(modifier = Modifier.height(27.dp))
 

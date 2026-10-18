@@ -111,6 +111,7 @@ import com.metrolist.music.LocalListenTogetherManager
 import com.metrolist.music.LocalPlayerAwareWindowInsets
 import com.metrolist.music.LocalPlayerConnection
 import com.metrolist.music.R
+import com.metrolist.music.saraswati.SaraswatiFeatures
 import com.metrolist.music.constants.AutoRadioQueueKey
 import com.metrolist.music.constants.GridItemSize
 import com.metrolist.music.constants.GridItemsSizeKey
@@ -2604,8 +2605,12 @@ fun HomeScreen(
                         }
                     }
                 },
-                onRecognitionClick = {
-                    navController.navigate("recognition")
+                // SARASWATI: music recognition is dropped; leaving this null
+                // hides the FAB (HideOnScrollFAB only shows it when non-null).
+                onRecognitionClick = if (SaraswatiFeatures.RECOGNITION) {
+                    { navController.navigate("recognition") }
+                } else {
+                    null
                 },
             )
         }

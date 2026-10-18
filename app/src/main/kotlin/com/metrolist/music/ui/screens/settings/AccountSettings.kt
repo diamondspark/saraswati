@@ -35,6 +35,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.launch
 import timber.log.Timber
+import com.metrolist.music.saraswati.SaraswatiFeatures
 import com.metrolist.music.utils.reportException
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -389,16 +390,21 @@ fun AccountSettings(
 
         Material3SettingsGroup(
             items = buildList {
-                add(
-                    Material3SettingsItem(
-                        title = { Text(stringResource(R.string.integrations)) },
-                        icon = painterResource(R.drawable.integration),
-                        onClick = {
-                            onClose()
-                            navController.navigate("settings/integrations")
-                        }
+                // SARASWATI: the Integrations screen only hosts Discord and
+                // Last.fm (Listen Together has its own entry point elsewhere);
+                // both are dropped, so hide the row entirely.
+                if (SaraswatiFeatures.DISCORD || SaraswatiFeatures.LASTFM) {
+                    add(
+                        Material3SettingsItem(
+                            title = { Text(stringResource(R.string.integrations)) },
+                            icon = painterResource(R.drawable.integration),
+                            onClick = {
+                                onClose()
+                                navController.navigate("settings/integrations")
+                            }
+                        )
                     )
-                )
+                }
                 add(
                     Material3SettingsItem(
                         title = { Text(stringResource(R.string.settings)) },
