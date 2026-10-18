@@ -27,6 +27,15 @@
 
 set -euo pipefail
 
+# SARASWATI: hardcoded, not derived from `gh`'s own repo auto-detection —
+# this checkout has both an `origin` (diamondspark/saraswati) and an
+# `upstream` (MetrolistGroup/Metrolist) remote, and `gh secret set`'s
+# default-repo resolution picks `upstream` over `origin` when both exist
+# (confirmed live: it tried to write to MetrolistGroup/Metrolist's
+# environment, got a 404 since this account has no access there, before
+# any secret was ever sent). Every `gh` call below is pinned to this repo
+# explicitly with `-R`/the literal path so that ambiguity can't recur.
+REPO="diamondspark/saraswati"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 KEY_DIR="$HOME/saraswati-keys"
 KEYSTORE_FILE="$KEY_DIR/release.keystore"
@@ -50,13 +59,13 @@ if ! gh auth status >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! gh api repos/{owner}/{repo} --jq '.full_name' >/dev/null 2>&1; then
-  echo "key-ceremony: could not resolve the current repository via 'gh api'." >&2
-  echo "Run this from a checkout of diamondspark/saraswati." >&2
+if ! gh api "repos/$REPO" --jq '.full_name' >/dev/null 2>&1; then
+  echo "key-ceremony: could not reach $REPO via 'gh api'." >&2
+  echo "Check 'gh auth status' and that this account has access to $REPO." >&2
   exit 1
 fi
 
-if ! gh api repos/{owner}/{repo}/environments/release >/dev/null 2>&1; then
+if ! gh api "repos/$REPO/environments/release" >/dev/null 2>&1; then
   echo "key-ceremony: the 'release' GitHub environment doesn't exist yet." >&2
   echo "It is created in Task 1 (gh api .../environments/release) — do that first." >&2
   exit 1
@@ -130,10 +139,10 @@ echo
 
 echo "Uploading secrets to the GitHub 'release' environment..."
 echo "(piped from a file or base64 — never placed on a command line, never printed)"
-base64 -w0 "$KEYSTORE_FILE" | gh secret set RELEASE_KEYSTORE_B64 --env release
-gh secret set RELEASE_KEYSTORE_PASSWORD --env release < "$STORE_PASS_FILE"
-printf '%s' "$KEY_ALIAS" | gh secret set RELEASE_KEY_ALIAS --env release
-gh secret set RELEASE_KEY_PASSWORD --env release < "$KEY_PASS_FILE"
+base64 -w0 "$KEYSTORE_FILE" | gh secret set RELEASE_KEYSTORE_B64 -R "$REPO" --env release
+gh secret set RELEASE_KEYSTORE_PASSWORD -R "$REPO" --env release < "$STORE_PASS_FILE"
+printf '%s' "$KEY_ALIAS" | gh secret set RELEASE_KEY_ALIAS -R "$REPO" --env release
+gh secret set RELEASE_KEY_PASSWORD -R "$REPO" --env release < "$KEY_PASS_FILE"
 echo "Uploaded: RELEASE_KEYSTORE_B64, RELEASE_KEYSTORE_PASSWORD, RELEASE_KEY_ALIAS, RELEASE_KEY_PASSWORD"
 echo
 
@@ -232,6 +241,6 @@ echo "  5. Commit security/release-cert.sha256 — it is public information; it 
 echo "     contain, and cannot be used to derive, the private key."
 echo
 echo "Verify from here first, if you like:"
-echo "  gh secret list --env release      # expect exactly the four names above"
+echo "  gh secret list -R \"$REPO\" --env release      # expect exactly the four names above"
 echo "  cat \"$CERT_SHA256_PATH\"            # expect 64 lowercase hex characters"
 echo "  git -C \"$REPO_ROOT\" status         # expect no keystore or password file listed"
