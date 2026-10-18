@@ -68,9 +68,48 @@ Google's own official apps) and `PoTokenWebView.kt`'s
 endpoint constants used identically by the community PO-token-generator
 projects). None are account- or billing-linked secrets under this
 project's control, and none are ours to rotate.
-`security/gitleaks-baseline.json` freezes exactly these 16 findings by
-`(commit, file, rule)` fingerprint; a new secret in a new commit still
-fails the gate (verified with a synthetic high-entropy test key).
+
+**Mechanism: `.gitleaksignore`, not `--baseline-path`.** The first
+version of this fix used `gitleaks detect --baseline-path
+security/gitleaks-baseline.json`. A dedicated review
+(`.superpowers/sdd/2026-10-17-saraswati-phase2-updates-pipeline/task-3-review.md`)
+found and proved a critical hole: gitleaks excludes the file named by
+`--baseline-path` from scanning in its entirety, in every commit (its
+own source, `detect/detect.go`: `fragment.FilePath == d.baselinePath` is
+skipped before any per-finding comparison runs). The reviewer
+reproduced it live — appending a fabricated secret to that file and
+committing it made the secret permanently invisible to the gate (exit
+0). Since the repo has no required PR reviewers
+(`required_pull_request_reviews: null`), nothing else would have caught
+a future PR (malicious, careless, or a tampered upstream-sync commit)
+doing the same thing for real.
+
+Replaced with `.gitleaksignore` (repo root): a list of exact
+`commit:file:rule-id:start-line` fingerprints. Verified this does *not*
+have the same hole, rather than assuming — read gitleaks' source
+(only `--baseline-path`/`--config` get the blanket file-skip;
+`.gitleaksignore` entries are matched per-finding, after scanning, in
+`AddFinding`) and reproduced the reviewer's exact attack shape against
+it: a fabricated secret smuggled *inside* `.gitleaksignore`'s own
+content was still caught (exit 1); a new secret added anywhere else was
+still caught (exit 1). `.gitleaksignore` lists 32 fingerprints, not 16:
+deleting `security/gitleaks-baseline.json` from the working tree
+doesn't erase it from history, and the commit that had introduced it
+(`a5f1be48`) embedded the same 16 secrets a second time as plaintext
+JSON fields, so that commit's own fingerprints needed listing too.
+Final state (`f275ada3`), verified against a clean mirror clone: `gitleaks
+detect --source . --redact --report-format sarif --exit-code 1` →
+`no leaks found`, exit 0; a freshly fabricated secret committed on top →
+caught, exit 1.
+
+**Residual risk, noted rather than silently accepted:** a single PR
+that edits both a source file and `.gitleaksignore` could still pair a
+new secret with a matching exemption — the same property every
+content-addressed allowlist in this repo has (`egress-allowlist.json`,
+`manifest-allowlist.json`, `workflow-allowlist.txt`) once there are no
+required reviewers. Not unique to this mechanism or this fix; a
+`check_workflows.py`-style script that pins `.gitleaksignore`'s exact
+expected contents would close it if the owner wants that extra rung.
 
 ## Branch protection on `main` (applied in Task 3)
 
