@@ -14,7 +14,7 @@ Phase 1 hardens the fork: fewer permissions, HTTPS only, a smaller exported surf
 
 ## Build
 
-Build and test instructions will be in `docs/build-baseline.md`, which Phase 1 adds. You need JDK 21 and the Android SDK.
+Build and test instructions are in [docs/build-baseline.md](docs/build-baseline.md). You need JDK 21 and the Android SDK.
 
 ## Design and plans
 
