@@ -40,6 +40,20 @@ github-owned action or `gradle/actions/*`, pinned to a 40-character
 commit SHA (Task 1's selected-actions policy allows nothing else to run
 regardless of what a workflow file says).
 
+`build-test` runs the app's unit tests and `:update-core:test` /
+`:updater:testDebugUnitTest`, builds both unsigned release APKs (app and
+Saraswati Updates, R8-minified), and gates each with `apk_gate.py`
+against its own allowlist (`security/manifest-allowlist.json`,
+`security/updater-allowlist.json`). A second job, `release-dry-run`, then
+rehearses the release `sign` job on every push/PR with no secret
+involved: it signs both APKs with `scripts/sign_release.sh` using a
+throwaway keystore generated inside the job, checks the signer with
+`scripts/verify_apk_signer.sh` (the matching key must pass, a second
+throwaway key's digest must be rejected), and re-runs both manifest
+gates on the signed APKs. These are the same two scripts the real `sign`
+job runs, so a broken signing step shows up here first rather than on a
+real release.
+
 The first real runs surfaced two environment gaps that a long-lived dev
 machine's warm caches had hidden, both fixed in `phase2-pipeline`:
 
@@ -236,20 +250,24 @@ entirely in the owner's hands.
    release), `urgent` (only for a fix that must skip promotion's
    48-hour wait), and `notes` (shown to users, ≤1000 chars — the
    `publish` job's manifest build fails if this is exceeded).
-2. `verify` re-runs the full `ci` gate against the dispatched ref;
-   `build` assembles both unsigned APKs. Both run unattended.
+2. `verify` re-runs the full `ci` gate (including `release-dry-run`)
+   against the dispatched ref; `build` assembles both unsigned APKs.
+   Both run unattended.
 3. `sign` stops and waits: **approve the `release` environment in the
    GitHub mobile app** (a push notification, or Actions → the run →
    Review deployments). This is the only point the signing key is ever
    touched — it is base64-decoded from secrets into the runner's
    `$RUNNER_TEMP` for the lifetime of this one job and deleted (via
    `shred -u`, falling back to `rm -f`) before the job ends either way.
-4. `sign` zipaligns and signs both APKs with `apksigner`, then compares
-   the signer's SHA-256 against the committed
-   `security/release-cert.sha256` — **the job fails outright on any
+4. `sign` zipaligns and signs both APKs with `scripts/sign_release.sh`
+   (`apksigner`), then compares each signer's SHA-256 against the
+   committed `security/release-cert.sha256` with
+   `scripts/verify_apk_signer.sh` — **the job fails outright on any
    difference**, so a release can never ship signed with the wrong
-   key — and runs `apk_gate.py check` on the signed Saraswati APK.
-5. `publish` creates a GitHub Release `v<versionCode>` with both signed
+   key — and runs `apk_gate.py check` on both signed APKs, each against
+   its own allowlist.
+5. `publish` creates a GitHub Release `v<versionCode>`, its tag pinned
+   (`--target`) to the exact commit the run built from, with both signed
    APKs and their `.sha256` checksum files, builds the channel
    manifest with `scripts/make_manifest.py`, and pushes
    `<channel>.json` to the `gh-pages` branch.
@@ -257,7 +275,8 @@ entirely in the owner's hands.
    returns 200 with a JSON content type (once Pages is enabled — Task
    8); both released APKs pass `apksigner verify --print-certs`
    against `security/release-cert.sha256` and, for the Saraswati APK,
-   `python3 -I security/apk_gate.py check`.
+   `python3 -I security/apk_gate.py check` (Saraswati Updates against
+   `security/updater-allowlist.json`).
 
 ### How to promote (beta → stable)
 
@@ -274,7 +293,11 @@ entirely in the owner's hands.
    surface or an explicit urgency call). It also refuses if the given
    `version_code` doesn't match `beta.json`'s actual `versionCode` — a
    guard against promoting a different build than the one that was
-   reviewed, in case a newer beta shipped in between.
+   reviewed, in case a newer beta shipped in between. And it refuses if
+   the current `stable.json` already has a higher `versionCode` (e.g. a
+   newer build released directly to `stable`), so promotion can never
+   move stable backwards; `publish` re-checks this against `gh-pages`
+   right before pushing.
 4. On success, `stable.json` on `gh-pages` becomes `beta.json` with
    `"channel"` rewritten to `"stable"`.
 
