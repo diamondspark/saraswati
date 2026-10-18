@@ -25,6 +25,7 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.audiofx.AudioEffect
 import com.metrolist.music.playback.audio.VolumeNormalizationAudioProcessor
+import com.metrolist.music.saraswati.security.StartActions
 import com.metrolist.music.utils.safeDataStoreEdit
 import android.net.ConnectivityManager
 import android.os.Binder
@@ -4419,6 +4420,16 @@ class MusicService :
             if (!ensureForegroundWithLatestNotificationOrStop()) {
                 return START_NOT_STICKY
             }
+        }
+
+        // SARASWATI: MusicService is android:exported="true", so any app can send these
+        // widget/alarm actions directly without going through the (now-deleted) widget
+        // BroadcastReceivers. Refuse to run them for any caller (audit NEW-2) while still
+        // letting Media3's own actions (media button, notification dismissal, null) through to
+        // the default handling below.
+        if (StartActions.isBlocked(intent?.action)) {
+            Timber.tag(TAG).w("StartActions blocked action=%s", intent?.action)
+            return super.onStartCommand(null, flags, startId)
         }
 
         when (intent?.action) {
