@@ -82,3 +82,50 @@ exercised for real, signed in, on a phone.
     and the Python policy suite (`python3 -I -m unittest discover -s security -p 'test_*.py' -v`).
     If step 7 added anything, commit it as its own `fix(security): ...` commit referencing this
     checklist, not folded silently into a later task's commit.
+
+## Task 13 — performance and Android Auto baselines (brief Steps 3-4)
+
+Task 13 built and sanity-checked the measurement tooling itself
+(`scripts/perf_stats.py`, `scripts/test_perf_stats.py`, `scripts/perf-baseline.sh`;
+dry-run proof against the headless emulator's own `com.android.settings`, not
+Metrolist or Saraswati, in `docs/perf-baseline.md`). It could not run a real
+measurement: Metrolist isn't installed on the emulator, no account can sign
+in there, and the Android Auto Desktop Head Unit (DHU) needs the Pixel
+physically at the computer over USB. Both deferred docs
+(`docs/perf-baseline.md`, `docs/android-auto-baseline.md`) are templates with
+budgets and exact commands, numbers left as TODO.
+
+1. **Performance baseline** (`docs/perf-baseline.md`). Install Metrolist
+   13.6.3 and the current Saraswati build side by side on the Pixel, both
+   signed in, screen on, battery > 50%, same Wi-Fi:
+   ```bash
+   source scripts/dev-env.sh
+   export ANDROID_SERIAL=<PIXEL_SERIAL>
+   scripts/perf-baseline.sh com.metrolist.music 10
+   scripts/perf-baseline.sh dev.diamondspark.saraswati 10
+   ```
+   Fill in `docs/perf-baseline.md`'s Results table from the two reports and
+   state plainly which budgets (cold start ≥20% faster than Metrolist and
+   ≤1.0 s; tap-to-audio p50 ≤1.0 s uncached; jank <1%) are not yet met —
+   Phase 2's Macrobenchmark and Baseline Profile work is what closes them,
+   not this task.
+2. **Android Auto baseline** (`docs/android-auto-baseline.md`), with the user
+   at the computer:
+   - Enable developer mode and "Unknown sources" in the Android Auto app on
+     the Pixel.
+   - `adb forward tcp:5277 tcp:5277`, then start the head unit server from
+     the Android Auto app's developer settings.
+   - Launch the DHU: `"${ANDROID_HOME:-$HOME/Android/Sdk}/extras/google/auto/desktop-head-unit/desktop-head-unit"`.
+   - Run the checklist in `docs/android-auto-baseline.md` for Saraswati,
+     then again for Metrolist: app listed, root browse tree loads, play a
+     song, next/previous, voice search through the DHU, resume after
+     reconnect, and `adb logcat -d | grep "ControllerPolicy denied"` shows
+     **no match**. Record results and any timing in that file's table.
+   - If a denial or a missing host shows up, treat it as a real finding
+     (Task 8's controller policy or Task 12's egress allowlist), not
+     something to paper over to make the checklist pass.
+3. **Known cross-task gap:** the plan's Task 10 (`scripts/smoke.sh`, a
+   unit-tested `parse_playing_state` helper) has not been run in this repo.
+   `scripts/perf-baseline.sh` currently contains its own small stand-in for
+   that check (see the `KNOWN GAP` comment at the top of that file). When
+   Task 10 is eventually run, reconcile the two instead of leaving both.
