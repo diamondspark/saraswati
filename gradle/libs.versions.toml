@@ -32,7 +32,17 @@ timber = "5.0.1"
 materialKolor = "5.0.1"
 kuromojiIpadic = "0.9.0"
 innertubex = "v0.8.4"
-tinypinyin = "2.0.3"
+# SARASWATI: supply-chain hardening (Task 9) — pinned to 2.0.1, not upstream's
+# 2.0.3: JitPack's build is dead for 2.0.3 under every coordinate spelling
+# (confirmed via jitpack.io/api/builds/com.github.promeG/tinypinyin, status
+# "Error" for 2.0.3/v2.0.3/master; "ok" only for 2.0.1), so restricting the
+# JitPack repo's content (this task's whole point) makes 2.0.3 permanently
+# unresolvable the moment Gradle needs a fresh dependency graph (e.g. a
+# config-cache-busted release build). 2.0.3's only change over 2.0.1 was a
+# cncity lexicon data fix (upstream release notes: "修复cncity词库的bug"); the
+# app's only call site (LyricsUtils.kt's Pinyin.toPinyin(Char)) is the core
+# engine API, unchanged since 2.0.1.
+tinypinyin = "2.0.1"
 protobuf = "4.36.2"
 
 [libraries]

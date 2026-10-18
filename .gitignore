@@ -105,6 +105,16 @@ core.*
 # Python (scripts/)
 __pycache__/
 *.pyc
+
+# SARASWATI: supply-chain hardening (Task 9) — secrets/signing material must
+# never be committed to this public repo.
+*.jks
+*.p12
+*.pem
+*.key
+keystore.properties
+.env*
+local.properties
 app/src/main/java/com/metrolist/music/listentogether/proto/*
 
 # FFTW third-party library build artifacts
