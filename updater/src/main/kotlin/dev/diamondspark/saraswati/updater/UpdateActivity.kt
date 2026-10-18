@@ -42,6 +42,7 @@
 package dev.diamondspark.saraswati.updater
 
 import android.app.Activity
+import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -94,6 +95,13 @@ class UpdateActivity : Activity() {
 
     private var checkInFlight = false
 
+    /**
+     * Bumped by every [startCheck]; a check's result is dropped if a newer
+     * check started meanwhile (e.g. [onNewIntent] re-checking a different
+     * channel while the old channel's fetch was still in flight).
+     */
+    private var checkGeneration = 0
+
     /** True once the current flow is checking/installing the Updater itself, not Saraswati. */
     private var updatingSelf = false
 
@@ -139,6 +147,24 @@ class UpdateActivity : Activity() {
                 dispatch(Event.PermissionChecked(canInstall = packageManager.canRequestPackageInstalls()))
             UiState.Checking -> if (!checkInFlight) startCheck()
             else -> render(displayed)
+        }
+    }
+
+    // SARASWATI: final-review fix round 2 (R2) — singleTask: a later banner
+    // tap with a (possibly different) channel extra arrives here, while
+    // getIntent() would otherwise keep returning the first launch's Intent.
+    // Runs before onResume; see decideOnNewIntent for when it re-checks.
+    // After a re-check starts, onResume's `Checking -> if (!checkInFlight)`
+    // branch sees the check in flight and doesn't start a second one.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val action = decideOnNewIntent(checkpoint, displayed, PendingInstall.isAttemptPending(prefs))
+        if (action == NewIntentAction.Recheck) {
+            checkpoint = UiState.Checking
+            displayed = checkpoint
+            render(displayed)
+            startCheck()
         }
     }
 
@@ -282,6 +308,7 @@ class UpdateActivity : Activity() {
         // would otherwise get stuck with a confusing failure.
         updatingSelf = false
         checkInFlight = true
+        val generation = ++checkGeneration
         val channel = currentChannel()
         executor.execute {
             try {
@@ -289,12 +316,14 @@ class UpdateActivity : Activity() {
                 val manifest = ManifestParser.parse(json).getOrThrow()
                 val installed = installedVersionCode(TARGET_PACKAGE_SARASWATI)
                 mainHandler.post {
+                    if (generation != checkGeneration) return@post
                     checkInFlight = false
                     lastFetchedManifest = manifest
                     dispatch(Event.ManifestLoaded(manifest, installed))
                 }
             } catch (e: Exception) {
                 mainHandler.post {
+                    if (generation != checkGeneration) return@post
                     checkInFlight = false
                     dispatch(Event.ManifestFailed(getString(R.string.cant_reach_update_server)))
                 }

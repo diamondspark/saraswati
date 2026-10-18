@@ -163,3 +163,48 @@ fun reduce(state: UiState, event: Event, canInstallNow: Boolean): UiState {
         }
     }
 }
+
+/** What UpdateActivity does when a new Intent reaches its already-running instance. */
+enum class NewIntentAction {
+    /** Start over from [UiState.Checking], exactly like a fresh launch with that Intent. */
+    Recheck,
+
+    /** Keep the current flow; the new Intent's channel applies to the next check. */
+    KeepCurrentFlow,
+}
+
+/**
+ * SARASWATI: final-review fix round 2 (R2). UpdateActivity is
+ * `launchMode="singleTask"`, so a second banner tap (possibly with a
+ * different `channel` extra) lands in `onNewIntent` on the instance that is
+ * already running, not in a fresh `onCreate`. From a resting state — still
+ * checking, or showing a result nothing has acted on yet — that tap must
+ * behave like a fresh launch: re-check against the new Intent's channel.
+ *
+ * Mid-install it must not: a pending PackageInstaller attempt, a download or
+ * install in progress, a verified APK waiting to install, or a
+ * permission prompt (above all [UiState.TurnPermissionOff], which exists to
+ * get REQUEST_INSTALL_PACKAGES switched back off) all keep their flow. The
+ * new channel still takes effect on the next check (UpdateActivity always
+ * adopts the new Intent).
+ */
+fun decideOnNewIntent(checkpoint: UiState, displayed: UiState, isInstallAttemptPending: Boolean): NewIntentAction {
+    if (isInstallAttemptPending) return NewIntentAction.KeepCurrentFlow
+    if (displayed is UiState.Downloading || displayed == UiState.Installing) return NewIntentAction.KeepCurrentFlow
+    return when (checkpoint) {
+        is UiState.NeedsInstallPermission,
+        is UiState.ReadyToInstall,
+        UiState.Installing,
+        is UiState.Downloading,
+        is UiState.TurnPermissionOff,
+        -> NewIntentAction.KeepCurrentFlow
+
+        UiState.Checking,
+        is UiState.UpToDate,
+        is UiState.AlreadyAhead,
+        is UiState.UpdateReady,
+        is UiState.Done,
+        is UiState.Error,
+        -> NewIntentAction.Recheck
+    }
+}
