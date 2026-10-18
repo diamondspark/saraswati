@@ -128,6 +128,13 @@ jobs:
   mobsf:
     name: mobsf-scan
     needs: build-test
+    # Report-only (Steps 3-4 not done yet, see the block comment above):
+    # scoped to a manual run only, not every push/PR, so this ~30-minute
+    # Docker-based scan doesn't add real time to every ordinary CI run for
+    # a job that can't fail anything yet. Drop this `if:` once Step 4
+    # switches the job to gating -- at that point it should run on every
+    # push/PR like the rest of this workflow.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     continue-on-error: true
