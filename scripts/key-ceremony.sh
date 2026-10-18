@@ -5,7 +5,8 @@
 # terminal, on a machine you trust — never by an agent, never on a shared
 # or ephemeral machine. It generates the real RSA-4096 release signing key
 # (alias "saraswati") that will sign every Saraswati and Saraswati Updates
-# release from now on, uploads it and its two passwords to the GitHub
+# release from now on, uploads it and its password (as both the store-
+# and key-password secrets — PKCS12 has only one, see below) to the GitHub
 # `release` environment as secrets, and makes one encrypted offline
 # backup. No password is ever printed, logged, or put on a command line
 # (keytool and the password files use the `:file` / stdin forms
@@ -91,10 +92,24 @@ echo
 mkdir -p -m 700 "$KEY_DIR"
 chmod 700 "$KEY_DIR"
 
-echo "Generating two random passwords (store + key) — never printed, never logged..."
+# ONE password, written to both files on purpose. keytool's default
+# keystore type (JDK 9+) is PKCS12, which has no per-key password: the
+# store password protects the key too. Given two different values, keytool
+# prints "Different store and key passwords not supported for PKCS12
+# KeyStores. Ignoring user-specified -keypass value." and the key password
+# becomes meaningless — the uploaded RELEASE_KEY_PASSWORD would then fail
+# apksigner with UnrecoverableKeyException on the first real release. Both
+# files (and both secrets) are kept so every caller reading either env var
+# gets the right value; they just always hold the same one. A real copy,
+# not a symlink: the backup tar stores file contents.
+echo "Generating the keystore password (one value, stored as both store + key password) — never printed, never logged..."
 ( umask 077; openssl rand -base64 48 | tr -d '\n' > "$STORE_PASS_FILE" )
-( umask 077; openssl rand -base64 48 | tr -d '\n' > "$KEY_PASS_FILE" )
+( umask 077; cat "$STORE_PASS_FILE" > "$KEY_PASS_FILE" )
 chmod 600 "$STORE_PASS_FILE" "$KEY_PASS_FILE"
+if ! cmp -s "$STORE_PASS_FILE" "$KEY_PASS_FILE"; then
+  echo "key-ceremony: store and key password files differ; refusing to continue" >&2
+  exit 1
+fi
 
 echo "Generating the RSA-4096 release key (alias: $KEY_ALIAS, validity: 10000 days)..."
 ( umask 077

@@ -15,7 +15,13 @@
 # by apksigner itself (`env:` form), so they never appear on a command line.
 # zipalign and apksigner must be on PATH (Android build-tools).
 #
-# Exit codes: 0 every APK signed, 1 a signing step failed, 2 usage error.
+# KS_PASS and KEY_PASS must be equal for keytool's default PKCS12 keystore
+# (it has one password for the whole store; see scripts/key-ceremony.sh).
+#
+# Exit codes: 0 every APK signed; 1 zipalign or apksigner failed (wrong
+# password or alias, unreadable APK, ... — the tools' own exit statuses, 1
+# for zipalign and 2 for apksigner, are folded into 1 so 2 always means
+# usage); 2 usage error (bad arguments, missing file, env var or tool).
 
 set -euo pipefail
 
@@ -67,13 +73,22 @@ for i in "${!inputs[@]}"; do
     exit 2
   fi
   aligned="$work_dir/aligned-$i.apk"
-  zipalign -p 4 "$in" "$aligned"
-  apksigner sign \
+  if ! zipalign -p 4 "$in" "$aligned"; then
+    echo "sign_release.sh: zipalign failed on $in" >&2
+    exit 1
+  fi
+  if ! apksigner sign \
     --ks "$keystore" \
     --ks-pass env:KS_PASS \
     --ks-key-alias "$KEY_ALIAS" \
     --key-pass env:KEY_PASS \
     --out "$out" \
-    "$aligned"
+    "$aligned"; then
+    echo "sign_release.sh: apksigner failed on $in" >&2
+    if [ "$KS_PASS" != "$KEY_PASS" ]; then
+      echo "sign_release.sh: KS_PASS and KEY_PASS differ; a PKCS12 keystore has one password for both, so KEY_PASS must equal KS_PASS" >&2
+    fi
+    exit 1
+  fi
   echo "sign_release.sh: signed $in -> $out"
 done

@@ -342,30 +342,37 @@ jobs:
       # Two keystores: "good" signs the APKs, "wrong" stands in for a
       # different key so the rejection path can be exercised. Passwords are
       # random per run (not literals in this file) and are not secrets.
-      # The cert digest is computed the same way scripts/key-ceremony.sh
-      # computes security/release-cert.sha256.
+      # Generated in the same shape as scripts/key-ceremony.sh: keytool's
+      # default keystore type (PKCS12), RSA-4096, one random password
+      # written to two SEPARATE files passed as -storepass:file and
+      # -keypass:file, and the sign step below reads KS_PASS and KEY_PASS
+      # from those two files independently, the way the real job reads
+      # two separate secrets. (PKCS12 has a single password; if the two
+      # files ever differed, keytool would ignore -keypass and signing
+      # would fail — exactly what this rehearses.) The cert digest is
+      # computed the same way the ceremony computes
+      # security/release-cert.sha256.
       - name: Generate throwaway keystores
         run: |
           set -euo pipefail
           dir="$RUNNER_TEMP/dry-run-keys"
           ( umask 077; mkdir -p "$dir" )
           for name in good wrong; do
-            pass="$(openssl rand -hex 24)"
-            ( umask 077; printf '%s' "$pass" > "$dir/$name.pass" )
+            ( umask 077; openssl rand -base64 48 | tr -d '\n' > "$dir/$name.store-pass" )
+            ( umask 077; cat "$dir/$name.store-pass" > "$dir/$name.key-pass" )
             keytool -genkeypair \
-              -keystore "$dir/$name.p12" \
-              -storetype PKCS12 \
+              -keystore "$dir/$name.keystore" \
               -alias "dryrun-$name" \
               -keyalg RSA \
               -keysize 4096 \
               -validity 1 \
               -dname "CN=Saraswati CI release dry run throwaway $name" \
-              -storepass:file "$dir/$name.pass" \
-              -keypass:file "$dir/$name.pass"
+              -storepass:file "$dir/$name.store-pass" \
+              -keypass:file "$dir/$name.key-pass"
             keytool -exportcert \
-              -keystore "$dir/$name.p12" \
+              -keystore "$dir/$name.keystore" \
               -alias "dryrun-$name" \
-              -storepass:file "$dir/$name.pass" \
+              -storepass:file "$dir/$name.store-pass" \
               -rfc \
               -file "$dir/$name.pem"
             openssl x509 -in "$dir/$name.pem" -noout -fingerprint -sha256 \
@@ -387,12 +394,12 @@ jobs:
         run: |
           set -euo pipefail
           dir="$RUNNER_TEMP/dry-run-keys"
-          KS_PASS="$(cat "$dir/good.pass")"
-          KEY_PASS="$KS_PASS"
+          KS_PASS="$(cat "$dir/good.store-pass")"
+          KEY_PASS="$(cat "$dir/good.key-pass")"
           KEY_ALIAS="dryrun-good"
           export KS_PASS KEY_PASS KEY_ALIAS
           scripts/sign_release.sh \
-            --keystore "$dir/good.p12" \
+            --keystore "$dir/good.keystore" \
             --in unsigned-app/app-gms-release-unsigned.apk --out "$RUNNER_TEMP/app-signed.apk" \
             --in unsigned-updater/updater-release-unsigned.apk --out "$RUNNER_TEMP/updater-signed.apk"
 

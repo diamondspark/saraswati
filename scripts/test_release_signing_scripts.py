@@ -158,6 +158,34 @@ class SignReleaseTest(_FakeToolsCase):
             self.assertNotIn(secret, "\n".join(argv_lines), "a password leaked onto a command line")
         self.assertIn("ks_pass_env=store-secret-123", calls)
 
+    def _write_unsigned(self) -> Path:
+        app_in = self.tmp / "app-unsigned.apk"
+        app_in.write_bytes(b"app")
+        return app_in
+
+    def test_apksigner_failure_exits_1_with_a_pkcs12_hint(self) -> None:
+        # apksigner itself exits 2 (e.g. UnrecoverableKeyException from a
+        # wrong key password); the script must report 1, keeping 2 for usage.
+        _write_exe(self.bin / "apksigner", "echo boom >&2; exit 2\n")
+        result = self.run_script(
+            SIGN, "--keystore", self.keystore,
+            "--in", self._write_unsigned(), "--out", self.tmp / "o.apk",
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("apksigner failed", result.stderr)
+        self.assertIn("KS_PASS and KEY_PASS differ", result.stderr)
+        self.assertNotIn("store-secret-123", result.stderr + result.stdout)
+        self.assertNotIn("key-secret-456", result.stderr + result.stdout)
+
+    def test_zipalign_failure_exits_1(self) -> None:
+        _write_exe(self.bin / "zipalign", "exit 1\n")
+        result = self.run_script(
+            SIGN, "--keystore", self.keystore,
+            "--in", self._write_unsigned(), "--out", self.tmp / "o.apk",
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("zipalign failed", result.stderr)
+
     def test_missing_password_env_is_a_usage_error(self) -> None:
         del self.env["KEY_PASS"]
         app_in = self.tmp / "app-unsigned.apk"
