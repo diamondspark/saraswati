@@ -80,6 +80,22 @@ class App :
         CrashHandler.install(this)
         ArtistNameAliases.initialize(this)
 
+        // SARASWATI: plant logging before anything else below that might log,
+        // including the scrub try/catch a few lines down — it used to run
+        // after this block, so its failure warning silently printed nowhere
+        // in any build (no tree was planted yet to receive it). Moving the
+        // plant() call earlier, rather than moving the scrub later, keeps
+        // the scrub's "before any cookie read" ordering guarantee (Task 7)
+        // unchanged: it still runs before observeSettingsChanges() below.
+        // SARASWATI (audit A11-1): only in debug builds — unconditionally
+        // planting DebugTree sent ~990 call sites to release Logcat,
+        // including BotGuard responses and Listen Together room codes.
+        // Timber tolerates nothing ever being planted: every Timber.*() call
+        // elsewhere in the app is then simply a no-op in release.
+        if (BuildConfig.DEBUG) {
+            Timber.plant(Timber.DebugTree())
+        }
+
         // preferencesDataStore uses filesDir/datastore; proactive mkdir reduces failures on odd ROM states
         try {
             val datastoreDir = File(filesDir, "datastore")
@@ -102,31 +118,26 @@ class App :
         // scrub finishes before observeSettingsChanges() below — or
         // anything else in this process — ever reads the cookie.
         //
-        // SARASWATI (fix round 1): a broken/custom-ROM Keystore
-        // implementation (seen on some Samsung/Xiaomi phones) can make
-        // AndroidKeystoreKeyProvider.key() throw even after the StrongBox
-        // fallback — e.g. a java.security.ProviderException, which is a
-        // RuntimeException CookieVault.open()'s catch blocks don't cover.
-        // Uncaught, that would crash the app on every single launch with
-        // no recovery short of an uninstall. Catching here instead skips
-        // this boot's scrub (SecretScrubber runs again next boot; the
-        // worst case is a secret preference surviving a little longer,
-        // not an unusable app).
+        // SARASWATI (fix round 1; updated for I5): a broken/custom-ROM
+        // Keystore implementation (seen on some Samsung/Xiaomi phones) can
+        // make AndroidKeystoreKeyProvider.key() throw even after the
+        // StrongBox fallback — e.g. a java.security.ProviderException.
+        // CookieVault.open() (which scrub() calls) now also catches
+        // RuntimeException/ProviderException and returns null instead of
+        // propagating it (I5), so this specific failure is already covered
+        // one layer down; this outer try/catch is kept as defense-in-depth
+        // for anything else scrub() could still throw (e.g. a DataStore IO
+        // failure from the edit {} call). Uncaught, any such failure would
+        // crash the app on every single launch with no recovery short of an
+        // uninstall. Catching here instead skips this boot's scrub
+        // (SecretScrubber runs again next boot; the worst case is a secret
+        // preference surviving a little longer, not an unusable app).
         try {
             runBlocking { SecretScrubber.scrub(dataStore, SaraswatiVault.cookieVault) }
         } catch (e: Exception) {
             Timber.w(e, "SecretScrubber.scrub failed, skipping this boot's scrub")
         }
 
-        // Plant logging before extraction services initialize.
-        // SARASWATI (audit A11-1): only in debug builds — unconditionally
-        // planting DebugTree sent ~990 call sites to release Logcat,
-        // including BotGuard responses and Listen Together room codes.
-        // Timber tolerates nothing ever being planted: every Timber.*() call
-        // elsewhere in the app is then simply a no-op in release.
-        if (BuildConfig.DEBUG) {
-            Timber.plant(Timber.DebugTree())
-        }
         InnerTubeXPlayer.initialize(this)
 
         // Pre-read Coil cache size on background to avoid runBlocking in newImageLoader

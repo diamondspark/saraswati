@@ -118,14 +118,32 @@
     #public static int e(...);
 }
 
-# SARASWATI (audit A11-1): App.kt only plants Timber.DebugTree in debug
-# builds, so these calls are already no-ops in release; this rule lets R8
-# also strip the call sites and their (sometimes non-trivial) message/arg
+# SARASWATI (audit A11-1, corrected): App.kt only plants Timber.DebugTree in
+# debug builds, so these calls are already no-ops in release; this rule lets
+# R8 also strip the call sites and their (sometimes non-trivial) message/arg
 # expressions from the release binary entirely.
--assumenosideeffects class timber.log.Timber* {
-    public static *** v(...);
-    public static *** d(...);
-    public static *** i(...);
+#
+# The original version of this rule targeted "public static *** v/d/i(...)"
+# on classes matching "timber.log.Timber*" — that never matched anything.
+# Timber 5.x is a Kotlin rewrite: `Timber.tag(x).d(...)` (the shape every
+# call site in this codebase uses) compiles to INVOKEVIRTUAL on
+# timber.log.Timber$Tree (`.tag()` itself is INVOKEVIRTUAL on
+# timber.log.Timber$Forest, returning a Tree); a bare `Timber.d(...)` with
+# no `.tag()` compiles to INVOKEVIRTUAL directly on Timber$Forest. Neither
+# is ever "public static". Verified with `javap -p` on both
+# timber-5.0.1-runtime.jar's Timber$Tree/Timber$Forest classes and this
+# project's own compiled MusicService.class (gmsRelease) — every real call
+# site is exactly `Timber$Forest.tag(String):Timber$Tree` followed by
+# `Timber$Tree.d/w/e(...)`.
+-assumenosideeffects class timber.log.Timber$Tree {
+    public void v(...);
+    public void d(...);
+    public void i(...);
+}
+-assumenosideeffects class timber.log.Timber$Forest {
+    public void v(...);
+    public void d(...);
+    public void i(...);
 }
 
 # Generated automatically by the Android Gradle plugin.

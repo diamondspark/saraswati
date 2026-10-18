@@ -75,7 +75,6 @@ import com.metrolist.music.ui.screens.settings.AndroidAutoSection
 import com.metrolist.music.ui.screens.settings.deserializeSections
 import com.metrolist.music.ui.screens.settings.serializeSections
 import kotlinx.coroutines.withContext
-import timber.log.Timber
 
 class MediaLibrarySessionCallback
 @Inject
@@ -115,11 +114,18 @@ constructor(
         if (!allowed) {
             val reason =
                 if (caller == null) {
-                    "package name not verified for uid ${controller.uid}"
+                    "package name not verified"
                 } else {
                     "not own package, trusted, Android Auto or system app"
                 }
-            Timber.tag(tag).w("ControllerPolicy denied pkg=%s reason=%s", controller.packageName, reason)
+            // SARASWATI (I4): android.util.Log.w, not Timber — Timber.DebugTree is gated
+            // behind BuildConfig.DEBUG (Task 17), so a Timber call here would be silent in
+            // the release build family phones actually run, defeating the whole point of
+            // this line (`grep "ControllerPolicy denied"` proving zero denials during
+            // Android Auto testing). android.util.Log.w/.e are kept by proguard-rules.pro
+            // in release (verified: only Log.v/.d are stripped). Only the package name and
+            // a short reason category are logged — never the uid or anything sensitive.
+            android.util.Log.w(tag, "ControllerPolicy denied pkg=${controller.packageName} reason=$reason")
         }
         return allowed
     }

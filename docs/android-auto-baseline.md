@@ -71,6 +71,18 @@ Record pass/fail and any timing for both. For `dev.diamondspark.saraswati`,
 the DHU should also recognize the debug or release-like build installed by
 Task 10 — note which variant was used.
 
+**Row 7 must be run against a release build, not debug (I4).** Through
+Task 17, `Timber.DebugTree` is only planted in debug builds, so a Timber-based
+denial log would be silently absent from a release build regardless of
+whether a denial actually happened — a debug-only "no denials" result would
+prove nothing about the build family phones actually run. The
+`ControllerPolicy denied` log in `MediaLibrarySessionCallback.kt` and the
+`StartActions blocked` log in `MusicService.kt` now call `android.util.Log.w`
+directly instead of `Timber.w`, specifically so this check is meaningful on a
+release build (`android.util.Log.w`/`.e` are kept by `proguard-rules.pro` in
+release; `.v`/`.d` are stripped — verified with `javap`). Run row 7 on the
+release (or release-minified) build.
+
 | # | Check | Saraswati result | Metrolist result |
 | --- | --- | --- | --- |
 | 1 | App listed in the DHU launcher | TODO | TODO |
