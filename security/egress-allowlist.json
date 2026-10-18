@@ -1,0 +1,43 @@
+{
+  "allowed": [
+    { "name": "youtube.com", "subdomains": true },
+    { "name": "googlevideo.com", "subdomains": true },
+    { "name": "ytimg.com", "subdomains": true },
+    { "name": "ggpht.com", "subdomains": true },
+    { "name": "googleusercontent.com", "subdomains": true },
+    { "name": "gstatic.com", "subdomains": true },
+    { "name": "google.com", "subdomains": true },
+    { "name": "lrclib.net", "subdomains": false },
+    { "name": "lyrics-api.boidu.dev", "subdomains": false }
+  ],
+  "forbidden_hosts": [
+    "discord.com",
+    "cdn.discordapp.com",
+    "openrouter.ai",
+    "api.openai.com",
+    "api.anthropic.com",
+    "api.mistral.ai",
+    "api.x.ai",
+    "api.perplexity.ai",
+    "api.inceptionlabs.ai",
+    "generativelanguage.googleapis.com",
+    "api.deepl.com",
+    "api-free.deepl.com",
+    "ws.audioscrobbler.com",
+    "amp.shazam.com",
+    "music.apple.com",
+    "amp-api.music.apple.com",
+    "metroserverx.meowery.eu",
+    "jewishmusic.fm",
+    "lyrics.kugou.com",
+    "mobileservice.kugou.com",
+    "search.zemer.io",
+    "lyrics.paxsenix.org",
+    "returnyoutubedislikeapi.com",
+    "api.github.com",
+    "github.com",
+    "raw.githubusercontent.com",
+    "avatars.githubusercontent.com",
+    "cdn.jsdelivr.net"
+  ]
+}

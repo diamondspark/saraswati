@@ -319,6 +319,12 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.ktor.client.mock)
+
+    // SARASWATI: Task 12 instrumented proof that the network security
+    // config's deny-by-default egress allowlist is enforced on-device
+    // (EgressPolicyInstrumentedTest).
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
 }
 
 // SARASWATI: everything below overrides the upstream android {} block above
