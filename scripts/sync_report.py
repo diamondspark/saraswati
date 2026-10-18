@@ -159,7 +159,14 @@ def render_pr_body(
             " upstream change:"
         )
         for name in workflow_changes:
-            sections.append(f"> - `{name}`")
+            # Not backtick-wrapped like the host names below: a path can
+            # contain a backtick itself (git/GitHub both permit it in a
+            # filename), which would close an inline code span early and
+            # let markdown after it render live, right inside this
+            # callout. _escape_markdown alone (no code span) is what
+            # actually neutralizes that, since backslash escapes don't do
+            # anything *inside* a code span to begin with.
+            sections.append(f"> - {_escape_markdown(name)}")
         sections.append("")
 
     sections.append(f"### Commits ({len(commits)})")

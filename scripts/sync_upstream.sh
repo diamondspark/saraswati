@@ -135,10 +135,20 @@ echo "sync_upstream.sh: $new_commit_count new upstream commit(s) ($UPSTREAM_LOCA
 # existing PR pick up any later commits once it's merged.
 if [[ -n "${GITHUB_REPOSITORY:-}" ]] && command -v gh >/dev/null 2>&1; then
   export GH_TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
-  existing_sync_pr="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open \
+  # Distinguish "gh pr list succeeded and found nothing" (empty is correct:
+  # proceed) from "gh pr list itself failed" (empty would be a lie: a rate
+  # limit, an auth hiccup, any transient API failure must NOT be read as
+  # "no PR is open," or this check fails open and recreates the exact
+  # duplicate-PR-flooding risk it exists to prevent). The `if !` below
+  # captures the command's own exit status, not just its (possibly empty,
+  # possibly meaningless) stdout.
+  if ! existing_sync_pr="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open \
     --json headRefName,url \
     --jq '[.[] | select(.headRefName | startswith("sync/upstream-"))] | .[0].url // empty' \
-    2>/dev/null || true)"
+    2>"$WORKDIR/pr_list.err")"; then
+    cat "$WORKDIR/pr_list.err" >&2
+    die "could not check for an already-open sync PR (gh pr list failed — see the error above); not safe to assume none is open, so stopping rather than risking a duplicate"
+  fi
   if [[ -n "$existing_sync_pr" ]]; then
     echo "sync_upstream.sh: a sync PR is already open ($existing_sync_pr); skipping until it is merged or closed" >&2
     exit 0

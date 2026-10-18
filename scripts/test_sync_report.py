@@ -118,6 +118,16 @@ class RenderPrBodyTest(unittest.TestCase):
         body = self._render([])
         self.assertNotIn("WARNING", body)
 
+    def test_escapes_a_backtick_in_a_workflow_filename(self) -> None:
+        # git/GitHub both permit a backtick in a filename. Wrapped in a
+        # single pair of backticks (`` `{name}` ``) it would close that
+        # code span early and let markdown after it render live, inside
+        # the WARNING callout -- the most prominent part of the PR body.
+        evil_name = ".github/workflows/evil`**INJECTED BOLD**`.yml"
+        body = self._render([evil_name])
+        self.assertNotIn("evil`**INJECTED BOLD**`", body)
+        self.assertIn(r"evil\`\*\*INJECTED BOLD\*\*\`.yml", body)
+
     def test_escapes_markdown_in_untrusted_commit_subjects(self) -> None:
         # A malicious or compromised upstream commit could craft a subject
         # that visually spoofs part of the review checklist (e.g. its own
