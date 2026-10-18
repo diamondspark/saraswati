@@ -44,6 +44,19 @@ MAX_NOTES_LENGTH = 1000
 MAX_APK_BYTES = 104_857_600
 SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
 
+
+def _utf16_length(text: str) -> int:
+    """Length in UTF-16 code units, i.e. Kotlin's `String.length`.
+
+    update-core's ManifestParser enforces the notes limit with Kotlin's
+    `notes.length`, which counts UTF-16 code units; Python's `len()` counts
+    code points, so a non-BMP character (an emoji: one code point, a
+    two-unit surrogate pair) would count 1 here and 2 on every client. The
+    publisher must count the way the client does, or a manifest could pass
+    here and then be rejected on every phone with no visible error.
+    """
+    return len(text.encode("utf-16-le")) // 2
+
 RELEASE_HOST = "github.com"
 RELEASE_URL_PREFIX = "https://github.com/diamondspark/saraswati/releases/download/"
 
@@ -128,7 +141,7 @@ def build_manifest(
         raise ValueError(f"unknown channel {channel!r}")
     if version_code <= 0:
         raise ValueError(f"invalid versionCode {version_code}")
-    if len(notes) > MAX_NOTES_LENGTH:
+    if _utf16_length(notes) > MAX_NOTES_LENGTH:
         raise ValueError(f"notes exceed {MAX_NOTES_LENGTH} chars")
 
     apk = _validate_apk_asset(
