@@ -31,7 +31,7 @@ YouTube Music's brain, Spotify's craft, built for one family. It's safe on phone
 - **The YouTube engine is what breaks.** It handles stream URLs, PoTokens and cipher solving, and that's where OuterTune died. YouTube breaks playback about every 1–2 months. Active upstreams recover in days; Metrolist fixed the 30 Jan 2026 outage the same day.
 - **Metrolist keeps the engine alive with:**
   - `MetrolistGroup/innertubex`
-  - remote cipher configs (ZemerTeam/zemer-cipher), so many fixes need **no new APK**
+  - remote cipher configs from a third-party repo, so many fixes need no new APK. **Saraswati switches this off** (the Phase 1 security audit, finding A12-b, found that the live path downloads unsigned JavaScript and runs it inside the app via `Function(...)`, bypassing every gate here — disabled in code, `SaraswatiFeatures.REMOTE_CIPHER_CODE = false`, and network-blocked for a second, independent layer). YouTube fixes arrive as InnerTubeX bumps through the Phase 2 sync bot and Saraswati Updates instead.
   - a PoToken WebView
   - fallback across several YouTube clients
 - **So Saraswati is a thin layer on Metrolist (GPL-3.0).** We put our effort into family features, security, speed and polish.
@@ -101,7 +101,7 @@ YouTube Music's brain, Spotify's craft, built for one family. It's safe on phone
   4. **Update:** Android's standard install screen appears, and you tap Install.
   5. **Lock again:** the switch is turned back off. The app confirms this itself (`canRequestPackageInstalls() == false`) and keeps reminding until it's off. On Samsung, Auto Blocker goes back on; One UI 8.5 may re-enable it automatically after 30 minutes.
   6. The phone reports its new version to the family hub's health view.
-- **Fewer interruptions:** the family's Stable channel gets at most one batch a month, plus urgent playback fixes. Remote cipher configs mean many YouTube breaks need no update at all. Smart downloads keep music playing while a phone is behind.
+- **Fewer interruptions:** the family's Stable channel gets at most one batch a month, plus urgent playback fixes. A YouTube break is fixed by an InnerTubeX bump shipped as an update (the sync bot, the red "Fixes music playback" banner and the health view exist for that; the remote cipher channel is off, see Decisions). Smart downloads keep music playing while a phone is behind.
 - **Signing key:**
   - Generated offline once. It's never stored in the repo and is removed from the dev machine after setup.
   - It lives as a GitHub secret in a protected `release` environment. **Every signed release waits for your tap in the GitHub app.**
@@ -128,7 +128,7 @@ YouTube Music's brain, Spotify's craft, built for one family. It's safe on phone
 - **Encrypt** with the Android Keystore (AES-GCM, hardware-backed where available, no extra library).
 - **Never let it leave the app's private storage.** Android backup and phone-to-phone transfer are switched off (`allowBackup=false`), a startup scrubber deletes any plaintext cookie or integration token (for example from a restored Metrolist backup), and the cookie is never logged.
 - **Host allowlist:** enforced by Android itself through the network security config. The app trusts no server except a short list of domains, so a bug or a hijacked config cannot send the cookie anywhere else. (Fallback if Android ignores an empty trust list: an OkHttp interceptor on every client.)
-- **Stream URLs** must be on `*.googlevideo.com`. Output from the remote cipher config is validated before use.
+- **Stream URLs** must be on `*.googlevideo.com`. There is no remote cipher input at all: the channel is switched off in code, and `cdn.jsdelivr.net`, GitHub and `githubusercontent.com` are not on the network allowlist.
 - **Login WebView:** Google domains only, no JavaScript bridges, no file access, Safe Browsing on.
 - **Escape hatch:** Google Account → Security → "Sign out of all devices".
 - **Main accounts are fine,** because only YouTube cookies are ever held. Anyone may use a music-only account instead, at the cost of starting their recommendations fresh.
@@ -202,7 +202,7 @@ Metrolist already gives us a Media3 `MediaLibraryService` with a browse tree, `o
 
 1. **Safe by default.** Least privilege, no secrets in the APK, and no standing install permission.
 2. **Music in under a second.** Measured on your Pixel every release.
-3. **Never silent.** Downloads, local files and remote cipher fixes.
+3. **Never silent.** Downloads and local files keep music playing when YouTube breaks something.
 4. **YouTube's brain, our face.** No home-made recommender, and no taste pollution.
 5. **Grandparent-proof and car-proof.** One tap in Saral, zero fiddling in the car.
 6. **Look human to YouTube.** Modest prefetch, throttled downloads, no VPN. Rapid skipping already triggers about one-day lockouts (#4192).
@@ -303,8 +303,10 @@ Smart downloads are limited to about 50 songs a night per phone, on Wi-Fi while 
 ### Status
 
 1. **Phase 0 is done** (2026-10-17): REA 6.5.0 registered at user level, JDK 21 and Android SDK 37 installed, and a spike build of the chosen base passed all 186 unit tests.
-2. **Detailed plans written:** `2026-10-17-saraswati-phase1-fork-harden.md` and `2026-10-17-saraswati-phase2-updates-pipeline.md` (same folder).
-3. **Next:** the user reviews the plans and chooses how they are executed; then Phase 1 starts.
+2. **Phase 1 is done:** fork, rebrand, security audit, hardening and perf baselines all merged.
+3. **Phase 2 is done** (2026-10-18): signing ceremony, CI gates, Saraswati Updates app, sync bot, developer verification all merged; release `v3902` is the first real signed release on the Beta channel.
+4. **Detailed plan written for Phase 3:** `2026-10-18-saraswati-phase3-hub-saral-car-rollout.md` (same folder), including Indian-family personalization (Saral's Hindi UI, Devanagari typography, Hindi/Bollywood/devotional defaults, festival awareness, per-phone local time in the health view).
+5. **Next:** the user reviews the Phase 3 plan and chooses how it's executed.
 
 ### Phase 0: tools (about 1 h)
 
@@ -401,7 +403,7 @@ Smart downloads are limited to about 50 songs a night per phone, on Wi-Fi while 
 
 | Risk | Mitigation |
 |---|---|
-| YouTube breaks playback | Remote cipher configs (no APK needed); urgent releases flagged red; the health view tells you who to nudge; downloads and local files keep music playing. |
+| YouTube breaks playback | Fast InnerTubeX bumps through the sync bot and Saraswati Updates (the remote cipher channel is off because it ran unsigned code); urgent releases flagged red; the health view tells you who to nudge; downloads and local files keep music playing. |
 | Family members skip manual updates | Monthly batches only, red "fixes playback" banners, the health view, and your remote help. |
 | Upstream or dependency compromise | Manifest gate, checksums, CodeQL and MobSF, a Claude security review, 48 h on Beta, your approval. |
 | Signing key theft | Kept off the repo and the dev machine, in a protected environment that needs your approval. v3.1 rotation is possible. |
@@ -423,6 +425,14 @@ Smart downloads are limited to about 50 songs a night per phone, on Wi-Fi while 
 - Adults and grandparents
 - All four family features
 
+**Mine (veto any), from the Phase 1 security audit (a read-only audit of the base, changes applied after your approval):**
+- The remote cipher channel is switched off (a pre-build audit found that the live path downloads unsigned JavaScript that runs inside the app, which bypasses every gate here); YouTube fixes now ship as normal updates, so expect somewhat more update banners than the original design assumed
+- Home-screen widgets, the proxy setting and the cookie/token editor are removed
+- Backups carry no account or network settings; a restored backup can only bring back look-and-feel and playback settings
+- The sign-in WebView may only visit Google and YouTube sign-in hosts, and it keeps no copy of your Google session after sign-in
+- Deep links are validated and a malformed one can no longer crash the app
+- The app writes no log lines in release builds
+
 **Mine (veto any):**
 - App ID `dev.diamondspark.saraswati`
 - Public repo
@@ -442,3 +452,4 @@ Smart downloads are limited to about 50 songs a night per phone, on Wi-Fi while 
 - Hindi feature names with English subtitles
 - Marigold accent, dark by default
 - Player name Veena
+- **The update-ready banner and flow (Phase 2) is named Sudhaar** (सुधार, "fix/improvement") **with English subtitle "Update ready"** — continuing the Hindi-name-plus-subtitle pattern into the one new piece of user-facing copy Phase 2 introduced.
