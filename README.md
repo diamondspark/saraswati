@@ -1,10 +1,10 @@
 # Saraswati
 
-Saraswati is a private, family-only music app for Android. It is a hardened fork of [Metrolist](https://github.com/MetrolistGroup/Metrolist), an open-source YouTube Music client, and it is licensed under GPL-3.0.
+Saraswati is a private, family-only music app for Android. It is a fork of [Metrolist](https://github.com/MetrolistGroup/Metrolist), an open-source YouTube Music client. The fork is being hardened for family use and is licensed under GPL-3.0.
 
-It keeps YouTube Music's catalog and recommendations. Each person signs in with their own YouTube Music account, so the recommendations are theirs. There are no ads and no tracking SDKs.
+It keeps YouTube Music's catalog and recommendations. Each person signs in with their own YouTube Music account, so the recommendations are theirs. No ads, and the build declares no third-party analytics, advertising or crash-reporting libraries (checked at the pinned commit). Plays are reported to YouTube, as in Metrolist, which is how recommendations work. Chromecast support in the gms build comes from Google Play services.
 
-The source is public because the license requires it. The app is built for one family: it is not on any app store, and no support is offered to anyone outside it (see [SECURITY.md](SECURITY.md)).
+The source is public, which satisfies the GPL-3.0 source requirement. The app is built for one family: it is not on any app store, and no support is offered to anyone outside it (see [SECURITY.md](SECURITY.md)).
 
 ## Status
 
@@ -14,7 +14,7 @@ Phase 1 hardens the fork: fewer permissions, HTTPS only, a smaller exported surf
 
 ## Build
 
-Build and test instructions are in [docs/build-baseline.md](docs/build-baseline.md), which Phase 1 adds. You need JDK 21 and the Android SDK.
+Build and test instructions will be in `docs/build-baseline.md`, which Phase 1 adds. You need JDK 21 and the Android SDK.
 
 ## Design and plans
 

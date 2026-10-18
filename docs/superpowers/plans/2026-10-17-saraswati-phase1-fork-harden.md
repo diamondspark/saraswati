@@ -8,7 +8,7 @@
 
 **Tech Stack:** Kotlin 2.4.20 / Compose, Gradle 9.7.1 + AGP 9.4.x, JDK 21, Media3 1.10.1, Room, JUnit4 + Robolectric (JVM tests), Python 3 stdlib `unittest` (gates), Android SDK tools (`apkanalyzer`, `apksigner`, `aapt2`), adb, REA CLI (`npx -y rea-agents@6.5.0`).
 
-**Spec:** `/home/mohit/.claude/plans/i-am-creating-my-serene-engelbart.md` (copied into the repo in Task 1). Phase 2 is `2026-10-17-saraswati-phase2-updates-pipeline.md`.
+**Spec:** `docs/superpowers/specs/2026-10-17-saraswati-design.md`. Phase 2 is `2026-10-17-saraswati-phase2-updates-pipeline.md`.
 
 ## Facts established by a spike (do not re-derive)
 
@@ -22,11 +22,11 @@
 
 - **Identity:** `applicationId` `dev.diamondspark.saraswati`; debug build `dev.diamondspark.saraswati.debug` (suffix `.debug` always); app name `Saraswati`, debug `Saraswati Debug`; Kotlin `namespace` stays `com.metrolist.music` (keeps the diff small); new code in `com.metrolist.music.saraswati.*`.
 - **Base commit:** upstream `main` @ `76fa5a78b5110674442884b6f21c0cef51cdb782` (2026-10-08, InnerTubeX `v0.8.4`, Media3 `1.10.1` with upstream's comment "1.11.1 hides Android 17 media controls (#4404)"). Media3 stays at 1.10.1.
-- **SDK/toolchain:** compileSdk 37, targetSdk 36, minSdk 26, JDK 21 (`/home/mohit/tools/jdk-21`), Android SDK `/home/mohit/Android/Sdk`, adb `/home/mohit/Android/Sdk/platform-tools/adb` (not `/usr/bin/adb`), test phone Pixel 8 Pro serial `<PIXEL_SERIAL>` (Android 17). `apksigner` needs `java` on PATH.
+- **SDK/toolchain:** compileSdk 37, targetSdk 36, minSdk 26, JDK 21 (`$HOME/tools/jdk-21`), Android SDK `$HOME/Android/Sdk`, adb `$HOME/Android/Sdk/platform-tools/adb` (not `/usr/bin/adb`), test phone Pixel 8 Pro serial `<PIXEL_SERIAL>` (Android 17). `apksigner` needs `java` on PATH.
 - **Shipped variant:** flavor `gms` only; ABI `arm64-v8a` only (all family phones are 2022+; Task 14 records each phone's `ro.product.cpu.abilist` before rollout and adds `armeabi-v7a` only if one lacks arm64).
 - **Final permission allowlist (Saraswati app):** `INTERNET`, `ACCESS_NETWORK_STATE`, `WAKE_LOCK`, `POST_NOTIFICATIONS`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK`, `FOREGROUND_SERVICE_DATA_SYNC`, `dev.diamondspark.saraswati.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`, plus any permission the `gms`-only libraries merge in, each recorded and justified in Task 4. **Never present:** `RECORD_AUDIO`, `FOREGROUND_SERVICE_MICROPHONE`, `SCHEDULE_EXACT_ALARM`, `RECEIVE_BOOT_COMPLETED`, `REQUEST_INSTALL_PACKAGES`, `QUERY_ALL_PACKAGES`, SMS, contacts, location, phone state, camera, accessibility, notification-listener, overlay.
 - **Network:** HTTPS only. No user-installed CAs, in any build type.
-- **Secrets:** never commit, print or log secrets. Never print `~/.claude.json` `mcpServers` URLs (the Penpot entry embeds a token) and never run `claude mcp list`.
+- **Secrets:** never commit, print or log secrets. Never print `~/.claude.json` `mcpServers` URLs (they can embed tokens) and never run `claude mcp list`.
 - **Upstream edits:** every edit to an upstream-owned file carries a `// SARASWATI:` (Kotlin/Gradle) or `<!-- SARASWATI: -->` (XML) marker with a reason. Keep every upstream copyright/GPL header; credit Metrolist, InnerTune and OuterTune.
 - **Machine limits:** ~8 GB RAM free. Always build through `sar_gradle` (Task 2): Gradle heap 3 GB, Kotlin daemon 2 GB, `nice -n 10`.
 - **Commits:** Conventional Commits, one per task step noted, each ending with the attribution trailer the harness supplies at execution time (currently `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`). Work on branch `phase1-harden`; Task 14 merges it.
@@ -53,10 +53,10 @@ Inputs and failure modes the spec implies but no feature task would otherwise ex
 - Move: upstream `README.md` → `docs/UPSTREAM_README.md` (keeps attribution)
 
 **Interfaces:**
-- Produces: remotes `origin` = `diamondspark/saraswati`, `upstream` = `MetrolistGroup/Metrolist`; local path `/home/mohit/saraswati`; branch `main` at the pinned commit plus our docs commit; branch `upstream-main` at the pinned commit (mirror used by Phase 2's sync bot); working branch `phase1-harden`.
+- Produces: remotes `origin` = `diamondspark/saraswati`, `upstream` = `MetrolistGroup/Metrolist`; local path `$HOME/saraswati`; branch `main` at the pinned commit plus our docs commit; branch `upstream-main` at the pinned commit (mirror used by Phase 2's sync bot); working branch `phase1-harden`.
 
 - [ ] **Step 1: Create the public fork.** `gh repo fork MetrolistGroup/Metrolist --fork-name saraswati --clone=false`. Verify: `gh repo view diamondspark/saraswati --json isFork,visibility,parent --jq '[.isFork,.visibility,.parent.name]|@tsv'` prints `true	PUBLIC	Metrolist`.
-- [ ] **Step 2: Clone with full history.** `gh repo clone diamondspark/saraswati /home/mohit/saraswati`, then `git -C /home/mohit/saraswati remote add upstream https://github.com/MetrolistGroup/Metrolist.git && git -C /home/mohit/saraswati fetch upstream`. Verify `git rev-parse --is-shallow-repository` prints `false`.
+- [ ] **Step 2: Clone with full history.** `gh repo clone diamondspark/saraswati $HOME/saraswati`, then `git -C $HOME/saraswati remote add upstream https://github.com/MetrolistGroup/Metrolist.git && git -C $HOME/saraswati fetch upstream`. Verify `git rev-parse --is-shallow-repository` prints `false`.
 - [ ] **Step 3: Pin.** `git checkout -B main 76fa5a78b5110674442884b6f21c0cef51cdb782 && git branch -f upstream-main 76fa5a78b5110674442884b6f21c0cef51cdb782`. Verify `git log -1 --format=%H` equals that hash and `grep -E '^innertubex = "v0.8.4"' gradle/libs.versions.toml` matches.
 - [ ] **Step 4: Remove upstream CI and add project docs.** Delete the four workflow files (upstream workflows run on a third-party runner provider with signing secrets; deleting is safer than disabling because a disabled flag does not stop a newly added upstream workflow). Add `README.md` (what Saraswati is, "fork of Metrolist, GPL-3.0", build pointer), `CREDITS.md` (Metrolist, InnerTune, OuterTune, copied from upstream's credits), `SECURITY.md` (how to report, scope: family-only app), and the three copied docs. Commit: `chore: pin upstream base 76fa5a7, drop upstream CI, add project docs`.
 - [ ] **Step 5: Publish.** `git push --force-with-lease origin main upstream-main` (the fork is brand new, so moving `main` back to the pinned commit is safe). Verify `gh api repos/diamondspark/saraswati/branches/main --jq .commit.sha` starts with the docs commit, and `git branch -r --contains` shows no extra branches.

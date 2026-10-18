@@ -8,7 +8,7 @@
 
 **Tech Stack:** Kotlin, Android `PackageInstaller`, kotlinx.serialization (already audited in the main app), GitHub Actions + `gh`, Python 3 stdlib (`unittest`) for gates, apksigner/zipalign, CodeQL, gitleaks, MobSF (Docker), androidx Macrobenchmark + Baseline Profile, JUnit4.
 
-**Spec:** `/home/mohit/.claude/plans/i-am-creating-my-serene-engelbart.md`. Phase 1 plan: `2026-10-17-saraswati-phase1-fork-harden.md` (must be merged first).
+**Spec:** `docs/superpowers/specs/2026-10-17-saraswati-design.md`. Phase 1 plan: `2026-10-17-saraswati-phase1-fork-harden.md` (must be merged first).
 
 ## Global Constraints
 

@@ -230,7 +230,7 @@ Metrolist already gives us a Media3 `MediaLibraryService` with a browse tree, `o
 
 ## Architecture
 
-- **Repo:** `diamondspark/saraswati`, a public fork, which satisfies GPL-3.0. The local clone goes in `/home/mohit/saraswati`.
+- **Repo:** `diamondspark/saraswati`, a public fork, which satisfies GPL-3.0. The local clone goes in `$HOME/saraswati`.
   - **Keep every upstream copyright notice**, and credit Metrolist, InnerTube and OuterTune. OpenTune was DMCA'd for stripping notices.
 - **Base:** upstream `main` at commit `76fa5a78b5110674442884b6f21c0cef51cdb782` (2026-10-08), not the `v13.7.0` tag. The tag pins InnerTubeX v0.5.2; the commit pins v0.8.4, and the playback fixes, the Cast fix (`bc6ee5ea4`) and the Android 17 media-control fix all landed after the tag. Verified: it builds and passes its 186 unit tests with our toolchain. Later upstream changes arrive through the sync bot.
 - **Rebrand:** three one-line edits in `app/build.gradle.kts` (application id `dev.diamondspark.saraswati`, app name `Saraswati`, debug name `Saraswati Debug`), launcher icons in `res/mipmap-anydpi-v26|v31` and `res/drawable/ic_launcher_*`, and the accent colour in `ui/theme/Theme.kt` (`0xFFED5564`). The `METROLIST_*` environment variables stay unset, so a build can never produce Metrolist's package id.
@@ -313,7 +313,7 @@ Smart downloads are limited to about 50 songs a night per phone, on Wi-Fi while 
    - Then the same command with `--yes`. This writes `mcpServers.rea` to `~/.claude.json` and the skill to `~/.claude/skills/reverse-engineer-anything`.
    - Prerequisites are already met: Node 22.23, procps, Chrome.
 2. **JDK 21** (Temurin, `~/tools/jdk-21`) and the **Android SDK** command-line tools (`~/Android/Sdk`: platform-tools, `platforms;android-37`, build-tools, and `extras;google;auto` for the Desktop Head Unit). User-space installs, no sudo.
-3. **jadx-headless-mcp 0.7.1:** check its SHA-256 (`6e5eacf500b64292bfb73c49797c1958f6ee44646e43e868039ae7feb573ff75`) and put it in `/home/mohit/.local/share/rea/android/`. Add `REA_JADX_MCP_JAR` and `JAVA_HOME` to the rea MCP server's environment.
+3. **jadx-headless-mcp 0.7.1:** check its SHA-256 (`6e5eacf500b64292bfb73c49797c1958f6ee44646e43e868039ae7feb573ff75`) and put it in `$HOME/.local/share/rea/android/`. Add `REA_JADX_MCP_JAR` and `JAVA_HOME` to the rea MCP server's environment.
 4. **Verify:** `npx rea-agents doctor --client claude_code --skill --json`, `claude mcp list` and `java -version`. Then restart Claude Code.
 
 ### Phase 1: fork, audit, harden (days 1–2)
