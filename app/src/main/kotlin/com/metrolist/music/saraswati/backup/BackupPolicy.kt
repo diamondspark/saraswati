@@ -155,6 +155,27 @@ object BackupPolicy {
         return mutable.toPreferences()
     }
 
+    // SARASWATI (I1): restoring a backup must never touch the live sealed
+    // cookie, VisitorData, DataSyncId or signed-in account identity —
+    // Task 16's own comment said so, but `prefs.clear(); prefs += restored`
+    // actually wiped them, because `restored` has already gone through
+    // sanitize() and therefore contains NONE of these keys at all. This
+    // function is the one place that decides what "preserve across a
+    // restore" means, so both BackupRestoreViewModel.restore() and its
+    // test use the exact same logic: every NEVER_EXPORT_OR_RESTORE key
+    // keeps EXACTLY its current live value — present or absent — no
+    // matter what [restored] does or doesn't contain for it. Every other
+    // key comes from [restored] as-is; that is the entire point of a
+    // restore.
+    fun mergeRestoreOntoLive(live: Preferences, restored: Preferences): Preferences {
+        val merged = restored.toMutablePreferences()
+        for (key in NEVER_EXPORT_OR_RESTORE) {
+            merged.removeAny(key)
+            copyLiveValue(live, merged, key)
+        }
+        return merged.toPreferences()
+    }
+
     @Suppress("UNCHECKED_CAST")
     private fun MutablePreferences.removeAny(key: Preferences.Key<*>) {
         // Preferences.Key<T> is invariant, but MutablePreferences.remove()
@@ -164,6 +185,19 @@ object BackupPolicy {
         // this cast is safe regardless of the key's real T. Same pattern as
         // SecretScrubber.removeAny.
         remove(key as Preferences.Key<Any>)
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun copyLiveValue(
+        live: Preferences,
+        into: MutablePreferences,
+        key: Preferences.Key<*>,
+    ) {
+        // Same invariance note as removeAny above — the cast is safe
+        // because Preferences' get/set only ever key off the name.
+        val typedKey = key as Preferences.Key<Any>
+        val value = live[typedKey] ?: return
+        into[typedKey] = value
     }
 
     // Size caps for every entry a backup ZIP or import file can carry.

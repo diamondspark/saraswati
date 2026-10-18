@@ -190,4 +190,56 @@ class BackupRoundTripTest {
             }
             assertTrue(sawSettingsEntry)
         }
+
+    @Test
+    fun `restoring into a signed-in device keeps the live cookie and updates the theme`() =
+        runBlocking {
+            // SARASWATI (I1): BackupRoundTripTest previously only ever restored into an
+            // EMPTY target store, so it could never catch `prefs.clear(); prefs += restored`
+            // wiping a cookie that was already live before the restore started — that bug
+            // only shows up when the TARGET is signed in. This is that missing case: a
+            // signed-in device (has a live sealed cookie, VisitorData, account identity)
+            // restores a backup made on a *different* device with different settings.
+            val liveSealedCookie = "v1:not-really-sealed-but-opaque-to-this-test=="
+            val targetDataStore =
+                InMemoryPreferencesDataStore(
+                    mutablePreferencesOf(
+                        DarkModeKey to "DARK",
+                        InnerTubeCookieKey to liveSealedCookie,
+                        com.metrolist.music.constants.AccountNameKey to "Live Account",
+                    ),
+                )
+
+            // The backup being restored came from a different signed-in session with a
+            // different theme; sanitize() already strips its cookie/account keys, same as
+            // every real restore.
+            val backupBytes =
+                serialize(
+                    BackupPolicy.sanitize(
+                        mutablePreferencesOf(
+                            DarkModeKey to "LIGHT",
+                            InnerTubeCookieKey to "SAPISID=someone-elses-cookie",
+                            com.metrolist.music.constants.AccountNameKey to "Someone Else",
+                        ).toPreferences(),
+                    ),
+                )
+            val restoredPrefs = BackupPolicy.sanitize(deserialize(backupBytes))
+
+            // This is the exact sequence BackupRestoreViewModel.restore() now runs inside
+            // its dataStore.edit {} block.
+            val live = targetDataStore.data.first()
+            val merged = BackupPolicy.mergeRestoreOntoLive(live = live, restored = restoredPrefs)
+            targetDataStore.edit { prefs ->
+                prefs.clear()
+                prefs += merged
+            }
+
+            val after = targetDataStore.data.first()
+            // The restored backup's own setting takes effect...
+            assertEquals("LIGHT", after[DarkModeKey])
+            // ...but the live secret/account-identity keys are completely unchanged, not
+            // cleared and not overwritten with the backup's values.
+            assertEquals(liveSealedCookie, after[InnerTubeCookieKey])
+            assertEquals("Live Account", after[com.metrolist.music.constants.AccountNameKey])
+        }
 }

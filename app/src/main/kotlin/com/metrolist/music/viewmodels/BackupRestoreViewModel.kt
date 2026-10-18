@@ -15,17 +15,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
-import com.metrolist.innertube.utils.parseCookieString
-import com.metrolist.innertube.utils.sha1
 import com.metrolist.music.R
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import okio.Buffer
 import com.metrolist.music.constants.AccountEmailKey
 import com.metrolist.music.constants.AccountNameKey
@@ -321,14 +311,20 @@ class BackupRestoreViewModel @Inject constructor(
                     // SARASWATI: audit A10-2 — write the sanitized settings into the live
                     // DataStore via edit {} instead of replacing settings.preferences_pb on
                     // disk. sanitize() has already dropped the cookie/proxy/server/AI/
-                    // account-identity keys above, so this can never plant one of them; the
-                    // restore never sets or clears the cookie — it simply never has one to
-                    // begin with.
+                    // account-identity keys from `restored`, so this can never plant one of
+                    // them. I1: that also means a plain `prefs.clear(); prefs += restored`
+                    // would WIPE those same live keys (the sealed cookie, VisitorData,
+                    // DataSyncId, account name/email/handle) instead of leaving them alone —
+                    // BackupPolicy.mergeRestoreOntoLive snapshots `prefs` (the current live
+                    // preferences, which `edit {}` hands this transform before any change)
+                    // and writes those exact live values back in on top of the restored
+                    // settings, so the restore truly never sets or clears the cookie.
                     if (foundSettings) {
                         sanitizedSettings?.let { restored ->
                             context.dataStore.edit { prefs ->
+                                val merged = BackupPolicy.mergeRestoreOntoLive(live = prefs.toPreferences(), restored = restored)
                                 prefs.clear()
-                                prefs += restored
+                                prefs += merged
                             }
                         }
                     }
@@ -400,85 +396,6 @@ class BackupRestoreViewModel @Inject constructor(
         }.getOrElse {
             Timber.tag("BACKUP_PREVIEW").e(it, "Failed to preview backup")
             BackupPreviewInfo()
-        }
-    }
-
-    suspend fun fetchAccountInfoFromBackup(cookie: String): BackupPreviewInfo? {
-        return runCatching {
-            // Parse cookie to get SAPISID for auth header
-            val cookieMap = parseCookieString(cookie)
-            val sapisid = cookieMap["SAPISID"] ?: return@runCatching null
-
-            // Generate SAPISIDHASH auth header
-            val origin = "https://music.youtube.com"
-            val currentTime = System.currentTimeMillis() / 1000
-            val sapisidHash = sha1("$currentTime $sapisid $origin")
-            val authHeader = "SAPISIDHASH ${currentTime}_$sapisidHash"
-
-            val client = OkHttpClient()
-            val requestBody = """{"context":{"client":{"clientName":"WEB_REMIX","clientVersion":"1.20240101.01.00"}}}"""
-                .toRequestBody("application/json".toMediaType())
-
-            val request = Request.Builder()
-                .url("https://music.youtube.com/youtubei/v1/account/account_menu?prettyPrint=false")
-                .post(requestBody)
-                .header("Cookie", cookie)
-                .header("Authorization", authHeader)
-                .header("Origin", origin)
-                .header("Referer", "$origin/")
-                .header("X-Origin", origin)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                .build()
-
-            val response = client.newCall(request).execute()
-            val responseBody = response.body?.string() ?: return@runCatching null
-
-            // Parse the JSON response
-            val json = Json { ignoreUnknownKeys = true }
-            val jsonResponse = json.parseToJsonElement(responseBody).jsonObject
-
-            // Navigate to activeAccountHeaderRenderer
-            val header = jsonResponse["actions"]
-                ?.jsonArray?.getOrNull(0)
-                ?.jsonObject?.get("openPopupAction")
-                ?.jsonObject?.get("popup")
-                ?.jsonObject?.get("multiPageMenuRenderer")
-                ?.jsonObject?.get("header")
-                ?.jsonObject?.get("activeAccountHeaderRenderer")
-                ?.jsonObject
-
-            if (header != null) {
-                val name = header["accountName"]
-                    ?.jsonObject?.get("runs")
-                    ?.jsonArray?.getOrNull(0)
-                    ?.jsonObject?.get("text")
-                    ?.jsonPrimitive?.content
-
-                val email = header["email"]
-                    ?.jsonObject?.get("runs")
-                    ?.jsonArray?.getOrNull(0)
-                    ?.jsonObject?.get("text")
-                    ?.jsonPrimitive?.content
-
-                val thumbnailUrl = header["accountPhoto"]
-                    ?.jsonObject?.get("thumbnails")
-                    ?.jsonArray?.getOrNull(0)
-                    ?.jsonObject?.get("url")
-                    ?.jsonPrimitive?.content
-
-                if (name != null) {
-                    BackupPreviewInfo(
-                        hasAuthData = true,
-                        accountName = name,
-                        accountEmail = email,
-                        accountImageUrl = thumbnailUrl,
-                        cookie = cookie,
-                    )
-                } else null
-            } else null
-        }.getOrElse {
-            Timber.tag("BACKUP_PREVIEW").e(it, "Failed to fetch account info from backup")
-            null
         }
     }
 

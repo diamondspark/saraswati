@@ -892,7 +892,10 @@
     <!-- Restore confirmation dialog -->
     <string name="restore_confirm_title">Restore backup?</string>
     <string name="restore_confirm_message">This will restore your app data from the selected backup</string>
-    <string name="restore_account_warning">The following account information will be restored and preserved:</string>
+    <!-- SARASWATI (I1): restoring never changes who's signed in on this device — the
+         backup's account info below is shown only so you can recognize which backup this
+         is; your current sign-in and cookie are kept as-is. -->
+    <string name="restore_account_warning">This backup was created while signed in as:</string>
     <string name="restore">Restore</string>
     <string name="restore_database_incompatible">Cannot restore backup: database version incompatible. Your current data has been preserved.</string>
     <string name="checking_previous_account">Checking for previous account…</string>
