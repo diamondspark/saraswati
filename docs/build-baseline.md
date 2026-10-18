@@ -90,3 +90,39 @@ Line-by-line justification for the entries in `security/manifest-allowlist.json`
 - `forbidden_permissions` beyond the four literal ones Task 4's brief names (`RECORD_AUDIO`, `FOREGROUND_SERVICE_MICROPHONE`, `SCHEDULE_EXACT_ALARM`, `RECEIVE_BOOT_COMPLETED`) spell out the Global Constraints' "Never present" categories as concrete permission constants, since the gate matches exact strings: `REQUEST_INSTALL_PACKAGES`, `QUERY_ALL_PACKAGES` (named literally); SMS → `SEND_SMS`/`RECEIVE_SMS`/`READ_SMS`/`RECEIVE_MMS`/`RECEIVE_WAP_PUSH`; contacts → `READ_CONTACTS`/`WRITE_CONTACTS`/`GET_ACCOUNTS`; location → `ACCESS_FINE_LOCATION`/`ACCESS_COARSE_LOCATION`/`ACCESS_BACKGROUND_LOCATION`; phone state → `READ_PHONE_STATE`/`READ_PHONE_NUMBERS`/`CALL_PHONE`/`ANSWER_PHONE_CALLS`/`PROCESS_OUTGOING_CALLS`; camera → `CAMERA`; accessibility → `BIND_ACCESSIBILITY_SERVICE`; notification-listener → `BIND_NOTIFICATION_LISTENER_SERVICE`; overlay → `SYSTEM_ALERT_WINDOW`.
 
 No Cast, Play Services or Google Sign-In permission or exported component appeared in this snapshot (the `gms` flavor only adds the Cast `OPTIONS_PROVIDER_CLASS_NAME` `<meta-data>`, which is not a permission or an exported component), so none needed a separate line here.
+
+## Final Phase 1 test count (after the whole-branch review fix round)
+
+The "Baseline" section above is deliberately untouched: it is the pinned
+upstream measurement from before any Phase 1 change, kept as the fixed
+comparison point. This section records where the number ended up after
+Tasks 1–17 and the final whole-branch review's fix round (C1/I1/I2/I4/I5 and
+the smaller related fixes).
+
+| Item | Value |
+| --- | --- |
+| Command | `source scripts/dev-env.sh && rm -rf app/build/test-results/testGmsDebugUnitTest && sar_gradle :app:testGmsDebugUnitTest` |
+| Unit tests | `288 0 0 0` (tests, failures, errors, skipped — same one-liner as "Test totals" below) |
+| `security/apk_gate.py check` | exit 0 against a fresh `:app:assembleGmsRelease` output |
+| Python gates | `python3 -I -m unittest discover -s security -p 'test_*.py'` and the same with `-s scripts`: 16 and 17 tests, 0 failures |
+
+Task 14's own clean-build run (step 1, before this fix round) measured 285
+tests and recorded a build-environment finding worth keeping visible here:
+**the default heap in `scripts/dev-env.sh` (Gradle 3 GB / Kotlin daemon
+2 GB) OOM'd twice on a genuinely clean, full-module Kotlin compile** (large
+Compose files such as `CsvColumnMappingDialog.kt` hit the ASM bytecode
+analyzer's GC overhead limit). It only succeeded after a one-off larger
+heap:
+
+```bash
+sar_gradle clean :app:testGmsDebugUnitTest :app:assembleGmsRelease \
+  "-Dorg.gradle.jvmargs=-Xmx6g" "-Dkotlin.daemon.jvm.options=-Xmx4g"
+```
+
+This never affected any task's normal, incremental build during execution —
+only a true `clean` (no cached Kotlin/compile outputs at all) triggers it.
+Do not edit the committed `dev-env.sh` default to work around this; pass the
+larger heap one-off when a clean build is actually needed. Flagged for Phase
+2 Task 3 (the CI workflow): a GitHub Actions runner's first build is always
+clean, so it will need the same heap bump (or K2 incremental-compilation
+avoidance) to not OOM on its first run.
