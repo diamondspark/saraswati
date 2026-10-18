@@ -29,6 +29,8 @@ import com.metrolist.kugou.KuGou
 import com.metrolist.lastfm.LastFM
 import com.metrolist.music.BuildConfig
 import com.metrolist.music.saraswati.SaraswatiFeatures
+import com.metrolist.music.saraswati.security.SaraswatiVault
+import com.metrolist.music.saraswati.security.SecretScrubber
 import com.metrolist.music.constants.*
 import com.metrolist.music.di.ApplicationScope
 import com.metrolist.music.extensions.toEnum
@@ -87,6 +89,19 @@ class App :
         } catch (e: Exception) {
             Timber.e(e, "Failed to ensure DataStore directory")
         }
+
+        // SARASWATI: scrub any plaintext secret preference (a YouTube
+        // sign-in cookie, or an AI/Last.fm/Listen-Together/proxy
+        // credential) that a restored Metrolist backup, a phone-to-phone
+        // transfer, or a hand-copied legacy datastore file could have left
+        // behind (audit NEW-3; Review Focus #4). This runs synchronously,
+        // not inside applicationScope.launch: Android does not create any
+        // Activity (and therefore cannot run any Compose code that reads
+        // InnerTubeCookieKey via rememberPreference) until
+        // Application.onCreate() returns, so blocking here guarantees the
+        // scrub finishes before observeSettingsChanges() below — or
+        // anything else in this process — ever reads the cookie.
+        runBlocking { SecretScrubber.scrub(dataStore, SaraswatiVault.cookieVault) }
 
         // Plant logging before extraction services initialize.
         Timber.plant(Timber.DebugTree())
@@ -244,9 +259,13 @@ class App :
             dataStore.data
                 .map { it[InnerTubeCookieKey] }
                 .distinctUntilChanged()
-                .collect { cookie ->
+                .collect { stored ->
                     try {
-                        YouTube.cookie = cookie
+                        // SARASWATI: stored is vault-sealed; open it before handing
+                        // it to YouTube.cookie. SecretScrubber already ran above, so
+                        // in the normal case this is just the hot-reload path for a
+                        // cookie this app itself sealed.
+                        YouTube.cookie = stored?.let { SaraswatiVault.cookieVault.open(it) }
                     } catch (e: Exception) {
                         Timber.e(e, "Could not parse cookie. Clearing existing cookie.")
                         forgetAccount(this@App)

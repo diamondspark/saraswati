@@ -17,6 +17,7 @@ import com.metrolist.music.constants.DataSyncIdKey
 import com.metrolist.music.constants.InnerTubeAuthUserKey
 import com.metrolist.music.constants.InnerTubeCookieKey
 import com.metrolist.music.constants.VisitorDataKey
+import com.metrolist.music.saraswati.security.SaraswatiVault
 import com.metrolist.music.utils.SyncUtils
 import com.metrolist.music.utils.dataStore
 import com.metrolist.music.utils.safeDataStoreEdit
@@ -90,7 +91,8 @@ class AccountSettingsViewModel @Inject constructor(
     ) {
         viewModelScope.launch(Dispatchers.IO) {
             val saved = context.safeDataStoreEdit { settings ->
-                settings[InnerTubeCookieKey] = cookie
+                // SARASWATI: seal the sign-in cookie before it ever touches disk.
+                settings[InnerTubeCookieKey] = SaraswatiVault.cookieVault.seal(cookie)
                 settings[VisitorDataKey] = visitorData
                 settings[DataSyncIdKey] = dataSyncId
                 settings[InnerTubeAuthUserKey] = authUser.filter(Char::isDigit).ifBlank { "0" }

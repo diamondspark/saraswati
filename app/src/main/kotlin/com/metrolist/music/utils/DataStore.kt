@@ -17,7 +17,9 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.preferencesDataStore
+import com.metrolist.music.constants.InnerTubeCookieKey
 import com.metrolist.music.extensions.toEnum
+import com.metrolist.music.saraswati.security.SaraswatiVault
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -67,9 +69,38 @@ suspend fun Context.safeDataStoreEdit(
     }
 }
 
+// SARASWATI: InnerTubeCookieKey is sealed at rest (CookieVault); every read
+// through this file's helpers must open it here so no caller ever sees
+// ciphertext, and no caller ever sees a legacy/restored plaintext value
+// that SecretScrubber didn't catch (defense in depth — open() rejects
+// anything that isn't our own sealed format anyway).
+@Suppress("UNCHECKED_CAST")
+private fun <T> unsealIfCookie(
+    key: Preferences.Key<T>,
+    raw: T?,
+): T? =
+    if (key == InnerTubeCookieKey) {
+        (raw as? String)?.let { SaraswatiVault.cookieVault.open(it) } as T?
+    } else {
+        raw
+    }
+
+// SARASWATI: the write-side counterpart of unsealIfCookie — seal the
+// cookie before it ever touches disk.
+@Suppress("UNCHECKED_CAST")
+private fun <T> sealIfCookie(
+    key: Preferences.Key<T>,
+    value: T,
+): T =
+    if (key == InnerTubeCookieKey) {
+        SaraswatiVault.cookieVault.seal(value as String) as T
+    } else {
+        value
+    }
+
 operator fun <T> DataStore<Preferences>.get(key: Preferences.Key<T>): T? =
     runBlocking(Dispatchers.IO) {
-        data.first()[key]
+        unsealIfCookie(key, data.first()[key])
     }
 
 fun <T> DataStore<Preferences>.get(
@@ -77,7 +108,7 @@ fun <T> DataStore<Preferences>.get(
     defaultValue: T,
 ): T =
     runBlocking(Dispatchers.IO) {
-        data.first()[key] ?: defaultValue
+        unsealIfCookie(key, data.first()[key]) ?: defaultValue
     }
 
 fun <T> preference(
@@ -103,7 +134,7 @@ fun <T> rememberPreference(
     val state =
         remember {
             context.dataStore.data
-                .map { it[key] ?: defaultValue }
+                .map { unsealIfCookie(key, it[key]) ?: defaultValue }
                 .distinctUntilChanged()
         }.collectAsStateWithLifecycle(defaultValue)
 
@@ -114,7 +145,7 @@ fun <T> rememberPreference(
                 set(value) {
                     coroutineScope.launch {
                         context.safeDataStoreEdit {
-                            it[key] = value
+                            it[key] = sealIfCookie(key, value)
                         }
                     }
                 }

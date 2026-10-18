@@ -72,6 +72,7 @@ import com.metrolist.music.constants.DataSyncIdKey
 import com.metrolist.music.constants.InnerTubeAuthUserKey
 import com.metrolist.music.constants.InnerTubeCookieKey
 import com.metrolist.music.constants.VisitorDataKey
+import com.metrolist.music.saraswati.security.SaraswatiVault
 import com.metrolist.music.ui.component.IconButton
 import com.metrolist.music.ui.utils.backToMain
 import com.metrolist.music.utils.reportException
@@ -190,7 +191,8 @@ fun LoginScreen(
             val saved =
                 withContext(Dispatchers.IO) {
                     context.safeDataStoreEdit { settings ->
-                        settings[InnerTubeCookieKey] = authData.cookie
+                        // SARASWATI: seal the sign-in cookie before it ever touches disk.
+                        settings[InnerTubeCookieKey] = SaraswatiVault.cookieVault.seal(authData.cookie)
                         settings[VisitorDataKey] = authData.visitorData
                         settings[DataSyncIdKey] = authData.dataSyncId
                         settings[InnerTubeAuthUserKey] = authData.authUser

@@ -28,6 +28,7 @@ import com.metrolist.music.db.entities.PlaylistSongMap
 import com.metrolist.music.db.entities.PodcastEntity
 import com.metrolist.music.db.entities.SetVideoIdEntity
 import com.metrolist.music.db.entities.SongEntity
+import com.metrolist.music.saraswati.security.SaraswatiVault
 import com.metrolist.music.extensions.collectLatest
 import com.metrolist.music.extensions.isInternetConnected
 import com.metrolist.music.extensions.isSyncEnabled
@@ -409,9 +410,13 @@ class SyncUtils @Inject constructor(
 
     private suspend fun isLoggedIn(): Boolean {
         return try {
-            val cookie = context.dataStore.data
+            // SARASWATI: the stored value is vault-sealed; open it before
+            // inspecting it for SAPISID, otherwise every signed-in user would
+            // read as logged out.
+            val stored = context.dataStore.data
                 .map { it[InnerTubeCookieKey] }
                 .first()
+            val cookie = stored?.let { SaraswatiVault.cookieVault.open(it) }
             cookie?.let { "SAPISID" in parseCookieString(it) } ?: false
         } catch (e: Exception) {
             Timber.e(e, "Error checking login status")
