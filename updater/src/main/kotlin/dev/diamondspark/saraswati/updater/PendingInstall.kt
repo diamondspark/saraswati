@@ -53,6 +53,12 @@ object PendingInstall {
     /** True once an install attempt has begun and hasn't been fully resolved yet (see [clear]). */
     fun isAttemptPending(prefs: SharedPreferences): Boolean = prefs.getBoolean(KEY_ATTEMPTED, false)
 
+    /** Reads the terminal status without clearing it — see [decideInstallRecovery], which must not have side effects. */
+    fun peekTerminalStatus(prefs: SharedPreferences): Int? {
+        if (!prefs.contains(KEY_STATUS)) return null
+        return prefs.getInt(KEY_STATUS, 0)
+    }
+
     /**
      * The terminal status recorded for the pending attempt, if one has
      * arrived yet — null while still waiting on the user inside the system
@@ -60,8 +66,7 @@ object PendingInstall {
      * install attempt never sees a stale leftover value.
      */
     fun consumeTerminalStatus(prefs: SharedPreferences): Int? {
-        if (!prefs.contains(KEY_STATUS)) return null
-        val status = prefs.getInt(KEY_STATUS, 0)
+        val status = peekTerminalStatus(prefs) ?: return null
         prefs.edit().remove(KEY_STATUS).apply()
         return status
     }
@@ -69,5 +74,47 @@ object PendingInstall {
     /** Called once the attempt is fully resolved: the permission has been confirmed off. */
     fun clear(prefs: SharedPreferences) {
         prefs.edit().remove(KEY_ATTEMPTED).remove(KEY_STATUS).apply()
+    }
+}
+
+/** What [UpdateActivity.recoverPendingInstallIfAny] should do, decided by [decideInstallRecovery]. */
+sealed interface InstallRecoveryAction {
+    /** Nothing to recover — let the caller's normal onResume flow continue untouched. */
+    object None : InstallRecoveryAction
+
+    /** [UiState.ReadyToInstall] survived (an ordinary pause+resume, not a crash) and the real outcome is now known. */
+    data class DispatchStatus(val status: Int) : InstallRecoveryAction
+
+    /** [UiState.ReadyToInstall] survived but the user is still inside the system confirmation dialog — nothing to do yet. */
+    object WaitForStatus : InstallRecoveryAction
+
+    /** A genuine process death (checkpoint reset to [UiState.Checking]) with no manifest left: recover honestly with version=null. */
+    object RecoverAsCrashed : InstallRecoveryAction
+}
+
+// SARASWATI: Task 5 (fix round 2, dedicated re-review) — extracted as a
+// pure function specifically so the exact condition that was wrong in fix
+// round 1 is independently testable without Robolectric or a real
+// Activity: telling a genuine crash (checkpoint reset all the way back to
+// Checking) apart from completely ordinary pause+resume navigation that
+// merely passes back through some OTHER checkpoint (most notably
+// TurnPermissionOff, reached by tapping "Open settings" — that pauses and
+// resumes this Activity exactly like the system install-confirmation UI
+// does, but is not a crash). Fix round 1's fallback treated "anything that
+// isn't ReadyToInstall" as a crash, which wrongly caught TurnPermissionOff
+// too, discarding its real version and showing a misleading
+// "Install didn't finish" instead of "Done on version X" for what was
+// actually a successful update (self-correcting via Retry, never reopening
+// the permission-left-on gap — not a repeat of the CRITICAL finding).
+fun decideInstallRecovery(checkpoint: UiState, isAttemptPending: Boolean, knownStatus: Int?): InstallRecoveryAction {
+    if (!isAttemptPending) return InstallRecoveryAction.None
+    return when {
+        checkpoint is UiState.ReadyToInstall -> if (knownStatus != null) {
+            InstallRecoveryAction.DispatchStatus(knownStatus)
+        } else {
+            InstallRecoveryAction.WaitForStatus
+        }
+        checkpoint == UiState.Checking -> InstallRecoveryAction.RecoverAsCrashed
+        else -> InstallRecoveryAction.None
     }
 }

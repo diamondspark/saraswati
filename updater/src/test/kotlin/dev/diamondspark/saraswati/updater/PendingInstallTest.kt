@@ -13,6 +13,8 @@
 package dev.diamondspark.saraswati.updater
 
 import android.content.SharedPreferences
+import dev.diamondspark.saraswati.updatecore.ApkAsset
+import dev.diamondspark.saraswati.updatecore.UpdateManifest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -125,4 +127,91 @@ class PendingInstallTest {
         PendingInstall.recordTerminalStatus(prefs, 0)
         assertEquals(0, PendingInstall.consumeTerminalStatus(prefs))
     }
+
+    // SARASWATI: fix round 2, dedicated re-review — decideInstallRecovery is
+    // the exact logic that was wrong in fix round 1: it used to treat
+    // "anything that isn't ReadyToInstall" as a crash, which wrongly caught
+    // TurnPermissionOff too (reached by entirely ordinary navigation, e.g.
+    // tapping "Open settings" pauses+resumes the Activity the same way the
+    // system install-confirmation UI does), discarding its real version and
+    // showing a misleading "Install didn't finish" instead of
+    // "Done on version X" for what was actually a successful update.
+
+    @Test
+    fun `nothing pending means no recovery action regardless of checkpoint`() {
+        assertEquals(
+            InstallRecoveryAction.None,
+            decideInstallRecovery(UiState.Checking, isAttemptPending = false, knownStatus = null),
+        )
+    }
+
+    @Test
+    fun `ReadyToInstall with a known status dispatches it`() {
+        val m = manifest()
+        assertEquals(
+            InstallRecoveryAction.DispatchStatus(0),
+            decideInstallRecovery(UiState.ReadyToInstall(m), isAttemptPending = true, knownStatus = 0),
+        )
+    }
+
+    @Test
+    fun `ReadyToInstall with no status yet waits`() {
+        val m = manifest()
+        assertEquals(
+            InstallRecoveryAction.WaitForStatus,
+            decideInstallRecovery(UiState.ReadyToInstall(m), isAttemptPending = true, knownStatus = null),
+        )
+    }
+
+    @Test
+    fun `Checking with an attempt pending is recovered as a crash`() {
+        assertEquals(
+            InstallRecoveryAction.RecoverAsCrashed,
+            decideInstallRecovery(UiState.Checking, isAttemptPending = true, knownStatus = null),
+        )
+        // Even when a status happens to be known, Checking has no manifest
+        // left to thread it through reduce with — still recovers version-less.
+        assertEquals(
+            InstallRecoveryAction.RecoverAsCrashed,
+            decideInstallRecovery(UiState.Checking, isAttemptPending = true, knownStatus = 0),
+        )
+    }
+
+    @Test
+    fun `TurnPermissionOff with an attempt still pending is NOT treated as a crash`() {
+        // The exact regression: an ordinary pause+resume through
+        // TurnPermissionOff (e.g. "Open settings") must fall through to the
+        // normal onResume handling, which re-dispatches PermissionChecked
+        // against the REAL, already-correct TurnPermissionOff(version) —
+        // not get its version silently discarded by crash recovery.
+        val result = decideInstallRecovery(UiState.TurnPermissionOff("1.42"), isAttemptPending = true, knownStatus = null)
+        assertEquals(InstallRecoveryAction.None, result)
+    }
+
+    @Test
+    fun `any other checkpoint with an attempt pending is also not a crash signature`() {
+        assertEquals(
+            InstallRecoveryAction.None,
+            decideInstallRecovery(UiState.Done("1.42"), isAttemptPending = true, knownStatus = null),
+        )
+        assertEquals(
+            InstallRecoveryAction.None,
+            decideInstallRecovery(UiState.Installing, isAttemptPending = true, knownStatus = null),
+        )
+    }
+
+    private fun manifest(): UpdateManifest = UpdateManifest(
+        schema = 1,
+        channel = "stable",
+        versionCode = 1L,
+        versionName = "1.0",
+        apk = ApkAsset(
+            url = "https://github.com/diamondspark/saraswati/releases/download/v1/saraswati.apk",
+            sha256 = "a".repeat(64),
+            size = 1L,
+        ),
+        urgent = false,
+        notes = "",
+        publishedAt = "2026-10-17T00:00:00Z",
+    )
 }

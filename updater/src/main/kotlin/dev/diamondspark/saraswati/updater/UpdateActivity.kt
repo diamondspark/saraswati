@@ -155,9 +155,11 @@ class UpdateActivity : Activity() {
     // ---- recovery -----------------------------------------------------
 
     /**
-     * Consults [PendingInstall], which [InstallResultReceiver] writes to
-     * directly and independently of this Activity's lifecycle. Covers two
-     * distinct situations with one check (see the file header):
+     * Consults [PendingInstall] (via the pure [decideInstallRecovery],
+     * fix round 2 — see its own doc comment for exactly why "anything that
+     * isn't ReadyToInstall" was the wrong fallback condition) to tell apart
+     * three situations that can all arrive here with an attempt still
+     * pending:
      *
      * - [checkpoint] is still [UiState.ReadyToInstall] (this Activity
      *   instance merely paused, e.g. while the system install-confirmation
@@ -165,28 +167,37 @@ class UpdateActivity : Activity() {
      *   status is now known, dispatch it through `reduce` exactly as the
      *   live listener would have, threading the real manifest/version
      *   through normally. If no status is known yet, the user is still
-     *   inside the system dialog — nothing to recover, just let the normal
-     *   fall-through re-render whatever's already on screen.
-     * - [checkpoint] is anything else (a genuine process death reset it to
-     *   [UiState.Checking] on this fresh instance): the manifest is gone,
-     *   so there's nothing meaningful to thread through `reduce`'s
-     *   InstallStatus handling even if a status happens to be known —
-     *   recover the same honest, version-less way regardless.
+     *   inside the system dialog — nothing to recover.
+     * - [checkpoint] reset all the way to [UiState.Checking] (a genuine
+     *   process death on this fresh instance): the manifest is gone, so
+     *   recover the same honest, version-less way regardless of whether a
+     *   status happens to be known.
+     * - [checkpoint] is anything else (most notably [UiState.TurnPermissionOff]
+     *   itself, reached by entirely ordinary navigation such as tapping
+     *   "Open settings"): NOT a crash signature — return false and let the
+     *   normal onResume fall-through handle it with the real, already-correct
+     *   in-memory state.
      */
     private fun recoverPendingInstallIfAny(): Boolean {
-        if (!PendingInstall.isAttemptPending(prefs)) return false
+        val isPending = PendingInstall.isAttemptPending(prefs)
+        val knownStatus = if (isPending) PendingInstall.peekTerminalStatus(prefs) else null
 
-        if (checkpoint is UiState.ReadyToInstall) {
-            val knownStatus = PendingInstall.consumeTerminalStatus(prefs) ?: return false
-            dispatch(Event.InstallStatus(knownStatus))
-            return true
+        when (val action = decideInstallRecovery(checkpoint, isPending, knownStatus)) {
+            InstallRecoveryAction.None, InstallRecoveryAction.WaitForStatus -> return false
+
+            is InstallRecoveryAction.DispatchStatus -> {
+                PendingInstall.consumeTerminalStatus(prefs)
+                dispatch(Event.InstallStatus(action.status))
+            }
+
+            InstallRecoveryAction.RecoverAsCrashed -> {
+                PendingInstall.consumeTerminalStatus(prefs) // discard: no manifest left to make use of it
+                checkpoint = UiState.TurnPermissionOff(version = null)
+                displayed = checkpoint
+                render(displayed)
+                dispatch(Event.PermissionChecked(canInstall = packageManager.canRequestPackageInstalls()))
+            }
         }
-
-        PendingInstall.consumeTerminalStatus(prefs) // discard: no manifest left to make use of it
-        checkpoint = UiState.TurnPermissionOff(version = null)
-        displayed = checkpoint
-        render(displayed)
-        dispatch(Event.PermissionChecked(canInstall = packageManager.canRequestPackageInstalls()))
         return true
     }
 
