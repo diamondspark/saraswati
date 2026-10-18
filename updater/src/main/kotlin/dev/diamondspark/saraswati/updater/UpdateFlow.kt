@@ -95,14 +95,27 @@ fun reduce(state: UiState, event: Event, canInstallNow: Boolean): UiState {
     }
 
     return when (event) {
-        is Event.ManifestLoaded -> when (val decision = UpdateDecider.decide(event.installed, event.manifest)) {
-            is Decision.UpToDate -> UiState.UpToDate(event.installed ?: event.manifest.versionCode)
-            is Decision.AlreadyAhead -> UiState.AlreadyAhead(decision.installed)
-            is Decision.UpdateAvailable -> UiState.UpdateReady(decision.manifest)
-            is Decision.Rejected -> UiState.Error(decision.reason, canRetry = true)
+        // SARASWATI: fix round 1, dedicated review (MINOR) — gated on the
+        // predecessor state like every other branch below, instead of
+        // firing unconditionally regardless of `state`. Not reachable as a
+        // live bug given how UpdateActivity drives dispatch today (a
+        // manifest fetch only ever starts from Checking), but kept
+        // consistent for defense in depth rather than being the one
+        // exception to the pattern.
+        is Event.ManifestLoaded -> when (state) {
+            UiState.Checking -> when (val decision = UpdateDecider.decide(event.installed, event.manifest)) {
+                is Decision.UpToDate -> UiState.UpToDate(event.installed ?: event.manifest.versionCode)
+                is Decision.AlreadyAhead -> UiState.AlreadyAhead(decision.installed)
+                is Decision.UpdateAvailable -> UiState.UpdateReady(decision.manifest)
+                is Decision.Rejected -> UiState.Error(decision.reason, canRetry = true)
+            }
+            else -> state
         }
 
-        is Event.ManifestFailed -> UiState.Error(event.reason, canRetry = true)
+        is Event.ManifestFailed -> when (state) {
+            UiState.Checking -> UiState.Error(event.reason, canRetry = true)
+            else -> state
+        }
 
         is Event.DownloadProgress -> when (state) {
             is UiState.UpdateReady, is UiState.Downloading -> UiState.Downloading(event.percent)

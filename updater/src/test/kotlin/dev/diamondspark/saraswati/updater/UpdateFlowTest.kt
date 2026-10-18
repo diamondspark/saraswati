@@ -196,4 +196,23 @@ class UpdateFlowTest {
         val result = reduce(UiState.ReadyToInstall(m), Event.UserTappedUpdate, canInstallNow = true)
         assertEquals(UiState.Installing, result)
     }
+
+    // SARASWATI: fix round 1, dedicated review (MINOR) — ManifestLoaded/
+    // ManifestFailed are now gated on the predecessor state like every
+    // other event in reduce, instead of firing unconditionally.
+
+    @Test
+    fun `manifest loaded is ignored outside the Checking state`() {
+        val m = manifest()
+        val mid = UiState.Downloading(50)
+        val result = reduce(mid, Event.ManifestLoaded(m, installed = 1L), canInstallNow = false)
+        assertEquals(mid, result)
+    }
+
+    @Test
+    fun `manifest failed is ignored outside the Checking state`() {
+        val mid = UiState.Installing
+        val result = reduce(mid, Event.ManifestFailed("offline"), canInstallNow = false)
+        assertEquals(mid, result)
+    }
 }

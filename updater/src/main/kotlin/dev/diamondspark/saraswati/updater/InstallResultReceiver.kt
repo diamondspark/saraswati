@@ -7,9 +7,14 @@
 // not exported (AndroidManifest.xml), reachable only through the explicit
 // PendingIntent InstallSession hands to session.commit(). Two outcomes:
 // STATUS_PENDING_USER_ACTION means Android still needs the user to confirm
-// the install in a system dialog (EXTRA_INTENT is that dialog's Intent);
-// anything else is terminal and is forwarded to whichever UpdateActivity is
-// currently listening as an Event.InstallStatus.
+// the install in a system dialog (EXTRA_INTENT is that dialog's Intent) —
+// starting it (FLAG_ACTIVITY_NEW_TASK) is the ORDINARY path for every real
+// install and necessarily pauses UpdateActivity, which is exactly why a
+// terminal status below is persisted via PendingInstall UNCONDITIONALLY,
+// before even trying the live in-memory listener: this receiver is the one
+// thing that reliably sees every terminal outcome regardless of whether
+// UpdateActivity is resumed, paused, or not running at all (see
+// PendingInstall.kt's file header; fix round 1, dedicated review).
 package dev.diamondspark.saraswati.updater
 
 import android.content.BroadcastReceiver
@@ -36,6 +41,7 @@ class InstallResultReceiver : BroadcastReceiver() {
             return
         }
 
+        PendingInstall.recordTerminalStatus(PendingInstall.prefs(context), status)
         InstallEvents.listener?.invoke(status)
     }
 

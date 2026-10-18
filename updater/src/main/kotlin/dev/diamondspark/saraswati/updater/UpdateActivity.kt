@@ -18,19 +18,27 @@
 //    needs to build NeedsInstallPermission(manifest)/ReadyToInstall(manifest)/
 //    TurnPermissionOff(version), while [displayed] freely shows progress.
 //
-// 2. Surviving a crash mid-flow (Review Focus item 2's named risk). Before
-//    the very first byte of the APK is written into a PackageInstaller
-//    session, [PREF_PENDING_TURN_OFF] is persisted to disk. If this process
-//    dies anywhere between that point and the user actually flipping the
-//    permission off — mid-install, before the result broadcast, even
-//    before this Activity ever sees InstallStatus — the NEXT time the
-//    Updater opens, onResume sees that flag before it does anything else
-//    and jumps straight to TurnPermissionOff, skipping the normal
-//    Checking flow entirely, rather than silently forgetting that
-//    REQUEST_INSTALL_PACKAGES might still be granted. It deliberately
-//    recovers with version=null (never a guessed/stale version string) —
-//    if the install actually DID succeed before the crash, a plain Retry
-//    re-check will correctly land on UpToDate.
+// 2. Surviving both a crash AND a plain pause mid-flow (Review Focus item
+//    2's named risk; fix round 1 after dedicated review caught the pause
+//    case). PendingInstall.markAttemptStarted is written before the very
+//    first byte of the APK is written into a PackageInstaller session, and
+//    PendingInstall.recordTerminalStatus is written by InstallResultReceiver
+//    the instant a terminal status arrives — UNCONDITIONALLY, regardless of
+//    whether this Activity is resumed, paused, or not running at all. That
+//    second part matters because launching the system install-confirmation
+//    UI (STATUS_PENDING_USER_ACTION's EXTRA_INTENT, FLAG_ACTIVITY_NEW_TASK)
+//    necessarily pauses this Activity — the ORDINARY path for every real
+//    install, not an edge case — which nulls InstallEvents.listener
+//    (onPause) and would silently drop the real terminal broadcast if that
+//    were the only channel. onResume always checks PendingInstall first,
+//    both when checkpoint reset to Checking (genuine process death: no
+//    manifest left to thread through reduce, so it recovers honestly with
+//    version=null — if the install actually DID succeed before the crash,
+//    a plain Retry re-check will correctly land on UpToDate) and when
+//    checkpoint is still pinned at ReadyToInstall (this Activity instance
+//    merely paused and resumed: the manifest is still right there, so a
+//    now-known terminal status is dispatched through reduce exactly as if
+//    it had arrived live).
 package dev.diamondspark.saraswati.updater
 
 import android.app.Activity
@@ -55,9 +63,7 @@ import java.io.File
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
-private const val PREFS_NAME = "saraswati_updater"
 private const val PREF_CHANNEL = "channel"
-private const val PREF_PENDING_TURN_OFF = "pending_turn_off"
 private const val DEFAULT_CHANNEL = "stable"
 private const val EXTRA_CHANNEL = "channel"
 private const val TARGET_PACKAGE_SARASWATI = "dev.diamondspark.saraswati"
@@ -106,7 +112,7 @@ class UpdateActivity : Activity() {
         buttonPrimary = findViewById(R.id.button_primary)
         buttonPrimary.setOnClickListener { onPrimaryButtonTapped() }
 
-        prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        prefs = PendingInstall.prefs(this)
         executor = Executors.newSingleThreadExecutor()
         installSession = InstallSession(this)
 
@@ -115,9 +121,18 @@ class UpdateActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        InstallEvents.listener = { code -> mainHandler.post { dispatch(Event.InstallStatus(code)) } }
+        InstallEvents.listener = { code ->
+            mainHandler.post {
+                // Purge the persisted copy too: whichever path "wins" the
+                // race against a later resume's recovery check, exactly one
+                // consumer must clear it, or a stale status could otherwise
+                // leak into a completely unrelated, later install attempt.
+                PendingInstall.consumeTerminalStatus(prefs)
+                dispatch(Event.InstallStatus(code))
+            }
+        }
 
-        if (recoverPendingTurnOffIfAny()) return
+        if (recoverPendingInstallIfAny()) return
 
         when (checkpoint) {
             is UiState.NeedsInstallPermission, is UiState.TurnPermissionOff ->
@@ -139,9 +154,35 @@ class UpdateActivity : Activity() {
 
     // ---- recovery -----------------------------------------------------
 
-    private fun recoverPendingTurnOffIfAny(): Boolean {
-        if (checkpoint != UiState.Checking) return false
-        if (!prefs.getBoolean(PREF_PENDING_TURN_OFF, false)) return false
+    /**
+     * Consults [PendingInstall], which [InstallResultReceiver] writes to
+     * directly and independently of this Activity's lifecycle. Covers two
+     * distinct situations with one check (see the file header):
+     *
+     * - [checkpoint] is still [UiState.ReadyToInstall] (this Activity
+     *   instance merely paused, e.g. while the system install-confirmation
+     *   UI was on top, and resumed — no process death): if a terminal
+     *   status is now known, dispatch it through `reduce` exactly as the
+     *   live listener would have, threading the real manifest/version
+     *   through normally. If no status is known yet, the user is still
+     *   inside the system dialog — nothing to recover, just let the normal
+     *   fall-through re-render whatever's already on screen.
+     * - [checkpoint] is anything else (a genuine process death reset it to
+     *   [UiState.Checking] on this fresh instance): the manifest is gone,
+     *   so there's nothing meaningful to thread through `reduce`'s
+     *   InstallStatus handling even if a status happens to be known —
+     *   recover the same honest, version-less way regardless.
+     */
+    private fun recoverPendingInstallIfAny(): Boolean {
+        if (!PendingInstall.isAttemptPending(prefs)) return false
+
+        if (checkpoint is UiState.ReadyToInstall) {
+            val knownStatus = PendingInstall.consumeTerminalStatus(prefs) ?: return false
+            dispatch(Event.InstallStatus(knownStatus))
+            return true
+        }
+
+        PendingInstall.consumeTerminalStatus(prefs) // discard: no manifest left to make use of it
         checkpoint = UiState.TurnPermissionOff(version = null)
         displayed = checkpoint
         render(displayed)
@@ -162,7 +203,7 @@ class UpdateActivity : Activity() {
         checkpoint = if (next is UiState.Downloading || next == UiState.Installing) source else next
 
         if (source is UiState.TurnPermissionOff && checkpoint !is UiState.TurnPermissionOff) {
-            prefs.edit().remove(PREF_PENDING_TURN_OFF).apply()
+            PendingInstall.clear(prefs)
         }
 
         render(displayed)
@@ -217,6 +258,18 @@ class UpdateActivity : Activity() {
     // ---- background work ------------------------------------------------
 
     private fun startCheck() {
+        // SARASWATI: fix round 1, dedicated review — every fresh PRIMARY
+        // check (the only kind startCheck ever performs; a self-update
+        // check calls dispatch directly with an already-fetched manifest,
+        // see maybeStartSelfUpdateCheck) must start with updatingSelf
+        // false. Without this, updatingSelf set true by a PRIOR self-update
+        // pass stayed true forever (nothing ever reset it), so a later,
+        // unrelated primary check's own Install tap would wrongly resolve
+        // targetPackageName() to the Updater's own package instead of
+        // Saraswati's — ApkVerifier correctly rejects the mismatch
+        // (fails safe, not a security hole) but the primary update path
+        // would otherwise get stuck with a confusing failure.
+        updatingSelf = false
         checkInFlight = true
         val channel = currentChannel()
         executor.execute {
@@ -271,8 +324,9 @@ class UpdateActivity : Activity() {
         // SARASWATI: persisted BEFORE the session is even created — see the
         // file header. This must be written before any use of
         // REQUEST_INSTALL_PACKAGES actually begins, not after, so a crash
-        // at any point from here onward is still caught on the next launch.
-        prefs.edit().putBoolean(PREF_PENDING_TURN_OFF, true).apply()
+        // OR a plain pause (the system confirmation UI) at any point from
+        // here onward is still caught on the next resume/launch.
+        PendingInstall.markAttemptStarted(prefs)
         val target = downloadTargetFile(manifest.versionCode)
         val expectedPackage = targetPackageName()
         executor.execute {
