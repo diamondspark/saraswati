@@ -40,6 +40,29 @@ github-owned action or `gradle/actions/*`, pinned to a 40-character
 commit SHA (Task 1's selected-actions policy allows nothing else to run
 regardless of what a workflow file says).
 
+`build-test` runs the app's unit tests and `:update-core:test` /
+`:updater:testDebugUnitTest`, builds both unsigned release APKs (app and
+Saraswati Updates, R8-minified), and gates each with `apk_gate.py`
+against its own allowlist (`security/manifest-allowlist.json`,
+`security/updater-allowlist.json`). A second job, `release-dry-run`, then
+rehearses the release `sign` job on every push/PR with no secret
+involved: it signs both APKs with `scripts/sign_release.sh` using a
+throwaway keystore generated inside the job in the same shape as
+`scripts/key-ceremony.sh` (default PKCS12 type, RSA-4096, separate
+store- and key-password files), checks the signer with
+`scripts/verify_apk_signer.sh` (the matching key must pass, a second
+throwaway key's digest must be rejected), and re-runs both manifest
+gates on the signed APKs. These are the same two scripts, PATH setup and
+keystore shape the real `sign` job uses, so a bug in the signing
+commands, the signer check, the manifest gates or the way a keystore is
+generated shows up here first (verified: reverting the dry run to the
+ceremony's original two-different-passwords shape makes it fail at
+signing). What it cannot catch is anything specific to the real
+`release` environment: wrong or stale secret *values* (such as the
+`RELEASE_KEY_PASSWORD` described under "Status" below), the environment's
+approval rules, or a keystore that doesn't match
+`security/release-cert.sha256`. Those only surface on a real run.
+
 The first real runs surfaced two environment gaps that a long-lived dev
 machine's warm caches had hidden, both fixed in `phase2-pipeline`:
 
@@ -172,15 +195,31 @@ labeled commit is harmless to leave.**
 
 ## Signing ceremony, release, and promotion (Task 6)
 
-### Status: key ceremony not yet run — HUMAN ACTION NEEDED
+### Status: ceremony done; one secret needs correcting
 
-`security/release-cert.sha256` does not exist in this repository yet.
-Until it does, `saraswati-release.yml`'s `sign` job cannot succeed (its
-"Verify the signer against the pinned release certificate" step
-deliberately refuses to sign against an empty or missing pinned digest
-rather than skip the check), and `:updater`'s release build type embeds
-an empty `PINNED_CERT_SHA256`, which trusts nothing — both fail closed,
-not open, in the absence of a real key.
+The ceremony has run: `security/release-cert.sha256` is committed
+(landed with `c95fa1ac`) and the four `release`-environment secrets are
+set. `:updater`'s release build embeds that digest as
+`PINNED_CERT_SHA256`, and `sign` verifies every signed APK against it.
+
+**Known issue from the original run (fixed in the script since):** the
+script used to generate two *different* random passwords for the store
+and the key. keytool's default keystore type, PKCS12, has a single
+password for the whole store — keytool printed "Different store and key
+passwords not supported for PKCS12 KeyStores. Ignoring user-specified
+-keypass value." and protected the key with the store password. The
+uploaded `RELEASE_KEY_PASSWORD` therefore doesn't unlock the key, and
+`sign` fails with `UnrecoverableKeyException` (`sign_release.sh` adds a
+"KS_PASS and KEY_PASS differ" hint) until the owner re-sets
+`RELEASE_KEY_PASSWORD` to the **store password's** value, e.g.
+`gh secret set RELEASE_KEY_PASSWORD --env release < <store-password file
+from the backup>` — never echoed or typed onto a command line. The keystore,
+the key and the committed digest are all fine; only that secret's value is
+wrong. `scripts/key-ceremony.sh` now writes one password to both files, so a
+future ceremony (key rotation) can't repeat this.
+
+The ceremony instructions below are kept as the reference for how the key
+was made and for a future rotation.
 
 **The owner needs to run the ceremony themselves, in their own
 terminal, on a machine they trust — never an agent, never a shared or
@@ -191,9 +230,10 @@ cd <repo root>
 bash scripts/key-ceremony.sh
 ```
 
-It creates `~/saraswati-keys` (mode 700); generates two random
-passwords (store password, key password) into files that are never
-printed, logged, or placed on a command line; generates the RSA-4096
+It creates `~/saraswati-keys` (mode 700); generates one random
+password and writes it to two files (store password, key password —
+identical by design, since PKCS12 has only one) that are never printed,
+logged, or placed on a command line; generates the RSA-4096
 release key with `keytool -genkeypair` (alias `saraswati`, 10000-day
 validity, `CN=Saraswati Family`); writes the certificate's SHA-256
 digest to `security/release-cert.sha256` (public information — the
@@ -236,28 +276,35 @@ entirely in the owner's hands.
    release), `urgent` (only for a fix that must skip promotion's
    48-hour wait), and `notes` (shown to users, ≤1000 chars — the
    `publish` job's manifest build fails if this is exceeded).
-2. `verify` re-runs the full `ci` gate against the dispatched ref;
-   `build` assembles both unsigned APKs. Both run unattended.
+2. `verify` re-runs the full `ci` gate (including `release-dry-run`)
+   against the dispatched ref; `build` assembles both unsigned APKs.
+   Both run unattended.
 3. `sign` stops and waits: **approve the `release` environment in the
    GitHub mobile app** (a push notification, or Actions → the run →
    Review deployments). This is the only point the signing key is ever
    touched — it is base64-decoded from secrets into the runner's
    `$RUNNER_TEMP` for the lifetime of this one job and deleted (via
    `shred -u`, falling back to `rm -f`) before the job ends either way.
-4. `sign` zipaligns and signs both APKs with `apksigner`, then compares
-   the signer's SHA-256 against the committed
-   `security/release-cert.sha256` — **the job fails outright on any
+4. `sign` zipaligns and signs both APKs with `scripts/sign_release.sh`
+   (`apksigner`), then compares each signer's SHA-256 against the
+   committed `security/release-cert.sha256` with
+   `scripts/verify_apk_signer.sh` — **the job fails outright on any
    difference**, so a release can never ship signed with the wrong
-   key — and runs `apk_gate.py check` on the signed Saraswati APK.
-5. `publish` creates a GitHub Release `v<versionCode>` with both signed
+   key — and runs `apk_gate.py check` on both signed APKs, each against
+   its own allowlist.
+5. `publish` creates a GitHub Release `v<versionCode>`, its tag pinned
+   (`--target`) to the exact commit the run built from, with both signed
    APKs and their `.sha256` checksum files, builds the channel
    manifest with `scripts/make_manifest.py`, and pushes
    `<channel>.json` to the `gh-pages` branch.
 6. Verify: `curl -sI https://diamondspark.github.io/saraswati/<channel>.json`
    returns 200 with a JSON content type (once Pages is enabled — Task
    8); both released APKs pass `apksigner verify --print-certs`
-   against `security/release-cert.sha256` and, for the Saraswati APK,
-   `python3 -I security/apk_gate.py check`.
+   against `security/release-cert.sha256`; and both pass
+   `python3 -I security/apk_gate.py check`, each against its own
+   allowlist — the Saraswati APK against
+   `security/manifest-allowlist.json`, the Saraswati Updates APK against
+   `security/updater-allowlist.json`.
 
 ### How to promote (beta → stable)
 
@@ -274,7 +321,11 @@ entirely in the owner's hands.
    surface or an explicit urgency call). It also refuses if the given
    `version_code` doesn't match `beta.json`'s actual `versionCode` — a
    guard against promoting a different build than the one that was
-   reviewed, in case a newer beta shipped in between.
+   reviewed, in case a newer beta shipped in between. And it refuses if
+   the current `stable.json` already has a higher `versionCode` (e.g. a
+   newer build released directly to `stable`), so promotion can never
+   move stable backwards; `publish` re-checks this against `gh-pages`
+   right before pushing.
 4. On success, `stable.json` on `gh-pages` becomes `beta.json` with
    `"channel"` rewritten to `"stable"`.
 

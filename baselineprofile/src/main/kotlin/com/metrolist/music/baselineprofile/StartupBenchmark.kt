@@ -15,11 +15,13 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-// SARASWATI: Task 11 — must match :app's baseApplicationId
-// (app/build.gradle.kts). Hardcoded rather than read from BuildConfig: this
+// SARASWATI: Task 11 — must match :app's baseApplicationId plus the
+// ".benchmark" applicationIdSuffix its benchmarkRelease/nonMinifiedRelease
+// build types add (app/build.gradle.kts), so benchmarks never touch the real
+// installed app. Hardcoded rather than read from BuildConfig: this
 // module targets :app's installed APK via instrumentation, it doesn't
 // compile against :app's code.
-private const val TARGET_PACKAGE_NAME = "dev.diamondspark.saraswati"
+private const val TARGET_PACKAGE_NAME = "dev.diamondspark.saraswati.benchmark"
 
 // Matches scripts/perf-baseline.sh's own run count (Task 13), so the two
 // tools' medians/p90s are comparable at a glance.

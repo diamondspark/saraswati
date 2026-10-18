@@ -13,7 +13,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-private const val TARGET_PACKAGE_NAME = "dev.diamondspark.saraswati"
+private const val TARGET_PACKAGE_NAME = "dev.diamondspark.saraswati.benchmark"
 private const val UI_TIMEOUT_MS = 10_000L
 
 /**

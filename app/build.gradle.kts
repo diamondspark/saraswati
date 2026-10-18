@@ -105,6 +105,13 @@ android {
             keyAlias = debugKeyAlias
             keyPassword = debugKeyPassword
         }
+        // SARASWATI: unused by Saraswati's real release pipeline — no build
+        // type references this config. Real signing happens via
+        // scripts/sign_release.sh inside saraswati-release.yml's
+        // environment-gated `sign` job (see docs/release-runbook.md). Never
+        // wire this into a build type that runs before that approval gate,
+        // or signing secrets would need to reach an unprotected job. Kept
+        // only as pre-existing upstream structure.
         create("release") {
             storeFile = file("keystore/release.keystore")
             storePassword = System.getenv("STORE_PASSWORD")
@@ -150,26 +157,35 @@ android {
 
         // SARASWATI: Task 11 (:baselineprofile) — the androidx.baselineprofile
         // plugin auto-creates these two build types (initWith "release") if
-        // they don't already exist; pre-creating them here only to override
-        // their signing config, same reasoning for both. They'd otherwise
-        // inherit "release"'s signingConfig, which needs STORE_PASSWORD/
-        // KEY_ALIAS/KEY_PASSWORD secrets this dev machine doesn't have.
-        // Debug-key signed instead, matching how the Saraswati build
-        // already installed on the Pixel (Phase 1/Task 10 device
-        // verification) was signed, so a benchmark/profile-generation
-        // install lands on top of it rather than requiring an uninstall
-        // first (which would drop its real YouTube sign-in). Every other
-        // property (isDebuggable, isProfileable, isMinifyEnabled for
-        // nonMinifiedRelease, etc.) is enforced by the plugin regardless of
-        // what's set here (androidx.baselineprofile 1.2.4+).
+        // they don't already exist; pre-creating them here only to give
+        // them a separate package and a signing config, same reasoning for
+        // both. "release" itself has no signingConfig (assemble*Release is
+        // always unsigned — real signing happens in saraswati-release.yml's
+        // `sign` job via scripts/sign_release.sh), so without an override
+        // these would be unsigned and uninstallable; they're debug-key
+        // signed instead. applicationIdSuffix ".benchmark" makes them
+        // install as their own package, dev.diamondspark.saraswati.benchmark,
+        // so a benchmark/profile-generation run coexists with whatever is
+        // really installed on the device (a debug-signed build today, a
+        // release-signed one once Task 8 ships) instead of needing to match
+        // its signer — and AGP's connected-test runner uninstalling the
+        // target app after each run only ever wipes this throwaway package,
+        // never the real install's YouTube sign-in. The baselineprofile
+        // module's TARGET_PACKAGE_NAME constants must match this suffix.
+        // Every other property (isDebuggable, isProfileable,
+        // isMinifyEnabled for nonMinifiedRelease, etc.) is enforced by the
+        // plugin regardless of what's set here (androidx.baselineprofile
+        // 1.2.4+).
         create("benchmarkRelease") {
             initWith(getByName("release"))
             matchingFallbacks += listOf("release")
+            applicationIdSuffix = ".benchmark"
             signingConfig = signingConfigs.getByName("debug")
         }
         create("nonMinifiedRelease") {
             initWith(getByName("release"))
             matchingFallbacks += listOf("release")
+            applicationIdSuffix = ".benchmark"
             signingConfig = signingConfigs.getByName("debug")
         }
     }

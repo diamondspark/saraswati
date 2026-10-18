@@ -116,6 +116,20 @@ class BuildManifestValidationTests(unittest.TestCase):
         manifest = build_manifest(**_valid_kwargs(notes="x" * 1000))
         self.assertEqual(len(manifest["notes"]), 1000)
 
+    def test_counts_notes_in_utf16_units_like_kotlin(self) -> None:
+        # U+1F3B5 (musical note emoji) is one code point but a UTF-16
+        # surrogate pair: Kotlin's String.length (what ManifestParser
+        # checks) counts it as 2. 998 + 2 = 1000 units: accepted.
+        at_limit = "x" * 998 + "\U0001F3B5"
+        self.assertEqual(len(at_limit), 999)
+        build_manifest(**_valid_kwargs(notes=at_limit))
+        # 999 + 2 = 1001 units, though Python's len() is only 1000: the
+        # client would reject it, so the publisher must too.
+        over_limit = "x" * 999 + "\U0001F3B5"
+        self.assertEqual(len(over_limit), 1000)
+        with self.assertRaises(ValueError):
+            build_manifest(**_valid_kwargs(notes=over_limit))
+
     def test_rejects_a_sha256_that_is_not_64_lowercase_hex(self) -> None:
         too_short = "a" * 63
         too_long = "a" * 65

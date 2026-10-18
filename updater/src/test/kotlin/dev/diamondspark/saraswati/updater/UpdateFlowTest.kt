@@ -215,4 +215,73 @@ class UpdateFlowTest {
         val result = reduce(mid, Event.ManifestFailed("offline"), canInstallNow = false)
         assertEquals(mid, result)
     }
+
+    // ---- decideOnNewIntent (final-review fix round 2, R2) ---------------
+
+    @Test
+    fun `a new intent while resting re-checks like a fresh launch`() {
+        val m = manifest()
+        val resting = listOf(
+            UiState.Checking,
+            UiState.UpToDate(42L),
+            UiState.AlreadyAhead(43L),
+            UiState.UpdateReady(m),
+            UiState.Done("1.42"),
+            UiState.Error("offline", canRetry = true),
+            UiState.Error("bad signature", canRetry = false),
+        )
+        for (state in resting) {
+            assertEquals(
+                "state $state",
+                NewIntentAction.Recheck,
+                decideOnNewIntent(checkpoint = state, displayed = state, isInstallAttemptPending = false),
+            )
+        }
+    }
+
+    @Test
+    fun `a new intent mid-install keeps the current flow`() {
+        val m = manifest()
+        val midFlow = listOf(
+            UiState.NeedsInstallPermission(m),
+            UiState.ReadyToInstall(m),
+            UiState.TurnPermissionOff("1.42"),
+            UiState.TurnPermissionOff(null),
+        )
+        for (state in midFlow) {
+            assertEquals(
+                "state $state",
+                NewIntentAction.KeepCurrentFlow,
+                decideOnNewIntent(checkpoint = state, displayed = state, isInstallAttemptPending = false),
+            )
+        }
+    }
+
+    @Test
+    fun `a new intent while downloading or installing keeps the current flow`() {
+        // UpdateActivity pins checkpoint at the manifest-bearing state while
+        // displayed shows progress; displayed alone must be enough to hold.
+        val m = manifest()
+        assertEquals(
+            NewIntentAction.KeepCurrentFlow,
+            decideOnNewIntent(UiState.UpdateReady(m), UiState.Downloading(37), isInstallAttemptPending = false),
+        )
+        assertEquals(
+            NewIntentAction.KeepCurrentFlow,
+            decideOnNewIntent(UiState.ReadyToInstall(m), UiState.Installing, isInstallAttemptPending = false),
+        )
+    }
+
+    @Test
+    fun `a pending install attempt always keeps the current flow`() {
+        // e.g. the system install dialog is on top: onResume's recovery owns this.
+        assertEquals(
+            NewIntentAction.KeepCurrentFlow,
+            decideOnNewIntent(UiState.UpToDate(42L), UiState.UpToDate(42L), isInstallAttemptPending = true),
+        )
+        assertEquals(
+            NewIntentAction.KeepCurrentFlow,
+            decideOnNewIntent(UiState.Checking, UiState.Checking, isInstallAttemptPending = true),
+        )
+    }
 }

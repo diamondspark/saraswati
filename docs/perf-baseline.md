@@ -263,3 +263,11 @@ jank beyond Home.
   cleanup step. `dev.diamondspark.saraswati.debug` (the suffixed debug
   build) was never touched by this task and is still the one with real,
   intact account data.
+- **Since the Phase 2 final review:** `benchmarkRelease` /
+  `nonMinifiedRelease` now carry `applicationIdSuffix = ".benchmark"`, so
+  benchmarks and profile generation install and uninstall
+  `dev.diamondspark.saraswati.benchmark` — a separate package that
+  coexists with the real install (debug- or release-signed) and is the
+  only thing AGP's post-test uninstall can wipe. The numbers above were
+  measured under the old, unsuffixed package; the package name doesn't
+  change the code being measured.
