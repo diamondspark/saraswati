@@ -50,7 +50,15 @@
 #   SYNC_UPSTREAM_REF   override for the fetched branch (default: main).
 #   SYNC_BASE_BRANCH    override for the branch merged into (default:
 #                       main) — must already exist as "origin/<branch>".
+#   SYNC_REPO_ROOT      override for which git working tree this script
+#                       operates on (default: one level up from this
+#                       script's own location). Point a *copy* of this
+#                       script at a separate clone via this var instead of
+#                       running the in-repo copy directly against it,
+#                       since step 1 below replaces that clone's working
+#                       tree with the base branch's content.
 #
+
 # Exit codes: 0 on "no new upstream commits", on a pushed/opened PR, and on
 # a clean local merge with no GITHUB_REPOSITORY to publish to; 1 on a
 # conflict this bot doesn't auto-resolve, or any other failure.
@@ -72,7 +80,13 @@ HOST_SCAN_FILES=(
 CI_WORKFLOW_FILE="saraswati-ci.yml"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+# Normally the repo this script operates on is the one it ships inside of
+# (one level up from its own location). SYNC_REPO_ROOT overrides that, so
+# a copy of this script kept outside any clone can drive a *separate*
+# scratch clone — needed because step 1 below switches that clone's
+# working tree to match the base branch, and the base branch does not
+# necessarily contain this script.
+REPO_ROOT="${SYNC_REPO_ROOT:-$(cd -- "$SCRIPT_DIR/.." && pwd)}"
 SYNC_REPORT_PY="$SCRIPT_DIR/sync_report.py"
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
@@ -113,22 +127,36 @@ echo "sync_upstream.sh: $new_commit_count new upstream commit(s) ($UPSTREAM_LOCA
 # --- 3. branch, and capture the report material before merging -------------
 # Captured against the base/upstream branches directly, so the report
 # reflects what upstream is proposing even if the merge is later aborted.
+#
+# The content diffs (as opposed to the commit list) are taken from the
+# merge-base of base and upstream-main, NOT from base directly: base
+# carries Saraswati's own permanent fork delta (dropped CI, removed
+# mirrors, added security code, ...), and diffing straight against it
+# would show that whole permanent delta as "changed" on every single
+# sync, burying whatever upstream's new commits actually did. The
+# merge-base is exactly the point the two histories last agreed on
+# (the original pin on a first run; the last successfully-merged
+# upstream commit afterwards), so diffing from there isolates just
+# upstream's own new changes, the same way `$BASE_BRANCH..$UPSTREAM_LOCAL_BRANCH`
+# already isolates just its new commits.
 
 sync_branch="sync/upstream-$(date -u +%Y%m%d)"
 git checkout -B "$sync_branch" "$BASE_BRANCH"
 
+common_ancestor="$(git merge-base "$BASE_BRANCH" "$UPSTREAM_LOCAL_BRANCH")"
+
 git log --no-color "$BASE_BRANCH..$UPSTREAM_LOCAL_BRANCH" >"$WORKDIR/commits.log"
-git diff --no-color --stat "$BASE_BRANCH" "$UPSTREAM_LOCAL_BRANCH" >"$WORKDIR/diffstat.txt" || true
-git diff --no-color --name-only "$BASE_BRANCH" "$UPSTREAM_LOCAL_BRANCH" -- .github/workflows \
+git diff --no-color --stat "$common_ancestor" "$UPSTREAM_LOCAL_BRANCH" >"$WORKDIR/diffstat.txt" || true
+git diff --no-color --name-only "$common_ancestor" "$UPSTREAM_LOCAL_BRANCH" -- .github/workflows \
   >"$WORKDIR/workflow_changed.txt" || true
-git diff --no-color "$BASE_BRANCH" "$UPSTREAM_LOCAL_BRANCH" -- "$TOML_FILE" \
+git diff --no-color "$common_ancestor" "$UPSTREAM_LOCAL_BRANCH" -- "$TOML_FILE" \
   | grep -E '^[+-][^+-]' >"$WORKDIR/toml_lines.txt" || true
 
 mkdir -p "$WORKDIR/hosts"
 idx=0
 for f in "${HOST_SCAN_FILES[@]}"; do
   safe_name="$(printf '%s' "$f" | tr '/' '_')"
-  git show "$BASE_BRANCH:$f" >"$WORKDIR/hosts/${idx}_${safe_name}.old" 2>/dev/null \
+  git show "$common_ancestor:$f" >"$WORKDIR/hosts/${idx}_${safe_name}.old" 2>/dev/null \
     || : >"$WORKDIR/hosts/${idx}_${safe_name}.old"
   git show "$UPSTREAM_LOCAL_BRANCH:$f" >"$WORKDIR/hosts/${idx}_${safe_name}.new" 2>/dev/null \
     || : >"$WORKDIR/hosts/${idx}_${safe_name}.new"
