@@ -158,7 +158,8 @@ echo
 chmod 600 "$BACKUP_TAR"
 PLAINTEXT_SHA256="$(sha256sum "$BACKUP_TAR" | cut -d' ' -f1)"
 
-gpg --symmetric --cipher-algo AES256 --output "$BACKUP_FILE" "$BACKUP_TAR"
+( umask 077; gpg --symmetric --cipher-algo AES256 --output "$BACKUP_FILE" "$BACKUP_TAR" )
+chmod 600 "$BACKUP_FILE"
 
 # CRITICAL check: a backup that only ever gets compared against itself
 # (two copies' sha256 matching each other) proves nothing if the gpg
@@ -200,7 +201,8 @@ if [ "$decrypt_ok" -ne 1 ]; then
   echo "Do not shred or delete any of the above. Remove the bad encrypted file and" >&2
   echo "try the backup again:" >&2
   echo "  rm -f \"$BACKUP_FILE\"" >&2
-  echo "  gpg --symmetric --cipher-algo AES256 --output \"$BACKUP_FILE\" \"$BACKUP_TAR\"" >&2
+  echo "  ( umask 077; gpg --symmetric --cipher-algo AES256 --output \"$BACKUP_FILE\" \"$BACKUP_TAR\" )" >&2
+  echo "  chmod 600 \"$BACKUP_FILE\"" >&2
   echo "then re-run this script (it will refuse past the ceremony's earlier steps since" >&2
   echo "$CERT_SHA256_PATH now exists — run just the two commands above by hand, then" >&2
   echo "verify with: gpg --decrypt \"$BACKUP_FILE\" | sha256sum   (expect $PLAINTEXT_SHA256)." >&2
