@@ -79,10 +79,21 @@ jobs:
       - name: Install gitleaks
         run: scripts/install-gitleaks.sh
 
+      # security/gitleaks-baseline.json freezes the 16 findings already in
+      # this history before this gate existed: hardcoded Google API keys in
+      # upstream Metrolist's innertube client and PoToken/BotGuard code.
+      # These are the public, well-known InnerTube/BotGuard client keys
+      # every third-party YouTube client (yt-dlp, NewPipe, Metrolist itself)
+      # ships baked into its source — extracted from Google's own official
+      # apps, not account- or billing-linked, and not ours to rotate. The
+      # baseline matches by exact (commit, file, rule) fingerprint, so any
+      # *new* secret in a *new* commit still fails this gate; only these
+      # pre-existing, reviewed findings are skipped.
       - name: Secret scan (gitleaks, full history)
         run: |
           "$RUNNER_TEMP/gitleaks" detect \
             --source . \
+            --baseline-path security/gitleaks-baseline.json \
             --redact \
             --report-format sarif \
             --report-path "$RUNNER_TEMP/gitleaks-report.sarif" \
