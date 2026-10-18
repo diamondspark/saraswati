@@ -1,8 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- SARASWATI: HTTPS only, everywhere (Task 6). Upstream allowed cleartext
+     traffic for Listen Together's local servers; this fork keeps Listen
+     Together's UI visible but refuses to let it connect at all until
+     Phase 4 adds a join confirmation (see SaraswatiDeepLinkPolicy), so there
+     is no remaining caller that needs cleartext. System trust anchors only:
+     no user-installed CA is trusted, in any build type. -->
 <network-security-config>
-    <!-- Allow cleartext traffic for Listen Together local servers -->
-    <!-- We're already using WSS for the prod server -->
-    <base-config cleartextTrafficPermitted="true">
+    <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>

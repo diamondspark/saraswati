@@ -75,7 +75,11 @@ class CrashActivity : ComponentActivity() {
             // Create crash log file
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
             val fileName = "metrolist_crash_$timestamp.txt"
-            val crashFile = File(cacheDir, fileName)
+            // SARASWATI: write into the "shared/" subdirectory, the only one
+            // provider_paths.xml's cache-path exposes (Task 6), not the
+            // cache root.
+            val sharedDir = File(cacheDir, "shared").apply { mkdirs() }
+            val crashFile = File(sharedDir, fileName)
             crashFile.writeText(crashLog)
             
             // Get URI using FileProvider

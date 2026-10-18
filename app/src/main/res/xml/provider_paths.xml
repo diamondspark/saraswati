@@ -1,14 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- SARASWATI: narrowed from path="." (the entire external-files root, the
+     entire app cache, and the entire external cache) to only the named
+     subdirectories real call sites use (Task 6). No call site uses raw
+     external storage or the external cache dir, so those two roots are
+     dropped entirely rather than narrowed. -->
 <paths>
-    <external-path
-        name="external_files"
-        path="." />
     <cache-path
-        name="cache"
-        path="." />
-    <external-cache-path
-        name="external_cache"
-        path="." />
+        name="shared_cache"
+        path="shared/" />
     <external-files-path
         name="external_files_documents"
         path="Documents/MetrolistExports/" />
