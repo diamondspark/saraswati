@@ -64,3 +64,7 @@ dependencyResolutionManagement {
 rootProject.name = "Metrolist"
 include(":app")
 include(":innertube")
+// SARASWATI: Task 4 — new pure-Kotlin/JVM module (manifest schema, update
+// decision, APK verification, download allowlisting) for the separate
+// Saraswati Updates installer app landing in a later task.
+include(":update-core")
