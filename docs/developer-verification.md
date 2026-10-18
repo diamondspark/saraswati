@@ -70,23 +70,19 @@ and [Developer verification FAQ](https://developer.android.com/developer-verific
 
 ## Registration status
 
-**Not yet registered.** This is a human checkpoint: the account owner signs in
-to the [Android Developer Console](https://android.google.com/developerconsole/developers)
-— **not** the Google Play Console (`play.google.com/console`), which is a
-separate product for Play Store distribution and charges a $25 fee. The
-Android Developer Console is specifically for apps distributed outside
-Google Play, and its own page states: "If you're a student or hobbyist, you
-can create a special account type that has fewer verification requirements
-and no fee" — that special account type is the Limited Distribution account
-this doc covers. Sign in with the Google account that has 2-Step
-Verification on, choose the student/hobbyist (Limited Distribution) account
-type, and register both package names above. If the sign-up flow asks for a
-credit card, stop — that means you're on the wrong product (Play Console),
-not this one. The agent does not perform this sign-in or registration.
+**Done — both packages registered 2026-10-18**, via the
+[Android Developer Console](https://android.google.com/developerconsole/developers)
+(not the Google Play Console, which is a separate, paid product). No fee, no
+government ID, no credit card — confirmed this was the right product by the
+absence of any payment prompt.
 
-Record here once done: registration date, Developer Console account
-identifier (not the Google account password or any secret), and confirmation
-both package names show as registered.
+| Package name | App name | Status | Registered |
+|---|---|---|---|
+| `dev.diamondspark.saraswati` | Saraswati | Registered | Oct 18, 2026 |
+| `dev.diamondspark.saraswati.updater` | Saraswati Updates | Registered | Oct 18, 2026 |
+
+The owner performed this sign-in and registration themselves; the agent did
+not have or need access to the account.
 
 ## Device authorization procedure (for Phase 3 rollout)
 
