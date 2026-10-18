@@ -16,10 +16,12 @@ plugins {
     id("com.android.application")
 }
 
-// Mirrors :app's signing-config plumbing (same env var names) because both
+// Mirrors :app's debug signing-config plumbing (same env var names). Both
 // apps are signed with the SAME release key (alias "saraswati") per the
-// Global Constraints — the release workflow (Task 6) sets these once and
-// both APKs pick them up.
+// Global Constraints, but NOT through Gradle: the release workflow builds
+// both APKs unsigned and signs them with apksigner (scripts/sign_release.sh)
+// inside saraswati-release.yml's environment-gated `sign` job. See the
+// warning on signingConfigs.release below.
 val debugKeystorePathOverride = System.getenv("METROLIST_DEBUG_KEYSTORE_PATH")?.takeIf { it.isNotBlank() }
 val debugKeystorePassword = System.getenv("METROLIST_DEBUG_KEYSTORE_PASSWORD")?.takeIf { it.isNotBlank() } ?: "android"
 val debugKeyAlias = System.getenv("METROLIST_DEBUG_KEY_ALIAS")?.takeIf { it.isNotBlank() } ?: "androiddebugkey"
@@ -93,6 +95,13 @@ android {
             keyAlias = debugKeyAlias
             keyPassword = debugKeyPassword
         }
+        // SARASWATI: unused by Saraswati's real release pipeline — no build
+        // type references this config. Real signing happens via
+        // scripts/sign_release.sh inside saraswati-release.yml's
+        // environment-gated `sign` job (see docs/release-runbook.md). Never
+        // wire this into a build type that runs before that approval gate,
+        // or signing secrets would need to reach an unprotected job. Kept
+        // only to mirror :app's pre-existing upstream structure.
         create("release") {
             storeFile = rootProject.file("app/keystore/release.keystore")
             storePassword = System.getenv("STORE_PASSWORD")
