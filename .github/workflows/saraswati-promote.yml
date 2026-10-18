@@ -100,6 +100,24 @@ jobs:
                   sys.exit(1)
               print(f"beta.json is {age} old: promotion allowed")
 
+          # Never move stable backwards: a direct channel=stable release of
+          # a newer build may already be live, and promoting an older beta
+          # over it would "update" every phone on stable to a downgrade.
+          # No stable.json yet (first-ever promotion) means nothing to
+          # compare against.
+          if os.path.exists("stable.json"):
+              with open("stable.json", encoding="utf-8") as fh:
+                  current_stable = json.load(fh)
+              if beta["versionCode"] < current_stable["versionCode"]:
+                  print(
+                      f"refusing to promote: beta.json is at versionCode "
+                      f"{beta['versionCode']}, older than the current "
+                      f"stable.json's {current_stable['versionCode']} — "
+                      "promoting it would move stable backwards",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
+
           stable = dict(beta)
           stable["channel"] = "stable"
           out_path = os.path.join(os.environ["RUNNER_TEMP"], "stable.json")
@@ -149,6 +167,29 @@ jobs:
           VERSION_CODE: ${{ inputs.version_code }}
         run: |
           set -euo pipefail
+          # Re-check against gh-pages as checked out NOW, not as `approve`
+          # saw it: this job can queue on the shared publish concurrency
+          # group behind a saraswati-release.yml `publish` that pushes a
+          # newer stable.json in the meantime.
+          python3 -I - "$RUNNER_TEMP/stable.json" <<'PY'
+          import json
+          import os
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as fh:
+              promoted = json.load(fh)
+          if os.path.exists("stable.json"):
+              with open("stable.json", encoding="utf-8") as fh:
+                  current_stable = json.load(fh)
+              if promoted["versionCode"] < current_stable["versionCode"]:
+                  print(
+                      f"refusing to push: stable.json on gh-pages is now at "
+                      f"versionCode {current_stable['versionCode']}, newer "
+                      f"than the promoted {promoted['versionCode']}",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
+          PY
           cp "$RUNNER_TEMP/stable.json" ./stable.json
           git add stable.json
           if git diff --cached --quiet; then
