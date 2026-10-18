@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Lets scripts/sync_upstream.sh dispatch `analyze` on a sync-bot PR
+  # branch: a PR opened with GITHUB_TOKEN never fires `pull_request`, and
+  # branch protection requires `analyze` to pass.
+  workflow_dispatch:
   schedule:
     # Mondays 03:19 UTC. An off-the-hour minute avoids the top-of-hour
     # scheduling crush GitHub's docs warn about.

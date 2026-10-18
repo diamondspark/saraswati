@@ -78,6 +78,7 @@ HOST_SCAN_FILES=(
   "gradle/wrapper/gradle-wrapper.properties"
 )
 CI_WORKFLOW_FILE="saraswati-ci.yml"
+CODEQL_WORKFLOW_FILE="codeql.yml"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # Normally the repo this script operates on is the one it ships inside of
@@ -355,9 +356,15 @@ fi
 
 # Pull requests opened with the default GITHUB_TOKEN don't trigger
 # workflows on their own, so the branch protection status checks never
-# run unless something dispatches them explicitly.
+# run unless something dispatches them explicitly. Both required checks
+# (`build-test` from ci, `analyze` from codeql) need a dispatch; a failed
+# dispatch only warns, since the PR itself is already open and either
+# workflow can be dispatched by hand.
 if ! gh workflow run "$CI_WORKFLOW_FILE" --repo "$GITHUB_REPOSITORY" --ref "$sync_branch"; then
   echo "sync_upstream.sh: could not dispatch $CI_WORKFLOW_FILE on $sync_branch; dispatch it by hand" >&2
+fi
+if ! gh workflow run "$CODEQL_WORKFLOW_FILE" --repo "$GITHUB_REPOSITORY" --ref "$sync_branch"; then
+  echo "sync_upstream.sh: could not dispatch $CODEQL_WORKFLOW_FILE on $sync_branch; dispatch it by hand" >&2
 fi
 
 echo "sync_upstream.sh: done ($pr_url)"
