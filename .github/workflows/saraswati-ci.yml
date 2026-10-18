@@ -1,0 +1,90 @@
+name: ci
+
+# Reusable build/test/gate pipeline. `workflow_call` lets the (future)
+# release workflow (Task 6) depend on this exact job instead of
+# duplicating it; `workflow_dispatch` allows a manual run.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: build-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      - name: Python security test suite
+        run: python3 -I -m unittest discover -s security -p 'test_*.py' -v
+
+      - name: Python scripts test suite
+        run: python3 -I -m unittest discover -s scripts -p 'test_*.py' -v
+
+      - name: Workflow policy check
+        run: python3 -I security/check_workflows.py
+
+      - name: Build and test (gms)
+        run: ./gradlew --dependency-verification strict :app:testGmsDebugUnitTest :app:assembleGmsRelease
+
+      - name: APK manifest gate
+        run: |
+          python3 -I security/apk_gate.py check \
+            --apk app/build/outputs/apk/gms/release/app-gms-release-unsigned.apk \
+            --allowlist security/manifest-allowlist.json
+
+      - name: Install gitleaks
+        run: scripts/install-gitleaks.sh
+
+      - name: Secret scan (gitleaks, full history)
+        run: |
+          "$RUNNER_TEMP/gitleaks" detect \
+            --source . \
+            --redact \
+            --report-format sarif \
+            --report-path "$RUNNER_TEMP/gitleaks-report.sarif" \
+            --exit-code 1
+
+      - name: Upload unsigned APKs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unsigned-apks
+          path: app/build/outputs/apk/gms/release/*.apk
+          if-no-files-found: warn
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: reports
+          path: |
+            app/build/test-results/**/*.xml
+            ${{ runner.temp }}/gitleaks-report.sarif
+          if-no-files-found: warn
