@@ -67,3 +67,26 @@ It prints `tests failures errors skipped`. Baseline: `186 0 0 0`.
 Upstream hard-wires `$HOME/.android/debug.keystore` as the debug signing key (`signingConfigs.debug` in `app/build.gradle.kts`). On a machine without that file the build fails at `:app:validateSigningGmsDebug` with a `Keystore file ... not found` error. Run `sar_ensure_debug_keystore` first: it creates the keystore with the standard debug values (alias `androiddebugkey`, store and key pass `android`, 2048-bit RSA, 10000 days) at mode 600, and it never touches an existing file.
 
 Two other settings take precedence over that file, in this order: the `METROLIST_DEBUG_KEYSTORE_PATH` environment variable, then a gitignored `app/persistent-debug.keystore`. Whichever key signs the build is the app's signing identity: a phone that has a debug build signed by one key refuses an update signed by another (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`), so keep the keystore instead of regenerating it. The store and key pass are the public Android debug defaults, but the file itself is what identifies your debug builds, so it stays outside the repo and is never committed.
+
+## Manifest overlay and the APK gate (Task 4)
+
+`app/src/gms/AndroidManifest.xml` removes the mic/alarm/boot permissions and the recognizer, Discord-OAuth, alarm and home-screen-widget components upstream ships, plus the unused `org.apache.http.legacy` library. `security/apk_gate.py check --apk <apk> --allowlist security/manifest-allowlist.json` enforces the result; it passed (exit 0) against `app/build/outputs/apk/gms/release/app-gms-release-unsigned.apk` built from this commit.
+
+Snapshot of that APK's merged manifest (`apk_gate.py snapshot`):
+
+| Item | Value |
+| --- | --- |
+| Package | `dev.diamondspark.saraswati` |
+| Permissions | `INTERNET`, `ACCESS_NETWORK_STATE`, `WAKE_LOCK`, `POST_NOTIFICATIONS`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK`, `FOREGROUND_SERVICE_DATA_SYNC`, `dev.diamondspark.saraswati.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` |
+| Exported components | `activity:com.metrolist.music.MainActivity`, `activity-alias:com.metrolist.music.MainActivityAlias`, `activity-alias:com.metrolist.music.MainActivityStatic`, `service:com.metrolist.music.playback.MusicService`, `receiver:androidx.media3.session.MediaButtonReceiver`, `receiver:androidx.profileinstaller.ProfileInstallReceiver` |
+| allowBackup / debuggable | `false` / absent (not `true`) |
+
+Line-by-line justification for the entries in `security/manifest-allowlist.json` that are not self-evident from the Global Constraints' permission list:
+
+- `dev.diamondspark.saraswati.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` — synthesized by AGP/the Play Core / Media3 toolchain for app-signing-scoped dynamic broadcast receivers (`Context.registerReceiver` with `RECEIVER_NOT_EXPORTED` on API levels that back-fill the flag); it is package-scoped (`${applicationId}...`) and cannot be held by another app, so it carries no cross-app risk.
+- `receiver:androidx.media3.session.MediaButtonReceiver` exported `true` — required so the system (lock-screen controls, Bluetooth/Android Auto head units, the notification's media-button intent) can deliver `ACTION_MEDIA_BUTTON`; this is how every Media3 app wires hardware/BT playback buttons and is the documented, intended use of the component.
+- `receiver:androidx.profileinstaller.ProfileInstallReceiver` exported `true` — added by the `androidx.profileinstaller` baseline-profile library; it is exported but gated behind `android.permission.DUMP`, a signature/system-only permission no third-party app holds, so it cannot be triggered by another app on a non-rooted device. Kept exported per upstream/AndroidX default rather than patched, since `DUMP` already closes it off.
+- `activity-alias:com.metrolist.music.MainActivityStatic` exported `true`, `enabled="false"` — a disabled static-icon alias upstream ships for icon-pack theming; disabled aliases cannot be launched regardless of `exported`, so it is inert but still enumerates as an exported component in the manifest and is allowlisted for that reason.
+- `forbidden_permissions` beyond the four literal ones Task 4's brief names (`RECORD_AUDIO`, `FOREGROUND_SERVICE_MICROPHONE`, `SCHEDULE_EXACT_ALARM`, `RECEIVE_BOOT_COMPLETED`) spell out the Global Constraints' "Never present" categories as concrete permission constants, since the gate matches exact strings: `REQUEST_INSTALL_PACKAGES`, `QUERY_ALL_PACKAGES` (named literally); SMS → `SEND_SMS`/`RECEIVE_SMS`/`READ_SMS`/`RECEIVE_MMS`/`RECEIVE_WAP_PUSH`; contacts → `READ_CONTACTS`/`WRITE_CONTACTS`/`GET_ACCOUNTS`; location → `ACCESS_FINE_LOCATION`/`ACCESS_COARSE_LOCATION`/`ACCESS_BACKGROUND_LOCATION`; phone state → `READ_PHONE_STATE`/`READ_PHONE_NUMBERS`/`CALL_PHONE`/`ANSWER_PHONE_CALLS`/`PROCESS_OUTGOING_CALLS`; camera → `CAMERA`; accessibility → `BIND_ACCESSIBILITY_SERVICE`; notification-listener → `BIND_NOTIFICATION_LISTENER_SERVICE`; overlay → `SYSTEM_ALERT_WINDOW`.
+
+No Cast, Play Services or Google Sign-In permission or exported component appeared in this snapshot (the `gms` flavor only adds the Cast `OPTIONS_PROVIDER_CLASS_NAME` `<meta-data>`, which is not a permission or an exported component), so none needed a separate line here.

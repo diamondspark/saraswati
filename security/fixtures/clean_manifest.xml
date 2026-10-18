@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!--
+  Fixture: shape of the gms-flavor merged manifest after the Phase 1 overlay
+  (app/src/gms/AndroidManifest.xml) is applied. Used by test_apk_gate.py to
+  exercise parse_manifest() and the passing path of check(). Not a real
+  apkanalyzer dump; trimmed to the elements apk_gate.py reads.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="dev.diamondspark.saraswati"
+    platformBuildVersionCode="36"
+    platformBuildVersionName="16">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="dev.diamondspark.saraswati.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
+
+    <application android:allowBackup="false" android:label="Saraswati">
+
+        <activity android:name="com.metrolist.music.MainActivity" android:exported="true" />
+
+        <activity-alias
+            android:name="com.metrolist.music.MainActivityAlias"
+            android:exported="true"
+            android:targetActivity="com.metrolist.music.MainActivity" />
+
+        <activity-alias
+            android:name="com.metrolist.music.MainActivityStatic"
+            android:enabled="false"
+            android:exported="true"
+            android:targetActivity="com.metrolist.music.MainActivity" />
+
+        <activity android:name="com.yalantis.ucrop.UCropActivity" android:exported="false" />
+
+        <service android:name="com.metrolist.music.playback.MusicService" android:exported="true" />
+
+        <service android:name="com.metrolist.music.playback.ExoDownloadService" android:exported="false" />
+
+        <receiver android:name="androidx.media3.session.MediaButtonReceiver" android:exported="true" />
+
+        <receiver
+            android:name="androidx.profileinstaller.ProfileInstallReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="dev.diamondspark.saraswati.FileProvider"
+            android:exported="false" />
+
+    </application>
+</manifest>

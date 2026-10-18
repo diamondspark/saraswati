@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SARASWATI: gms-flavor manifest overlay. Removes the microphone/alarm/boot
+     permissions, the music-recognition and Discord-OAuth entry points, the
+     three home-screen widget receivers (dropped feature, see Phase 1 audit
+     finding NEW-1: exported with no permission, any app could skip tracks
+     or start playlists) and the unused org.apache.http.legacy stack
+     (NEW-8: would bypass the cleartext network policy). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" tools:node="remove" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" tools:node="remove" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" tools:node="remove" />
+
+    <uses-feature android:name="android.hardware.microphone" tools:node="remove" />
+
+    <application android:allowBackup="false" tools:replace="android:allowBackup">
+
+        <!-- NEW-8: unused legacy HTTP stack that would bypass the cleartext policy -->
+        <uses-library
+            android:name="org.apache.http.legacy"
+            tools:node="remove" />
+
+        <activity android:name="com.metrolist.music.MainActivity">
+            <!-- Music Recognizer Widget deep link: recognition feature is dropped -->
+            <intent-filter tools:node="remove">
+                <action android:name="com.metrolist.music.action.RECOGNITION" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+
+            <!-- Listen Together invite link: feature not shipped to the family build -->
+            <intent-filter android:autoVerify="true" tools:node="remove">
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="https" />
+                <data android:host="metrolist.cc" />
+                <data android:pathPrefix="/listen" />
+            </intent-filter>
+        </activity>
+
+        <!-- Discord Rich Presence OAuth callback: Discord integration dropped -->
+        <activity
+            android:name="com.metrolist.music.discord.DiscordOAuthActivity"
+            tools:node="remove" />
+
+        <!-- Music recognition feature dropped -->
+        <activity
+            android:name="com.metrolist.music.recognition.RecognitionLaunchActivity"
+            tools:node="remove" />
+
+        <service
+            android:name="com.metrolist.music.recognition.RecognitionForegroundService"
+            tools:node="remove" />
+
+        <service
+            android:name="com.metrolist.music.quicksettings.MusicRecognizerTileService"
+            tools:node="remove" />
+
+        <!-- NEW-1: exported widget receivers with no permission; widgets dropped -->
+        <receiver
+            android:name="com.metrolist.music.widget.MusicRecognizerWidgetReceiver"
+            tools:node="remove" />
+
+        <receiver
+            android:name="com.metrolist.music.widget.MusicWidgetReceiver"
+            tools:node="remove" />
+
+        <receiver
+            android:name="com.metrolist.music.widget.TurntableWidgetReceiver"
+            tools:node="remove" />
+
+        <receiver
+            android:name="com.metrolist.music.widget.PlaylistWidgetReceiver"
+            tools:node="remove" />
+
+        <!-- Exact-alarm / boot-triggered alarm feature dropped -->
+        <receiver
+            android:name="com.metrolist.music.playback.alarm.MusicAlarmReceiver"
+            tools:node="remove" />
+
+        <receiver
+            android:name="com.metrolist.music.playback.alarm.MusicAlarmRescheduleReceiver"
+            tools:node="remove" />
+
+    </application>
+
+</manifest>
