@@ -2,6 +2,7 @@ package com.metrolist.music.utils.potoken
 
 import android.content.Context
 import android.webkit.CookieManager
+import com.metrolist.music.saraswati.security.WebInputs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
@@ -27,6 +28,14 @@ class PoTokenGenerator(context: Context) {
         Timber.tag(TAG).d("WebView state: supported=$webViewSupported, badImpl=$webViewBadImpl")
         if (!webViewSupported || webViewBadImpl) {
             Timber.tag(TAG).d("WebView not available: supported=$webViewSupported, badImpl=$webViewBadImpl")
+            return null
+        }
+        // SARASWATI: audit A8.1 — videoId/visitorData are shape-checked before either one is
+        // ever spliced into PoTokenWebView's JS text. An unexpected shape fails closed (no
+        // token, same as the timeout path below) rather than reaching evaluateJavascript at all;
+        // playerResponseForPlayback's existing non-PoToken fallback clients take over from there.
+        if (!WebInputs.isValidVideoId(videoId) || !WebInputs.isValidVisitorData(sessionId)) {
+            Timber.tag(TAG).w("Rejecting malformed videoId/visitorData; proceeding without PoToken")
             return null
         }
 

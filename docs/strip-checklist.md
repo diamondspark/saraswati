@@ -61,6 +61,18 @@ Listen Together is **not** a dropped feature — it stays visible in the UI (it'
 | Proxy initialization from stored settings | `App.kt` (`initializeSettings`) | `if (settings[ProxyEnabledKey] == true)` → `if (PROXY && settings[ProxyEnabledKey] == true)`, so a proxy config restored from an old backup is never honored even if the row that set it is gone (Task 7 also scrubs it) |
 | Listen Together deep-link join | `MainActivity.kt` (`handleDeepLinkIntent`) | Early `return` via `SaraswatiDeepLinkPolicy.isListenTogetherLink(...)` before any join logic |
 
+## Removed entirely, no flag (Task 15)
+
+Unlike every row above, this is not gated by a `SaraswatiFeatures` flag and cannot be re-enabled by flipping one — the code is gone. Ruling R18: Saraswati signs in only through the login WebView, so there is no UI path, flag-gated or otherwise, to a screen that shows or accepts a raw Google session cookie.
+
+| Entry point | File | What changed |
+| --- | --- | --- |
+| "Advanced login"/two-tap "Token" settings row and its dialog (showed/accepted the raw `***INNERTUBE COOKIE***`/visitor data/data-sync id/account email as editable text; audit A6.4/A11-4) | `ui/screens/settings/AccountSettings.kt` | The `showToken`/`showTokenEditor` state, the settings row, and the `TextFieldDialog` that displayed and parsed the raw credential block are all deleted — not hidden behind a flag. |
+| `AccountSettingsViewModel.saveTokenAndRestart` (wrote a pasted cookie/visitor-data/data-sync-id to DataStore and restarted the app) | `viewmodels/AccountSettingsViewModel.kt` | Deleted along with its now-unused `InnerTubeCookieKey`/`VisitorDataKey`/`DataSyncIdKey`/`InnerTubeAuthUserKey`/account-field imports; it had no other caller. |
+| `advanced_login`, `token_hidden`, `token_shown`, `token_adv_login_description` string resources | `res/values/metrolist_strings.xml` | Deleted; confirmed unreferenced anywhere else (`R.drawable.token`, the icon the row used, is still used by `ui/menu/PlayerMenu.kt` for an unrelated row and was left alone). |
+
+`MainActivity.kt` and `ui/component/Dialog.kt` were checked (brief's suspected entry points) and found not to reference this dialog — `TextFieldDialog` itself is `Dialog.kt`'s generic component, shared by several unrelated legitimate features (playlist import, lyrics, song menu, create-playlist), so it was left in place.
+
 ## Manifest entries already removed (Task 4, for cross-reference)
 
 `app/src/gms/AndroidManifest.xml` (gms-flavor overlay) already removes, independently of the flags above:

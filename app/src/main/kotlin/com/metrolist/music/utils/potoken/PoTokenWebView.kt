@@ -13,6 +13,7 @@ import androidx.annotation.MainThread
 import androidx.collection.ArrayMap
 import com.metrolist.innertube.YouTube
 import com.metrolist.music.BuildConfig
+import com.metrolist.music.saraswati.security.WebInputs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.Dispatchers
@@ -75,6 +76,10 @@ class PoTokenWebView private constructor(
         webViewSettings.javaScriptEnabled = true
         webViewSettings.userAgentString = USER_AGENT
         webViewSettings.blockNetworkLoads = true // the WebView does not need internet access
+        // SARASWATI: audit A8.3 — this WebView never renders a page that references a
+        // content:// URI; shares no cookie jar need either since blockNetworkLoads already
+        // keeps it from making its own requests.
+        webViewSettings.allowContentAccess = false
 
         // so that we can run async functions and get back the result
         webView.addJavascriptInterface(this, JS_INTERFACE)
@@ -82,11 +87,14 @@ class PoTokenWebView private constructor(
         webView.webChromeClient = object : WebChromeClient() {
             override fun onConsoleMessage(m: ConsoleMessage): Boolean {
                 val msg = m.message()
-                // Log all console messages for debugging
-                when (m.messageLevel()) {
-                    ConsoleMessage.MessageLevel.ERROR -> Timber.tag(TAG).e("JS: $msg")
-                    ConsoleMessage.MessageLevel.WARNING -> Timber.tag(TAG).w("JS: $msg")
-                    else -> Timber.tag(TAG).d("JS: $msg")
+                // SARASWATI: audit A8.3 — JS console output (which can carry botguard/minter
+                // internals) is only logged in debug builds, never release logcat.
+                if (BuildConfig.DEBUG) {
+                    when (m.messageLevel()) {
+                        ConsoleMessage.MessageLevel.ERROR -> Timber.tag(TAG).e("JS: $msg")
+                        ConsoleMessage.MessageLevel.WARNING -> Timber.tag(TAG).w("JS: $msg")
+                        else -> Timber.tag(TAG).d("JS: $msg")
+                    }
                 }
 
                 if (msg.contains("Uncaught")) {
@@ -205,7 +213,11 @@ class PoTokenWebView private constructor(
      */
     @JavascriptInterface
     fun onRunBotguardResult(botguardResponse: String) {
-        Timber.tag(TAG).d("botguardResponse: $botguardResponse")
+        // SARASWATI: audit A8.3 — botguardResponse is a sensitive anti-abuse token; it is only
+        // ever logged in debug builds, never release logcat.
+        if (BuildConfig.DEBUG) {
+            Timber.tag(TAG).d("botguardResponse: $botguardResponse")
+        }
         makeBotguardServiceRequest(
             "https://www.youtube.com/api/jnn/v1/GenerateIT",
             "[ \"$REQUEST_KEY\", \"$botguardResponse\" ]",
@@ -292,8 +304,12 @@ class PoTokenWebView private constructor(
                 // here would let a concurrent call reassign them before this call's promise
                 // resolves, delivering this token to the other call's continuation.
                 webView.evaluateJavascript(
+                    // SARASWATI: audit A8.1 — requestKey is spliced into this script through
+                    // WebInputs.jsStringLiteral, never raw interpolation, so it cannot close the
+                    // string early and run arbitrary JS in the PoToken WebView's execution
+                    // context.
                     """(function() {
-                        var requestKey = "$requestKey"
+                        var requestKey = ${WebInputs.jsStringLiteral(requestKey)}
                         try {
                             var u8Identifier = ${stringToU8(identifier)}
                             obtainPoToken(u8Identifier).then(function(poTokenU8) {

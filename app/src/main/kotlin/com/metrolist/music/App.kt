@@ -403,6 +403,10 @@ class App :
                     }
                     flush()
                 }
+                // SARASWATI: audit A6.8/A7.4 — the login WebView's DOM/local storage can hold a
+                // second copy of the session independent of the cookie jar above; clear it too
+                // on logout.
+                android.webkit.WebStorage.getInstance().deleteAllData()
             }
             Timber.d("forgetAccount: Logout process complete")
         }
