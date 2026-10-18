@@ -71,3 +71,7 @@ include(":update-core")
 // SARASWATI: Task 5 — the Saraswati Updates installer app, the only app on
 // the family phones ever allowed to hold REQUEST_INSTALL_PACKAGES.
 include(":updater")
+// SARASWATI: Task 11 — Macrobenchmark + Baseline Profile module (com.android.test,
+// targets :app's gms flavor). Never shipped; generates/measures
+// app/src/main/baseline-prof.txt against the real Pixel.
+include(":baselineprofile")

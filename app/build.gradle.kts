@@ -30,6 +30,9 @@ plugins {
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.protobuf)
+    // SARASWATI: Task 11 (:baselineprofile) — consumer side; see
+    // baselineProfile(project(":baselineprofile")) below.
+    alias(libs.plugins.baseline.profile)
 }
 
 android {
@@ -144,6 +147,31 @@ android {
                     signingConfigs.getByName("debug")
                 }
         }
+
+        // SARASWATI: Task 11 (:baselineprofile) — the androidx.baselineprofile
+        // plugin auto-creates these two build types (initWith "release") if
+        // they don't already exist; pre-creating them here only to override
+        // their signing config, same reasoning for both. They'd otherwise
+        // inherit "release"'s signingConfig, which needs STORE_PASSWORD/
+        // KEY_ALIAS/KEY_PASSWORD secrets this dev machine doesn't have.
+        // Debug-key signed instead, matching how the Saraswati build
+        // already installed on the Pixel (Phase 1/Task 10 device
+        // verification) was signed, so a benchmark/profile-generation
+        // install lands on top of it rather than requiring an uninstall
+        // first (which would drop its real YouTube sign-in). Every other
+        // property (isDebuggable, isProfileable, isMinifyEnabled for
+        // nonMinifiedRelease, etc.) is enforced by the plugin regardless of
+        // what's set here (androidx.baselineprofile 1.2.4+).
+        create("benchmarkRelease") {
+            initWith(getByName("release"))
+            matchingFallbacks += listOf("release")
+            signingConfig = signingConfigs.getByName("debug")
+        }
+        create("nonMinifiedRelease") {
+            initWith(getByName("release"))
+            matchingFallbacks += listOf("release")
+            signingConfig = signingConfigs.getByName("debug")
+        }
     }
 
     compileOptions {
@@ -203,6 +231,22 @@ android {
             excludes += "META-INF/io.netty.versions.properties"
         }
     }
+}
+
+// SARASWATI: Task 11 (:baselineprofile) — consumer-side configuration.
+// mergeIntoMain is left at its default (false for apps): with it left
+// false, :app keeps a per-flavor task name, `generateGmsBaselineProfile`
+// (Task 11 brief, Step 3) — mergeIntoMain = true collapses that into a
+// single, flavor-less `generateBaselineProfile` task instead. The
+// generated file (src/gmsRelease/generated/baselineProfiles/baseline-prof.txt)
+// is then moved by hand to the single committed app/src/main/baseline-prof.txt
+// the brief names, which every flavor already inherits (gms is the only
+// shipped flavor — see AGENTS.md — so foss/izzy never generate or need
+// their own).
+baselineProfile {
+    // Never run as a side effect of an ordinary :app build — only on
+    // demand against the real Pixel (Task 11 brief, Step 3).
+    automaticGenerationDuringBuild = false
 }
 
 protobuf {
@@ -320,6 +364,14 @@ dependencies {
     coreLibraryDesugaring(libs.desugaring)
 
     implementation(libs.timber)
+
+    // SARASWATI: Task 11 (:baselineprofile) — profileinstaller reads and
+    // locally compiles the committed app/src/main/baseline-prof.txt on
+    // first launch (no Play Store cloud profile delivery for a sideloaded
+    // app). baselineProfile(...) wires the generated-profile dependency
+    // that drives the plugin's generate*BaselineProfile tasks.
+    implementation(libs.androidx.profileinstaller)
+    baselineProfile(project(":baselineprofile"))
 
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
