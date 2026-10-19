@@ -530,6 +530,47 @@ val AndroidAutoSectionsOrderKey = stringPreferencesKey("androidAutoSectionsOrder
 val AndroidAutoTargetPlaylistKey = stringPreferencesKey("androidAutoTargetPlaylist")
 val AndroidAutoSearchLocalLimitKey = intPreferencesKey("androidAutoSearchLocalLimit")
 val InnerTubeCookieKey = stringPreferencesKey("innerTubeCookie")
+
+// SARASWATI: Task 6 — family hub bearer credentials. Registered in
+// SecretPreferenceKeys.all and sealed at rest exactly like InnerTubeCookieKey
+// (SecretPreferenceKeys.VAULT_SEALED, SealedPreferences): read them through
+// dataStore[key] / rememberPreference so they are opened, and write them
+// through rememberPreference or SealedPreferences.write(...) — a plain
+// settings[key] = plaintext is wiped by SecretScrubber on the next start, and
+// a bare vault.seal(...) uses the cookie's slot, which does not open here:
+// each key seals under its own purpose (SealedPreferences.purposeOf).
+// The owner's admin key, this phone's own hub session token (issued on
+// approval), and the one-time claim secret that proves this phone is the one
+// that claimed a pairing token while it waits for approval.
+val FamilyAdminKeyKey = stringPreferencesKey("familyAdminKey")
+val FamilyHubSessionTokenKey = stringPreferencesKey("familyHubSessionToken")
+val FamilyHubClaimSecretKey = stringPreferencesKey("familyHubClaimSecret")
+
+// SARASWATI: Task 7 — not secrets, so stored plain. True only on the phone
+// whose owner pasted a hub-accepted admin key into Manage Family; the Family
+// tab shows "Manage family" only there (the admin key itself is what the hub
+// checks). The hub-issued id of this phone, needed for its own health
+// reports; kept next to the session token (or the claim) it belongs to.
+val IsFamilyOwnerKey = booleanPreferencesKey("isFamilyOwner")
+val FamilyDeviceIdKey = stringPreferencesKey("familyDeviceId")
+
+// SARASWATI: Task 8 — set the first time the owner saves a station list to the
+// hub. Until then an empty list from the hub means "nobody has set any yet" and
+// the editor starts on four defaults; after it, an empty list is shown as empty.
+val FamilyStationsSavedKey = booleanPreferencesKey("familyStationsSaved")
+
+// SARASWATI: Task 9 — a CACHE of the role the hub holds for this phone, not a
+// setting. true makes MainActivity host Saral (the grandparents' easy mode) as
+// the whole app. It is written only from the hub's own answer
+// (GrandparentRoleSync) and is never offered as a toggle, so the one way out of
+// Saral is the owner switching the role in Manage Family. Kept out of backups
+// (BackupPolicy) so a restore can neither lock a phone into Saral nor free it.
+val GrandparentRoleKey = booleanPreferencesKey("grandparentRole")
+
+// SARASWATI: Task 9 — the last station list the hub gave this phone, as JSON.
+// Saral and the car's Stations folder read it without waiting for the network
+// (StationsCache). Not a secret; not restored from backups.
+val FamilyStationsCacheKey = stringPreferencesKey("familyStationsCache")
 val AccountNameKey = stringPreferencesKey("accountName")
 val AccountEmailKey = stringPreferencesKey("accountEmail")
 val AccountChannelHandleKey = stringPreferencesKey("accountChannelHandle")
