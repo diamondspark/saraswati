@@ -1,0 +1,128 @@
+[
+  {
+    "client": "A",
+    "type": "room_created",
+    "payload": {
+      "room_code": "$ROOM1",
+      "user_id": "$USER1",
+      "session_token": "$TOKEN1"
+    }
+  },
+  {
+    "client": "A",
+    "type": "join_request",
+    "payload": {
+      "user_id": "$USER2",
+      "username": "Bharat"
+    }
+  },
+  {
+    "client": "A",
+    "type": "user_joined",
+    "payload": {
+      "user_id": "$USER2",
+      "username": "Bharat"
+    }
+  },
+  {
+    "client": "B",
+    "type": "join_approved",
+    "payload": {
+      "room_code": "$ROOM1",
+      "user_id": "$USER2",
+      "session_token": "$TOKEN2",
+      "state": {
+        "room_code": "$ROOM1",
+        "host_id": "$USER1",
+        "users": [
+          {
+            "user_id": "$USER1",
+            "username": "Asha",
+            "is_host": true,
+            "is_connected": true
+          },
+          {
+            "user_id": "$USER2",
+            "username": "Bharat",
+            "is_host": false,
+            "is_connected": true
+          }
+        ],
+        "is_playing": false,
+        "position": "0",
+        "last_update": "$TIME",
+        "volume": 1,
+        "queue": [],
+        "revision": "0"
+      }
+    }
+  },
+  {
+    "client": "A",
+    "type": "suggestion_received",
+    "payload": {
+      "suggestion_id": "$SUGG1",
+      "from_user_id": "$USER2",
+      "from_username": "Bharat",
+      "track_info": {
+        "id": "trk-008",
+        "title": "Raag Number 8",
+        "artist": "Pt. Ravi Shankar",
+        "album": "Raga Collection",
+        "duration": "240008",
+        "thumbnail": "https://i.ytimg.com/vi/trk-8/hqdefault.jpg",
+        "suggested_by": ""
+      }
+    }
+  },
+  {
+    "client": "B",
+    "type": "suggestion_rejected",
+    "payload": {
+      "suggestion_id": "$SUGG1",
+      "reason": "Maybe later"
+    }
+  },
+  {
+    "client": "A",
+    "type": "error",
+    "payload": {
+      "code": "suggestion_not_found",
+      "message": "Suggestion not found"
+    }
+  },
+  {
+    "client": "A",
+    "type": "suggestion_received",
+    "payload": {
+      "suggestion_id": "$SUGG2",
+      "from_user_id": "$USER2",
+      "from_username": "Bharat",
+      "track_info": {
+        "id": "trk-007",
+        "title": "Raag Number 7",
+        "artist": "Pt. Ravi Shankar",
+        "album": "Raga Collection",
+        "duration": "240007",
+        "thumbnail": "https://i.ytimg.com/vi/trk-7/hqdefault.jpg",
+        "suggested_by": ""
+      }
+    }
+  },
+  {
+    "client": "B",
+    "type": "suggestion_rejected",
+    "payload": {
+      "suggestion_id": "$SUGG2",
+      "reason": ""
+    }
+  },
+  {
+    "client": "A",
+    "type": "error",
+    "payload": {
+      "code": "missing_suggestion_id",
+      "message": "Suggestion ID is required"
+    }
+  }
+]

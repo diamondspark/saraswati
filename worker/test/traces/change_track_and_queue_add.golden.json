@@ -1,0 +1,664 @@
+[
+  {
+    "client": "A",
+    "type": "room_created",
+    "payload": {
+      "room_code": "$ROOM1",
+      "user_id": "$USER1",
+      "session_token": "$TOKEN1"
+    }
+  },
+  {
+    "client": "A",
+    "type": "join_request",
+    "payload": {
+      "user_id": "$USER2",
+      "username": "Bharat"
+    }
+  },
+  {
+    "client": "A",
+    "type": "user_joined",
+    "payload": {
+      "user_id": "$USER2",
+      "username": "Bharat"
+    }
+  },
+  {
+    "client": "B",
+    "type": "join_approved",
+    "payload": {
+      "room_code": "$ROOM1",
+      "user_id": "$USER2",
+      "session_token": "$TOKEN2",
+      "state": {
+        "room_code": "$ROOM1",
+        "host_id": "$USER1",
+        "users": [
+          {
+            "user_id": "$USER1",
+            "username": "Asha",
+            "is_host": true,
+            "is_connected": true
+          },
+          {
+            "user_id": "$USER2",
+            "username": "Bharat",
+            "is_host": false,
+            "is_connected": true
+          }
+        ],
+        "is_playing": false,
+        "position": "0",
+        "last_update": "$TIME",
+        "volume": 1,
+        "queue": [],
+        "revision": "0"
+      }
+    }
+  },
+  {
+    "client": "A",
+    "type": "sync_playback",
+    "payload": {
+      "action": "change_track",
+      "track_id": "trk-001",
+      "position": "0",
+      "track_info": {
+        "id": "trk-001",
+        "title": "Raag Number 1",
+        "artist": "Pt. Ravi Shankar",
+        "album": "Raga Collection",
+        "duration": "180000",
+        "thumbnail": "https://i.ytimg.com/vi/trk-1/hqdefault.jpg",
+        "suggested_by": ""
+      },
+      "insert_next": false,
+      "queue": [
+        {
+          "id": "trk-002",
+          "title": "Raag Number 2",
+          "artist": "Pt. Ravi Shankar",
+          "album": "Raga Collection",
+          "duration": "86400000",
+          "thumbnail": "https://i.ytimg.com/vi/trk-2/hqdefault.jpg",
+          "suggested_by": ""
+        },
+        {
+          "id": "trk-003",
+          "title": "सरस्वती वंदना",
+          "artist": "लता मंगेशकर",
+          "album": "Raga Collection",
+          "duration": "240003",
+          "thumbnail": "https://i.ytimg.com/vi/trk-3/hqdefault.jpg",
+          "suggested_by": ""
+        }
+      ],
+      "queue_title": "",
+      "volume": 0,
+      "server_time": "$TIME",
+      "revision": "1",
+      "captured_at_server_time": "0"
+    }
+  },
+  {
+    "client": "B",
+    "type": "sync_playback",
+    "payload": {
+      "action": "change_track",
+      "track_id": "trk-001",
+      "position": "0",
+      "track_info": {
+        "id": "trk-001",
+        "title": "Raag Number 1",
+        "artist": "Pt. Ravi Shankar",
+        "album": "Raga Collection",
+        "duration": "180000",
+        "thumbnail": "https://i.ytimg.com/vi/trk-1/hqdefault.jpg",
+        "suggested_by": ""
+      },
+      "insert_next": false,
+      "queue": [
+        {
+          "id": "trk-002",
+          "title": "Raag Number 2",
+          "artist": "Pt. Ravi Shankar",
+          "album": "Raga Collection",
+          "duration": "86400000",
+          "thumbnail": "https://i.ytimg.com/vi/trk-2/hqdefault.jpg",
+          "suggested_by": ""
+        },
+        {
+          "id": "trk-003",
+          "title": "सरस्वती वंदना",
+          "artist": "लता मंगेशकर",
+          "album": "Raga Collection",
+          "duration": "240003",
+          "thumbnail": "https://i.ytimg.com/vi/trk-3/hqdefault.jpg",
+          "suggested_by": ""
+        }
+      ],
+      "queue_title": "",
+      "volume": 0,
+      "server_time": "$TIME",
+      "revision": "1",
+      "captured_at_server_time": "0"
+    }
+  },
+  {
+    "client": "A",
+    "type": "sync_playback",
+    "payload": {
+      "action": "queue_add",
+      "track_id": "",
+      "position": "0",
+      "track_info": {
+        "id": "trk-004",
+        "title": "Raag Number 4",
+        "artist": "Pt. Ravi Shankar",
+        "album": "Raga Collection",
+        "duration": "240004",
+        "thumbnail": "https://i.ytimg.com/vi/trk-4/hqdefault.jpg",
+        "suggested_by": ""
+      },
+      "insert_next": false,
+      "queue": [
+        {
+          "id": "trk-002",
+          "title": "Raag Number 2",
+          "artist": "Pt. Ravi Shankar",
+          "album": "Raga Collection",
+          "duration": "86400000",
+          "thumbnail": "https://i.ytimg.com/vi/trk-2/hqdefault.jpg",
+          "suggested_by": ""
+        },
+        {
+          "id": "trk-003",
+          "title": "सरस्वती वंदना",
+          "artist": "लता मंगेशकर",
+          "album": "Raga Collection",
+          "duration": "240003",
+          "thumbnail": "https://i.ytimg.com/vi/trk-3/hqdefault.jpg",
+          "suggested_by": ""
+        },
+        {
+          "id": "trk-004",
+          "title": "Raag Number 4",
+          "artist": "Pt. Ravi Shankar",
+          "album": "Raga Collection",
+          "duration": "240004",
+          "thumbnail": "https://i.ytimg.com/vi/trk-4/hqdefault.jpg",
+          "suggested_by": ""
+        }
+      ],
+      "queue_title": "",
+      "volume": 0,
+      "server_time": "$TIME",
+      "revision": "2",
+      "captured_at_server_time": "0"
+    }
+  },
+  {
+    "client": "B",
+    "type": "sync_playback",
+    "payload": {
+      "action": "queue_add",
+      "track_id": "",
+      "position": "0",
+      "track_info": {
+        "id": "trk-004",
+        "title": "Raag Number 4",
+        "artist": "Pt. Ravi Shankar",
+        "album": "Raga Collection",
+        "duration": "240004",
+        "thumbnail": "https://i.ytimg.com/vi/trk-4/hqdefault.jpg",
+        "suggested_by": ""
+      },
+      "insert_next": false,
+      "queue": [
+        {
+          "id": "trk-002",
+          "title": "Raag Number 2",
+          "artist": "Pt. Ravi Shankar",
+          "album": "Raga Collection",
+          "duration": "86400000",
+          "thumbnail": "https://i.ytimg.com/vi/trk-2/hqdefault.jpg",
+          "suggested_by": ""
+        },
+        {
+          "id": "trk-003",
+          "title": "सरस्वती वंदना",
+          "artist": "लता मंगेशकर",
+          "album": "Raga Collection",
+          "duration": "240003",
+          "thumbnail": "https://i.ytimg.com/vi/trk-3/hqdefault.jpg",
+          "suggested_by": ""
+        },
+        {
+          "id": "trk-004",
+          "title": "Raag Number 4",
+          "artist": "Pt. Ravi Shankar",
+          "album": "Raga Collection",
+          "duration": "240004",
+          "thumbnail": "https://i.ytimg.com/vi/trk-4/hqdefault.jpg",
+          "suggested_by": ""
+        }
+      ],
+      "queue_title": "",
+      "volume": 0,
+      "server_time": "$TIME",
+      "revision": "2",
+      "captured_at_server_time": "0"
+    }
+  },
+  {
+    "client": "A",
+    "type": "sync_playback",
+    "payload": {
+      "action": "queue_add",
+      "track_id": "",
+      "position": "0",
+      "track_info": {
+        "id": "trk-005",
+        "title": "Raag Number 5",
+        "artist": "Pt. Ravi Shankar",
+        "album": "Raga Collection",
+        "duration": "240005",
+        "thumbnail": "https://i.ytimg.com/vi/trk-5/hqdefault.jpg",
+        "suggested_by": ""
+      },
+      "insert_next": true,
+      "queue": [
+        {
+          "id": "trk-005",
+          "title": "Raag Number 5",
+          "artist": "Pt. Ravi Shankar",
+          "album": "Raga Collection",
+          "duration": "240005",
+          "thumbnail": "https://i.ytimg.com/vi/trk-5/hqdefault.jpg",
+          "suggested_by": ""
+        },
+        {
+          "id": "trk-002",
+          "title": "Raag Number 2",
+          "artist": "Pt. Ravi Shankar",
+          "album": "Raga Collection",
+          "duration": "86400000",
+          "thumbnail": "https://i.ytimg.com/vi/trk-2/hqdefault.jpg",
+          "suggested_by": ""
+        },
+        {
+          "id": "trk-003",
+          "title": "सरस्वती वंदना",
+          "artist": "लता मंगेशकर",
+          "album": "Raga Collection",
+          "duration": "240003",
+          "thumbnail": "https://i.ytimg.com/vi/trk-3/hqdefault.jpg",
+          "suggested_by": ""
+        },
+        {
+          "id": "trk-004",
+          "title": "Raag Number 4",
+          "artist": "Pt. Ravi Shankar",
+          "album": "Raga Collection",
+          "duration": "240004",
+          "thumbnail": "https://i.ytimg.com/vi/trk-4/hqdefault.jpg",
+          "suggested_by": ""
+        }
+      ],
+      "queue_title": "",
+      "volume": 0,
+      "server_time": "$TIME",
+      "revision": "3",
+      "captured_at_server_time": "0"
+    }
+  },
+  {
+    "client": "B",
+    "type": "sync_playback",
+    "payload": {
+      "action": "queue_add",
+      "track_id": "",
+      "position": "0",
+      "track_info": {
+        "id": "trk-005",
+        "title": "Raag Number 5",
+        "artist": "Pt. Ravi Shankar",
+        "album": "Raga Collection",
+        "duration": "240005",
+        "thumbnail": "https://i.ytimg.com/vi/trk-5/hqdefault.jpg",
+        "suggested_by": ""
+      },
+      "insert_next": true,
+      "queue": [
+        {
+          "id": "trk-005",
+          "title": "Raag Number 5",
+          "artist": "Pt. Ravi Shankar",
+          "album": "Raga Collection",
+          "duration": "240005",
+          "thumbnail": "https://i.ytimg.com/vi/trk-5/hqdefault.jpg",
+          "suggested_by": ""
+        },
+        {
+          "id": "trk-002",
+          "title": "Raag Number 2",
+          "artist": "Pt. Ravi Shankar",
+          "album": "Raga Collection",
+          "duration": "86400000",
+          "thumbnail": "https://i.ytimg.com/vi/trk-2/hqdefault.jpg",
+          "suggested_by": ""
+        },
+        {
+          "id": "trk-003",
+          "title": "सरस्वती वंदना",
+          "artist": "लता मंगेशकर",
+          "album": "Raga Collection",
+          "duration": "240003",
+          "thumbnail": "https://i.ytimg.com/vi/trk-3/hqdefault.jpg",
+          "suggested_by": ""
+        },
+        {
+          "id": "trk-004",
+          "title": "Raag Number 4",
+          "artist": "Pt. Ravi Shankar",
+          "album": "Raga Collection",
+          "duration": "240004",
+          "thumbnail": "https://i.ytimg.com/vi/trk-4/hqdefault.jpg",
+          "suggested_by": ""
+        }
+      ],
+      "queue_title": "",
+      "volume": 0,
+      "server_time": "$TIME",
+      "revision": "3",
+      "captured_at_server_time": "0"
+    }
+  },
+  {
+    "client": "A",
+    "type": "error",
+    "payload": {
+      "code": "missing_track_info",
+      "message": "Track info is required for track change"
+    }
+  },
+  {
+    "client": "A",
+    "type": "error",
+    "payload": {
+      "code": "invalid_track_info",
+      "message": "Track must have ID and title"
+    }
+  },
+  {
+    "client": "B",
+    "type": "sync_state",
+    "payload": {
+      "current_track": {
+        "id": "trk-001",
+        "title": "Raag Number 1",
+        "artist": "Pt. Ravi Shankar",
+        "album": "Raga Collection",
+        "duration": "180000",
+        "thumbnail": "https://i.ytimg.com/vi/trk-1/hqdefault.jpg",
+        "suggested_by": ""
+      },
+      "is_playing": false,
+      "position": "0",
+      "last_update": "$TIME",
+      "queue": [
+        {
+          "id": "trk-005",
+          "title": "Raag Number 5",
+          "artist": "Pt. Ravi Shankar",
+          "album": "Raga Collection",
+          "duration": "240005",
+          "thumbnail": "https://i.ytimg.com/vi/trk-5/hqdefault.jpg",
+          "suggested_by": ""
+        },
+        {
+          "id": "trk-002",
+          "title": "Raag Number 2",
+          "artist": "Pt. Ravi Shankar",
+          "album": "Raga Collection",
+          "duration": "86400000",
+          "thumbnail": "https://i.ytimg.com/vi/trk-2/hqdefault.jpg",
+          "suggested_by": ""
+        },
+        {
+          "id": "trk-003",
+          "title": "सरस्वती वंदना",
+          "artist": "लता मंगेशकर",
+          "album": "Raga Collection",
+          "duration": "240003",
+          "thumbnail": "https://i.ytimg.com/vi/trk-3/hqdefault.jpg",
+          "suggested_by": ""
+        },
+        {
+          "id": "trk-004",
+          "title": "Raag Number 4",
+          "artist": "Pt. Ravi Shankar",
+          "album": "Raga Collection",
+          "duration": "240004",
+          "thumbnail": "https://i.ytimg.com/vi/trk-4/hqdefault.jpg",
+          "suggested_by": ""
+        }
+      ],
+      "volume": 1,
+      "revision": "3"
+    }
+  },
+  {
+    "client": "A",
+    "type": "sync_playback",
+    "payload": {
+      "action": "change_track",
+      "track_id": "trk-002",
+      "position": "0",
+      "track_info": {
+        "id": "trk-002",
+        "title": "Raag Number 2",
+        "artist": "Pt. Ravi Shankar",
+        "album": "Raga Collection",
+        "duration": "240002",
+        "thumbnail": "https://i.ytimg.com/vi/trk-2/hqdefault.jpg",
+        "suggested_by": ""
+      },
+      "insert_next": false,
+      "queue": [
+        {
+          "id": "trk-005",
+          "title": "Raag Number 5",
+          "artist": "Pt. Ravi Shankar",
+          "album": "Raga Collection",
+          "duration": "240005",
+          "thumbnail": "https://i.ytimg.com/vi/trk-5/hqdefault.jpg",
+          "suggested_by": ""
+        },
+        {
+          "id": "trk-003",
+          "title": "सरस्वती वंदना",
+          "artist": "लता मंगेशकर",
+          "album": "Raga Collection",
+          "duration": "240003",
+          "thumbnail": "https://i.ytimg.com/vi/trk-3/hqdefault.jpg",
+          "suggested_by": ""
+        },
+        {
+          "id": "trk-004",
+          "title": "Raag Number 4",
+          "artist": "Pt. Ravi Shankar",
+          "album": "Raga Collection",
+          "duration": "240004",
+          "thumbnail": "https://i.ytimg.com/vi/trk-4/hqdefault.jpg",
+          "suggested_by": ""
+        }
+      ],
+      "queue_title": "",
+      "volume": 0,
+      "server_time": "$TIME",
+      "revision": "4",
+      "captured_at_server_time": "0"
+    }
+  },
+  {
+    "client": "B",
+    "type": "sync_playback",
+    "payload": {
+      "action": "change_track",
+      "track_id": "trk-002",
+      "position": "0",
+      "track_info": {
+        "id": "trk-002",
+        "title": "Raag Number 2",
+        "artist": "Pt. Ravi Shankar",
+        "album": "Raga Collection",
+        "duration": "240002",
+        "thumbnail": "https://i.ytimg.com/vi/trk-2/hqdefault.jpg",
+        "suggested_by": ""
+      },
+      "insert_next": false,
+      "queue": [
+        {
+          "id": "trk-005",
+          "title": "Raag Number 5",
+          "artist": "Pt. Ravi Shankar",
+          "album": "Raga Collection",
+          "duration": "240005",
+          "thumbnail": "https://i.ytimg.com/vi/trk-5/hqdefault.jpg",
+          "suggested_by": ""
+        },
+        {
+          "id": "trk-003",
+          "title": "सरस्वती वंदना",
+          "artist": "लता मंगेशकर",
+          "album": "Raga Collection",
+          "duration": "240003",
+          "thumbnail": "https://i.ytimg.com/vi/trk-3/hqdefault.jpg",
+          "suggested_by": ""
+        },
+        {
+          "id": "trk-004",
+          "title": "Raag Number 4",
+          "artist": "Pt. Ravi Shankar",
+          "album": "Raga Collection",
+          "duration": "240004",
+          "thumbnail": "https://i.ytimg.com/vi/trk-4/hqdefault.jpg",
+          "suggested_by": ""
+        }
+      ],
+      "queue_title": "",
+      "volume": 0,
+      "server_time": "$TIME",
+      "revision": "4",
+      "captured_at_server_time": "0"
+    }
+  },
+  {
+    "client": "A",
+    "type": "sync_playback",
+    "payload": {
+      "action": "change_track",
+      "track_id": "trk-long",
+      "position": "0",
+      "track_info": {
+        "id": "trk-long",
+        "title": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL",
+        "artist": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL",
+        "album": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL",
+        "duration": "5000",
+        "thumbnail": "https://example.test/LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL",
+        "suggested_by": ""
+      },
+      "insert_next": false,
+      "queue": [
+        {
+          "id": "trk-005",
+          "title": "Raag Number 5",
+          "artist": "Pt. Ravi Shankar",
+          "album": "Raga Collection",
+          "duration": "240005",
+          "thumbnail": "https://i.ytimg.com/vi/trk-5/hqdefault.jpg",
+          "suggested_by": ""
+        },
+        {
+          "id": "trk-003",
+          "title": "सरस्वती वंदना",
+          "artist": "लता मंगेशकर",
+          "album": "Raga Collection",
+          "duration": "240003",
+          "thumbnail": "https://i.ytimg.com/vi/trk-3/hqdefault.jpg",
+          "suggested_by": ""
+        },
+        {
+          "id": "trk-004",
+          "title": "Raag Number 4",
+          "artist": "Pt. Ravi Shankar",
+          "album": "Raga Collection",
+          "duration": "240004",
+          "thumbnail": "https://i.ytimg.com/vi/trk-4/hqdefault.jpg",
+          "suggested_by": ""
+        }
+      ],
+      "queue_title": "",
+      "volume": 0,
+      "server_time": "$TIME",
+      "revision": "5",
+      "captured_at_server_time": "0"
+    }
+  },
+  {
+    "client": "B",
+    "type": "sync_playback",
+    "payload": {
+      "action": "change_track",
+      "track_id": "trk-long",
+      "position": "0",
+      "track_info": {
+        "id": "trk-long",
+        "title": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL",
+        "artist": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL",
+        "album": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL",
+        "duration": "5000",
+        "thumbnail": "https://example.test/LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL",
+        "suggested_by": ""
+      },
+      "insert_next": false,
+      "queue": [
+        {
+          "id": "trk-005",
+          "title": "Raag Number 5",
+          "artist": "Pt. Ravi Shankar",
+          "album": "Raga Collection",
+          "duration": "240005",
+          "thumbnail": "https://i.ytimg.com/vi/trk-5/hqdefault.jpg",
+          "suggested_by": ""
+        },
+        {
+          "id": "trk-003",
+          "title": "सरस्वती वंदना",
+          "artist": "लता मंगेशकर",
+          "album": "Raga Collection",
+          "duration": "240003",
+          "thumbnail": "https://i.ytimg.com/vi/trk-3/hqdefault.jpg",
+          "suggested_by": ""
+        },
+        {
+          "id": "trk-004",
+          "title": "Raag Number 4",
+          "artist": "Pt. Ravi Shankar",
+          "album": "Raga Collection",
+          "duration": "240004",
+          "thumbnail": "https://i.ytimg.com/vi/trk-4/hqdefault.jpg",
+          "suggested_by": ""
+        }
+      ],
+      "queue_title": "",
+      "volume": 0,
+      "server_time": "$TIME",
+      "revision": "5",
+      "captured_at_server_time": "0"
+    }
+  }
+]
