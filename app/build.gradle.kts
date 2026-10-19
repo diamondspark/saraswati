@@ -373,6 +373,16 @@ dependencies {
     implementation(libs.ktor.client.encoding)
     implementation(libs.ktor.serialization.json)
 
+    // SARASWATI: Task 6 (HubClient) — parses the family hub Worker's JSON with
+    // kotlinx.serialization directly. It already resolves transitively
+    // (Ktor), declared explicitly so HubClient does not depend on Ktor
+    // happening to expose it. OkHttp is deliberately NOT declared here:
+    // the app already imports okhttp3 through Coil/Ktor/Media3, and a direct
+    // implementation(libs.okhttp) changes what the generateLocaleConfig
+    // classpath resolves to, pulling in an unverified
+    // org.jetbrains.compose.annotation-internal 1.8.0 .module.
+    implementation(libs.kotlinx.serialization.json)
+
     // Protobuf for message serialization (lite version for Android)
     implementation(libs.protobuf.javalite)
     implementation(libs.protobuf.kotlin.lite)
@@ -393,6 +403,9 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.ktor.client.mock)
+    // SARASWATI: Task 6 — HubClientTest runs HubClient against a real local
+    // HTTP server instead of a mocked OkHttp Call.
+    testImplementation(libs.okhttp.mockwebserver)
 
     // SARASWATI: Task 12 instrumented proof that the network security
     // config's deny-by-default egress allowlist is enforced on-device
@@ -434,9 +447,21 @@ android {
         buildConfigField("String", "LASTFM_SECRET", "\"\"")
     }
 
+    // SARASWATI: Task 6 — base URL of the family hub Worker (HubClient).
+    // The URL's host must also be allowlisted in network_security_config.xml
+    // and security/egress-allowlist.json. foss/izzy never ship (gms only),
+    // so they get an empty URL: HubClient then fails every call with
+    // "not configured" instead of talking to a hub nobody vetted for them.
     productFlavors {
+        getByName("foss") {
+            buildConfigField("String", "HUB_BASE_URL", "\"\"")
+        }
         getByName("gms") {
             buildConfigField("Boolean", "UPDATER_AVAILABLE", "false")
+            buildConfigField("String", "HUB_BASE_URL", "\"https://saraswati-sangat.pandey-mohitk.workers.dev\"")
+        }
+        getByName("izzy") {
+            buildConfigField("String", "HUB_BASE_URL", "\"\"")
         }
     }
 }

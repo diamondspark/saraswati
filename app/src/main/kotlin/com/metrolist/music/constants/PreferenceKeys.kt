@@ -530,6 +530,19 @@ val AndroidAutoSectionsOrderKey = stringPreferencesKey("androidAutoSectionsOrder
 val AndroidAutoTargetPlaylistKey = stringPreferencesKey("androidAutoTargetPlaylist")
 val AndroidAutoSearchLocalLimitKey = intPreferencesKey("androidAutoSearchLocalLimit")
 val InnerTubeCookieKey = stringPreferencesKey("innerTubeCookie")
+
+// SARASWATI: Task 6 — family hub bearer credentials. Registered in
+// SecretPreferenceKeys.all and sealed at rest exactly like InnerTubeCookieKey
+// (SecretPreferenceKeys.VAULT_SEALED, SealedPreferences): read them through
+// dataStore[key] / rememberPreference so they are opened, and write them
+// through rememberPreference or SaraswatiVault.cookieVault.seal(...) — a plain
+// settings[key] = plaintext is wiped by SecretScrubber on the next start.
+// The owner's admin key, this phone's own hub session token (issued on
+// approval), and the one-time claim secret that proves this phone is the one
+// that claimed a pairing token while it waits for approval.
+val FamilyAdminKeyKey = stringPreferencesKey("familyAdminKey")
+val FamilyHubSessionTokenKey = stringPreferencesKey("familyHubSessionToken")
+val FamilyHubClaimSecretKey = stringPreferencesKey("familyHubClaimSecret")
 val AccountNameKey = stringPreferencesKey("accountName")
 val AccountEmailKey = stringPreferencesKey("accountEmail")
 val AccountChannelHandleKey = stringPreferencesKey("accountChannelHandle")

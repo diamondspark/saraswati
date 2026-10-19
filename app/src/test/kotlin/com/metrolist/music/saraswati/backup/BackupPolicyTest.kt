@@ -20,6 +20,9 @@ import com.metrolist.music.constants.DeeplApiKey
 import com.metrolist.music.constants.DiscordAvatarKey
 import com.metrolist.music.constants.DiscordButton1UrlKey
 import com.metrolist.music.constants.DiscordButton2UrlKey
+import com.metrolist.music.constants.FamilyAdminKeyKey
+import com.metrolist.music.constants.FamilyHubClaimSecretKey
+import com.metrolist.music.constants.FamilyHubSessionTokenKey
 import com.metrolist.music.constants.InnerTubeCookieKey
 import com.metrolist.music.constants.LastFMSessionKey
 import com.metrolist.music.constants.ListenTogetherServerUrlKey
@@ -60,6 +63,46 @@ class BackupPolicyTest {
         assertNull(sanitized[AccountNameKey])
         assertNull(sanitized[AccountEmailKey])
         assertNull(sanitized[AccountChannelHandleKey])
+    }
+
+    // SARASWATI: Task 6 — the family hub credentials ride on
+    // SecretPreferenceKeys.all, so a shared backup must not carry another
+    // device's admin key or session token, and a hostile backup must not be
+    // able to plant one into a live phone.
+    @Test
+    fun `sanitize drops the family hub credentials`() {
+        val prefs =
+            mutablePreferencesOf(
+                FamilyAdminKeyKey to "admin-key",
+                FamilyHubSessionTokenKey to "session-token",
+                FamilyHubClaimSecretKey to "claim-secret",
+            ).toPreferences()
+
+        val sanitized = BackupPolicy.sanitize(prefs)
+
+        assertNull(sanitized[FamilyAdminKeyKey])
+        assertNull(sanitized[FamilyHubSessionTokenKey])
+        assertNull(sanitized[FamilyHubClaimSecretKey])
+    }
+
+    @Test
+    fun `a restore keeps this phone's own family hub credentials and ignores restored ones`() {
+        val live =
+            mutablePreferencesOf(
+                FamilyAdminKeyKey to "live-sealed-admin",
+                FamilyHubSessionTokenKey to "live-sealed-session",
+            ).toPreferences()
+        val restored =
+            mutablePreferencesOf(
+                FamilyAdminKeyKey to "planted-admin",
+                FamilyHubClaimSecretKey to "planted-claim",
+            ).toPreferences()
+
+        val merged = BackupPolicy.mergeRestoreOntoLive(live = live, restored = restored)
+
+        assertEquals("live-sealed-admin", merged[FamilyAdminKeyKey])
+        assertEquals("live-sealed-session", merged[FamilyHubSessionTokenKey])
+        assertNull(merged[FamilyHubClaimSecretKey])
     }
 
     @Test

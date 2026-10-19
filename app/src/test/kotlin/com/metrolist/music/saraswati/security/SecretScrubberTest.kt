@@ -13,6 +13,9 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.mutablePreferencesOf
 import com.metrolist.music.constants.DeeplApiKey
+import com.metrolist.music.constants.FamilyAdminKeyKey
+import com.metrolist.music.constants.FamilyHubClaimSecretKey
+import com.metrolist.music.constants.FamilyHubSessionTokenKey
 import com.metrolist.music.constants.InnerTubeCookieKey
 import com.metrolist.music.constants.LastFMSessionKey
 import com.metrolist.music.constants.OpenRouterApiKey
@@ -92,6 +95,62 @@ class SecretScrubberTest {
             SecretScrubber.scrub(dataStore, vault)
 
             assertEquals(sealed, dataStore.data.first()[InnerTubeCookieKey])
+        }
+
+    private val hubKeys = listOf(FamilyAdminKeyKey, FamilyHubSessionTokenKey, FamilyHubClaimSecretKey)
+
+    // SARASWATI: Task 6 — the hub credentials are in SecretPreferenceKeys.all
+    // (so a backup never carries them) but are also kept sealed at rest, so
+    // the scrubber must keep the sealed ones exactly as it keeps the cookie.
+    // Without this the owner would be signed out of the hub on every start.
+    @Test
+    fun `keeps vault-sealed hub credentials`() =
+        runBlocking {
+            val sealed = hubKeys.associateWith { vault.seal("value-for-${it.name}") }
+            val dataStore =
+                InMemoryPreferencesDataStore(
+                    mutablePreferencesOf(*sealed.map { (key, value) -> key to value }.toTypedArray()),
+                )
+
+            SecretScrubber.scrub(dataStore, vault)
+
+            val after = dataStore.data.first()
+            for ((key, value) in sealed) {
+                assertEquals(key.name, value, after[key])
+            }
+        }
+
+    @Test
+    fun `drops plaintext hub credentials`() =
+        runBlocking {
+            val dataStore =
+                InMemoryPreferencesDataStore(
+                    mutablePreferencesOf(*hubKeys.map { it to "plaintext-${it.name}" }.toTypedArray()),
+                )
+
+            SecretScrubber.scrub(dataStore, vault)
+
+            val after = dataStore.data.first()
+            for (key in hubKeys) {
+                assertNull(key.name, after[key])
+            }
+        }
+
+    @Test
+    fun `drops hub credentials sealed by a different device's key`() =
+        runBlocking {
+            val otherDevice = CookieVault(SoftwareKeyProvider())
+            val dataStore =
+                InMemoryPreferencesDataStore(
+                    mutablePreferencesOf(*hubKeys.map { it to otherDevice.seal("from-another-phone") }.toTypedArray()),
+                )
+
+            SecretScrubber.scrub(dataStore, vault)
+
+            val after = dataStore.data.first()
+            for (key in hubKeys) {
+                assertNull(key.name, after[key])
+            }
         }
 
     @Test

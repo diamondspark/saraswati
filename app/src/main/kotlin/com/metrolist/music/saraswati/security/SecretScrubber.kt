@@ -8,17 +8,17 @@
 // backup, a phone-to-phone transfer, or a legacy datastore file copied in
 // by hand can carry a plaintext YouTube sign-in cookie or an integration
 // token (audit NEW-3; Review Focus #4). This removes every key
-// SecretPreferenceKeys.all names, except an InnerTubeCookieKey value the
-// vault actually accepts. A plaintext or foreign-sealed cookie is wiped,
-// not "repaired" — nothing downstream ever has to guess whether a stored
-// value is trustworthy.
+// SecretPreferenceKeys.all names, except a SecretPreferenceKeys.VAULT_SEALED
+// key (the cookie, the family hub credentials) whose value the vault
+// actually accepts. A plaintext or foreign-sealed value is wiped, not
+// "repaired" — nothing downstream ever has to guess whether a stored value
+// is trustworthy.
 package com.metrolist.music.saraswati.security
 
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
-import com.metrolist.music.constants.InnerTubeCookieKey
 
 object SecretScrubber {
     suspend fun scrub(
@@ -26,13 +26,20 @@ object SecretScrubber {
         vault: CookieVault,
     ) {
         dataStore.edit { settings ->
-            val cookieIsVaultSealed = settings[InnerTubeCookieKey]?.let { vault.open(it) != null } ?: false
             for (key in SecretPreferenceKeys.all) {
-                if (key == InnerTubeCookieKey && cookieIsVaultSealed) continue
+                if (key in SecretPreferenceKeys.VAULT_SEALED && settings.holdsVaultSealedValue(key, vault)) continue
                 settings.removeAny(key)
             }
         }
     }
+
+    // A sealed key's value is a String by construction (VAULT_SEALED only
+    // holds string keys), so the cast is safe; an absent key is not sealed.
+    @Suppress("UNCHECKED_CAST")
+    private fun MutablePreferences.holdsVaultSealedValue(
+        key: Preferences.Key<*>,
+        vault: CookieVault,
+    ): Boolean = (this[key as Preferences.Key<Any>] as? String)?.let { vault.open(it) != null } ?: false
 
     @Suppress("UNCHECKED_CAST")
     private fun MutablePreferences.removeAny(key: Preferences.Key<*>) {

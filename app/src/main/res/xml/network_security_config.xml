@@ -128,4 +128,18 @@
             <certificates src="system" />
         </trust-anchors>
     </domain-config>
+
+    <!-- SARASWATI: Phase 3 Task 6 — the family hub (HubClient,
+         saraswati/family/HubClient.kt): the Cloudflare Worker that holds the
+         roster, stations and kill-switches, reached at BuildConfig.HUB_BASE_URL
+         (gms flavor). Exact host only (Ruling R20): the app calls exactly this
+         one Workers subdomain, never workers.dev or any other account's Worker.
+         It is also the only place the owner's admin key and each phone's hub
+         session token are ever sent. -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="false">saraswati-sangat.pandey-mohitk.workers.dev</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
 </network-security-config>

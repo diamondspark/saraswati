@@ -86,6 +86,11 @@ coroutines-guava = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-guava", 
 
 gradle = { module = "com.android.tools.build:gradle", version.ref = "androidGradlePlugin" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
+# SARASWATI: Task 6 (HubClient) — OkHttp's own test server, pinned to the same
+# version line as okhttp above (they ship in lock-step). mockwebserver3 is the
+# current (non-deprecated) artifact; the legacy "mockwebserver" one is only a
+# JUnit4 wrapper around it.
+okhttp-mockwebserver = { module = "com.squareup.okhttp3:mockwebserver3", version.ref = "okhttp" }
 activity = { module = "androidx.activity:activity-compose", version.ref = "activity" }
 hilt-navigation = { module = "androidx.hilt:hilt-navigation-compose", version.ref = "hiltNavigation" }
 datastore = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
