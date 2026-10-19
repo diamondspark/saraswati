@@ -31,6 +31,13 @@ const FAMILY_FEATURE_KEYS = [
 ] as const;
 type FamilyFeatureKey = (typeof FAMILY_FEATURE_KEYS)[number];
 
+// What the owner has set a phone up as. Not to be confused with AuthResult's
+// "admin" | "device" `role`, which says who is calling.
+const DEVICE_ROLES = ["adult", "grandparent"] as const;
+type DeviceRole = (typeof DEVICE_ROLES)[number];
+const DEFAULT_DEVICE_ROLE: DeviceRole = "adult";
+const ROLE_ERROR = `role must be one of: ${DEVICE_ROLES.join(", ")}`;
+
 type AuthResult =
   | { role: "admin" }
   | { role: "device"; deviceId: string }
@@ -52,6 +59,7 @@ interface RosterRow extends Record<string, SqlStorageValue> {
   status: string;
   sessionToken: string | null;
   approvedAt: number | null;
+  role: string;
 }
 
 interface RosterStatusRow extends Record<string, SqlStorageValue> {
@@ -72,6 +80,10 @@ interface ClaimStatusRow extends Record<string, SqlStorageValue> {
 
 interface RosterIdRow extends Record<string, SqlStorageValue> {
   deviceId: string;
+}
+
+interface DeviceRoleRow extends Record<string, SqlStorageValue> {
+  role: string;
 }
 
 interface StationRow extends Record<string, SqlStorageValue> {
@@ -241,6 +253,10 @@ function parseHealthReport(
   return { deviceId, versionCode, versionName, timezone };
 }
 
+function isDeviceRole(value: unknown): value is DeviceRole {
+  return (DEVICE_ROLES as readonly unknown[]).includes(value);
+}
+
 function isFamilyFeatureKey(key: string): key is FamilyFeatureKey {
   return (FAMILY_FEATURE_KEYS as readonly string[]).includes(key);
 }
@@ -267,7 +283,8 @@ export class FamilyHub extends DurableObject<Env> {
       status TEXT,
       sessionToken TEXT,
       approvedAt INTEGER,
-      claimSecret TEXT
+      claimSecret TEXT,
+      role TEXT NOT NULL DEFAULT 'adult'
     )`);
     ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS stations (
       id TEXT PRIMARY KEY,
@@ -439,6 +456,13 @@ export class FamilyHub extends DurableObject<Env> {
       return json({ error: "not found" }, 404);
     }
 
+    // Checked before the token is looked up or spent, so a malformed role
+    // never burns the owner's pairing token and the phone can simply retry.
+    const role: unknown = "role" in body ? body.role : DEFAULT_DEVICE_ROLE;
+    if (!isDeviceRole(role)) {
+      return json({ error: ROLE_ERROR }, 400);
+    }
+
     const rows = this.ctx.storage.sql
       .exec<PairingTokenRow>(
         "SELECT token, expiresAt, usedAt FROM pairing_tokens WHERE token = ?",
@@ -472,10 +496,11 @@ export class FamilyHub extends DurableObject<Env> {
     const deviceId = crypto.randomUUID();
     const claimSecret = randomHex(32);
     this.ctx.storage.sql.exec(
-      "INSERT INTO roster (deviceId, deviceName, status, sessionToken, approvedAt, claimSecret) VALUES (?, ?, 'pending', NULL, NULL, ?)",
+      "INSERT INTO roster (deviceId, deviceName, status, sessionToken, approvedAt, claimSecret, role) VALUES (?, ?, 'pending', NULL, NULL, ?, ?)",
       deviceId,
       deviceName,
       claimSecret,
+      role,
     );
     this.ctx.storage.sql.exec(
       "UPDATE pairing_tokens SET usedAt = ? WHERE token = ?",
@@ -553,7 +578,7 @@ export class FamilyHub extends DurableObject<Env> {
 
     const devices = this.ctx.storage.sql
       .exec<RosterRow>(
-        "SELECT deviceId, deviceName, status, sessionToken, approvedAt FROM roster",
+        "SELECT deviceId, deviceName, status, sessionToken, approvedAt, role FROM roster",
       )
       .toArray()
       .map((row) => ({
@@ -561,9 +586,75 @@ export class FamilyHub extends DurableObject<Env> {
         deviceName: row.deviceName,
         status: row.status,
         approvedAt: row.approvedAt,
+        role: row.role,
       }));
 
     return json({ devices });
+  }
+
+  /**
+   * The owner's remote control for a phone's role: how a grandparent-mode
+   * phone, which has no settings and no way out, is switched back. Admin
+   * only, so the phone itself can never change it.
+   */
+  private async handleRosterRole(
+    request: Request,
+    deviceId: string,
+  ): Promise<Response> {
+    const auth = await this.authenticate(request, this.env);
+    if (auth?.role !== "admin") {
+      return json({ error: "unauthorized" }, 401);
+    }
+
+    const throttled = this.throttleAdmin(auth);
+    if (throttled) {
+      return throttled;
+    }
+
+    const body = await readStrictJsonObject(request);
+    const role = body?.role;
+    if (!isDeviceRole(role)) {
+      return json({ error: ROLE_ERROR }, 400);
+    }
+
+    const rows = this.ctx.storage.sql
+      .exec<RosterStatusRow>(
+        "SELECT deviceId, status FROM roster WHERE deviceId = ?",
+        deviceId,
+      )
+      .toArray();
+
+    if (rows.length === 0 || rows[0].status === "revoked") {
+      return json({ error: "not found" }, 404);
+    }
+
+    this.ctx.storage.sql.exec(
+      "UPDATE roster SET role = ? WHERE deviceId = ?",
+      role,
+      deviceId,
+    );
+
+    return json({ deviceId, role });
+  }
+
+  /** A phone asking what the owner has set it up as. Devices only. */
+  private async handleMe(request: Request): Promise<Response> {
+    const auth = await this.authenticate(request, this.env);
+    if (auth?.role !== "device") {
+      return json({ error: "unauthorized" }, 401);
+    }
+
+    const rows = this.ctx.storage.sql
+      .exec<DeviceRoleRow>(
+        "SELECT role FROM roster WHERE deviceId = ?",
+        auth.deviceId,
+      )
+      .toArray();
+    if (rows.length === 0) {
+      return json({ error: "unauthorized" }, 401);
+    }
+
+    return json({ deviceId: auth.deviceId, role: rows[0].role });
   }
 
   private async handleRosterApprove(
@@ -873,6 +964,15 @@ export class FamilyHub extends DurableObject<Env> {
         request,
         decodeURIComponent(revokeMatch[1]),
       );
+    }
+
+    const roleMatch = /^\/roster\/([^/]+)\/role$/.exec(pathname);
+    if (request.method === "PUT" && roleMatch) {
+      return this.handleRosterRole(request, decodeURIComponent(roleMatch[1]));
+    }
+
+    if (request.method === "GET" && pathname === "/me") {
+      return this.handleMe(request);
     }
 
     if (pathname === "/stations") {
