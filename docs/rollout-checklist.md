@@ -8,8 +8,9 @@ person, with the family member's own hands on their own sign-in.
 Related docs:
 
 - Setup guide the family member follows (Pixel, Samsung, Xiaomi pages):
-  <https://diamondspark.github.io/saraswati/setup-guide/> (not published yet,
-  Phase 3 Task 12; check that it loads before the first phone)
+  <https://diamondspark.github.io/saraswati/setup-guide/> (goes live with the
+  next release; see "The setup guide" below and check that it loads before
+  the first phone)
 - Developer verification, in full: [`developer-verification.md`](developer-verification.md)
 - How a build gets released and promoted: [`release-runbook.md`](release-runbook.md)
 - Why each hygiene item exists: "Phone hygiene" in
@@ -23,15 +24,30 @@ Owner only. Do this once.
 
 - [ ] Your Cloudflare account has 2-Step Verification on, and `wrangler login`
       is done on your own machine.
-- [ ] Your checkout includes commit `53351555` (or anything after it):
-      `git merge-base --is-ancestor 53351555 HEAD && echo ok` prints `ok`.
+- [ ] Your checkout includes commit `4308392a` (or anything after it):
+      `git merge-base --is-ancestor 4308392a HEAD && echo ok` prints `ok`.
       The hub's roster table has no migration for its newest column
-      (`claimSecret`), so deploy from this commit or later onto a fresh hub.
-      Do not deploy an older commit and upgrade it later.
-- [ ] Deploy: `cd worker && npx wrangler deploy`
+      (`claimSecret`, added in `53351555`), so deploy from this commit or
+      later onto a fresh hub. Do not deploy an older commit and upgrade it
+      later.
+- [ ] Deploy: `cd worker && npx wrangler deploy`. If a hub from an older commit
+      is already live, redeploy the Worker so `/pair` and `assetlinks.json` are
+      live (needed for the pairing link to open the app). Do this before the
+      first phone installs Saraswati: Android reads `assetlinks.json` when the
+      app is installed, so a phone that installed earlier may open the link in
+      the browser instead (the setup guide tells them to paste it into the
+      app).
 - [ ] Check it is up: `curl https://saraswati-sangat.pandey-mohitk.workers.dev/ping`
       returns `ok` (this is the address the app is built to use,
       `HUB_BASE_URL`; use the one `wrangler deploy` printed if it differs).
+- [ ] Check the two app-link pages. They need no token and no key:
+      `curl -s https://saraswati-sangat.pandey-mohitk.workers.dev/.well-known/assetlinks.json`
+      prints a statement for `dev.diamondspark.saraswati` whose fingerprint is
+      your release certificate in colon-separated capitals (the same value as
+      `security/release-cert.sha256`), and
+      `curl -s -o /dev/null -w '%{http_code}\n' https://saraswati-sangat.pandey-mohitk.workers.dev/pair`
+      prints `200`. (Use a plain GET here: `curl -I` sends HEAD, and these two
+      pages answer only GET.)
 - [ ] Make the admin key, in your own terminal only:
       `openssl rand -hex 32`. Copy the output. Do not paste it into chat, a
       file, a note-to-self message or a screenshot.
@@ -42,6 +58,24 @@ Owner only. Do this once.
       carry it from the terminal to the phone is not specified by the design,
       so use a channel you already trust for passwords.
 - [ ] To replace the key later, repeat the last two steps with a new value.
+
+### The setup guide
+
+The guide is plain HTML in `docs/setup-guide/`. A release run copies it to the
+`gh-pages` branch in the same push as the channel manifest, so it needs a
+push and a CI run that only you can do. Nothing publishes it until then.
+
+- [ ] Merge this work to `main`, then run the next release
+      ("How to release" in the runbook). Its publish job pushes
+      `setup-guide/` to `gh-pages` next to `beta.json` or `stable.json`.
+- [ ] When that run is green, check every page answers `200` (GitHub Pages can
+      take a minute or two after the push):
+      `for p in "" pixel.html samsung.html xiaomi.html style.css; do curl -s -o /dev/null -w "%{http_code} $p\n" "https://diamondspark.github.io/saraswati/setup-guide/$p"; done`
+      prints `200` five times. If one is not `200`, look at the release run's
+      "Publish the manifest and the setup guide to gh-pages" step.
+- [ ] Open <https://diamondspark.github.io/saraswati/setup-guide/> on your own
+      phone and read the page for your brand once, so you know what the family
+      member will see.
 
 ### The build
 
