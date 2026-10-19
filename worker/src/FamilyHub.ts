@@ -2,6 +2,17 @@ import { DurableObject } from "cloudflare:workers";
 import type { Env } from "./index";
 
 const PAIRING_TOKEN_TTL_MS = 15 * 60 * 1000;
+const MAX_STATIONS = 6;
+
+// Mirrors the app's FamilyFeature enum. Order here is the order the
+// kill-switch map is returned in.
+const FAMILY_FEATURE_KEYS = [
+  "sangat",
+  "parivaar_mix",
+  "family_playlists",
+  "cast_relay",
+] as const;
+type FamilyFeatureKey = (typeof FAMILY_FEATURE_KEYS)[number];
 
 type AuthResult =
   | { role: "admin" }
@@ -35,6 +46,25 @@ interface RosterIdRow extends Record<string, SqlStorageValue> {
   deviceId: string;
 }
 
+interface StationRow extends Record<string, SqlStorageValue> {
+  id: string;
+  title: string;
+  seedVideoId: string;
+  iconIndex: number;
+}
+
+interface KillswitchRow extends Record<string, SqlStorageValue> {
+  key: string;
+  enabled: number;
+}
+
+interface Station {
+  id: string;
+  title: string;
+  seedVideoId: string;
+  iconIndex: number;
+}
+
 function randomHex(byteLength: number): string {
   const bytes = new Uint8Array(byteLength);
   crypto.getRandomValues(bytes);
@@ -64,6 +94,75 @@ async function readJsonBody(
 }
 
 /**
+ * Unlike readJsonBody, which maps anything unparseable to `{}`, this tells
+ * "no valid JSON object" (null) apart from an empty object, so a PUT that
+ * replaces stored state can reject a malformed body instead of treating it
+ * as a no-op.
+ */
+async function readStrictJsonObject(
+  request: Request,
+): Promise<Record<string, unknown> | null> {
+  try {
+    const parsed: unknown = await request.json();
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      !Array.isArray(parsed)
+    ) {
+      return parsed as Record<string, unknown>;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+/** Returns the cleaned station list, or null if any part of it is invalid. */
+function parseStations(value: unknown): Station[] | null {
+  if (
+    !Array.isArray(value) ||
+    value.length < 1 ||
+    value.length > MAX_STATIONS
+  ) {
+    return null;
+  }
+
+  const seenIds = new Set<string>();
+  const stations: Station[] = [];
+  for (const entry of value as unknown[]) {
+    if (typeof entry !== "object" || entry === null) {
+      return null;
+    }
+    const { id, title, seedVideoId, iconIndex } = entry as Record<
+      string,
+      unknown
+    >;
+    if (
+      !isNonEmptyString(id) ||
+      !isNonEmptyString(title) ||
+      !isNonEmptyString(seedVideoId) ||
+      typeof iconIndex !== "number" ||
+      !Number.isInteger(iconIndex) ||
+      iconIndex < 0 ||
+      seenIds.has(id)
+    ) {
+      return null;
+    }
+    seenIds.add(id);
+    stations.push({ id, title, seedVideoId, iconIndex });
+  }
+  return stations;
+}
+
+function isFamilyFeatureKey(key: string): key is FamilyFeatureKey {
+  return (FAMILY_FEATURE_KEYS as readonly string[]).includes(key);
+}
+
+/**
  * Single global Durable Object backing the Saraswati family hub.
  *
  * Routing to the one instance (idFromName("family")) happens in
@@ -74,7 +173,7 @@ export class FamilyHub extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
 
-    // Later tasks add stations, killswitches, health, and rate_limits.
+    // Later tasks add health and rate_limits.
     ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS pairing_tokens (
       token TEXT PRIMARY KEY,
       expiresAt INTEGER,
@@ -87,6 +186,25 @@ export class FamilyHub extends DurableObject<Env> {
       sessionToken TEXT,
       approvedAt INTEGER
     )`);
+    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS stations (
+      id TEXT PRIMARY KEY,
+      title TEXT,
+      seedVideoId TEXT,
+      iconIndex INTEGER,
+      position INTEGER
+    )`);
+    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS killswitches (
+      key TEXT PRIMARY KEY,
+      enabled INTEGER
+    )`);
+    // INSERT OR IGNORE keeps any key the owner has already flipped; a feature
+    // key added to FAMILY_FEATURE_KEYS later seeds itself as enabled.
+    for (const key of FAMILY_FEATURE_KEYS) {
+      ctx.storage.sql.exec(
+        "INSERT OR IGNORE INTO killswitches (key, enabled) VALUES (?, 1)",
+        key,
+      );
+    }
   }
 
   /**
@@ -267,6 +385,117 @@ export class FamilyHub extends DurableObject<Env> {
     return json({ deviceId, status: "revoked" });
   }
 
+  private readStations(): Station[] {
+    return this.ctx.storage.sql
+      .exec<StationRow>(
+        "SELECT id, title, seedVideoId, iconIndex FROM stations ORDER BY position",
+      )
+      .toArray()
+      .map((row) => ({
+        id: row.id,
+        title: row.title,
+        seedVideoId: row.seedVideoId,
+        iconIndex: row.iconIndex,
+      }));
+  }
+
+  private readKillSwitches(): Record<FamilyFeatureKey, boolean> {
+    const enabledByKey = new Map(
+      this.ctx.storage.sql
+        .exec<KillswitchRow>("SELECT key, enabled FROM killswitches")
+        .toArray()
+        .map((row) => [row.key, row.enabled !== 0]),
+    );
+    return Object.fromEntries(
+      FAMILY_FEATURE_KEYS.map((key) => [key, enabledByKey.get(key) ?? true]),
+    ) as Record<FamilyFeatureKey, boolean>;
+  }
+
+  private async handleStationsGet(request: Request): Promise<Response> {
+    const auth = await this.authenticate(request, this.env);
+    if (!auth) {
+      return json({ error: "unauthorized" }, 401);
+    }
+
+    return json({ stations: this.readStations() });
+  }
+
+  private async handleStationsPut(request: Request): Promise<Response> {
+    const auth = await this.authenticate(request, this.env);
+    if (auth?.role !== "admin") {
+      return json({ error: "unauthorized" }, 401);
+    }
+
+    const body = await readStrictJsonObject(request);
+    const stations = body ? parseStations(body.stations) : null;
+    if (!stations) {
+      return json(
+        { error: `stations must be 1-${MAX_STATIONS} valid entries` },
+        400,
+      );
+    }
+
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec("DELETE FROM stations");
+      stations.forEach((station, position) => {
+        this.ctx.storage.sql.exec(
+          "INSERT INTO stations (id, title, seedVideoId, iconIndex, position) VALUES (?, ?, ?, ?, ?)",
+          station.id,
+          station.title,
+          station.seedVideoId,
+          station.iconIndex,
+          position,
+        );
+      });
+    });
+
+    return json({ stations: this.readStations() });
+  }
+
+  private async handleKillSwitchesGet(request: Request): Promise<Response> {
+    const auth = await this.authenticate(request, this.env);
+    if (!auth) {
+      return json({ error: "unauthorized" }, 401);
+    }
+
+    return json(this.readKillSwitches());
+  }
+
+  private async handleKillSwitchesPut(request: Request): Promise<Response> {
+    const auth = await this.authenticate(request, this.env);
+    if (auth?.role !== "admin") {
+      return json({ error: "unauthorized" }, 401);
+    }
+
+    const body = await readStrictJsonObject(request);
+    if (!body) {
+      return json({ error: "body must be a JSON object" }, 400);
+    }
+
+    const changes: Array<[FamilyFeatureKey, boolean]> = [];
+    for (const [key, value] of Object.entries(body)) {
+      if (!isFamilyFeatureKey(key) || typeof value !== "boolean") {
+        return json(
+          { error: "keys must be known features with boolean values" },
+          400,
+        );
+      }
+      changes.push([key, value]);
+    }
+
+    this.ctx.storage.transactionSync(() => {
+      for (const [key, enabled] of changes) {
+        this.ctx.storage.sql.exec(
+          "UPDATE killswitches SET enabled = ? WHERE key = ?",
+          enabled ? 1 : 0,
+          key,
+        );
+      }
+    });
+
+    return json(this.readKillSwitches());
+  }
+
   async fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
 
@@ -300,6 +529,24 @@ export class FamilyHub extends DurableObject<Env> {
         request,
         decodeURIComponent(revokeMatch[1]),
       );
+    }
+
+    if (pathname === "/stations") {
+      if (request.method === "GET") {
+        return this.handleStationsGet(request);
+      }
+      if (request.method === "PUT") {
+        return this.handleStationsPut(request);
+      }
+    }
+
+    if (pathname === "/killswitches") {
+      if (request.method === "GET") {
+        return this.handleKillSwitchesGet(request);
+      }
+      if (request.method === "PUT") {
+        return this.handleKillSwitchesPut(request);
+      }
     }
 
     return new Response("not found", { status: 404 });
