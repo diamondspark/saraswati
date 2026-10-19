@@ -4,6 +4,16 @@ import type { Env } from "./index";
 const PAIRING_TOKEN_TTL_MS = 15 * 60 * 1000;
 const MAX_STATIONS = 6;
 
+// /health: at most one accepted report per device per 5 minutes.
+const HEALTH_WINDOW_SECONDS = 5 * 60;
+const HEALTH_MAX_REPORTS = 1;
+// /pairing/claim: the window matches a pairing token's own TTL, so a token
+// whose attempts are spent stays blocked until it would have expired anyway.
+const CLAIM_WINDOW_SECONDS = 15 * 60;
+const CLAIM_MAX_ATTEMPTS = 10;
+// Storage hygiene for the free-text fields of a health report.
+const MAX_HEALTH_TEXT_LENGTH = 128;
+
 // Mirrors the app's FamilyFeature enum. Order here is the order the
 // kill-switch map is returned in.
 const FAMILY_FEATURE_KEYS = [
@@ -56,6 +66,20 @@ interface StationRow extends Record<string, SqlStorageValue> {
 interface KillswitchRow extends Record<string, SqlStorageValue> {
   key: string;
   enabled: number;
+}
+
+interface RateLimitRow extends Record<string, SqlStorageValue> {
+  windowStart: number;
+  count: number;
+}
+
+interface HealthRow extends Record<string, SqlStorageValue> {
+  deviceId: string;
+  deviceName: string | null;
+  versionCode: number;
+  versionName: string;
+  timezone: string;
+  lastSeenAt: number;
 }
 
 interface Station {
@@ -158,6 +182,35 @@ function parseStations(value: unknown): Station[] | null {
   return stations;
 }
 
+interface HealthReport {
+  deviceId: string;
+  versionCode: number;
+  versionName: string;
+  timezone: string;
+}
+
+function isBoundedNonEmptyString(value: unknown): value is string {
+  return isNonEmptyString(value) && value.length <= MAX_HEALTH_TEXT_LENGTH;
+}
+
+/** Returns the cleaned report, or null if any field is missing or malformed. */
+function parseHealthReport(
+  body: Record<string, unknown>,
+): HealthReport | null {
+  const { deviceId, versionCode, versionName, timezone } = body;
+  if (
+    !isBoundedNonEmptyString(deviceId) ||
+    typeof versionCode !== "number" ||
+    !Number.isSafeInteger(versionCode) ||
+    versionCode < 0 ||
+    !isBoundedNonEmptyString(versionName) ||
+    !isBoundedNonEmptyString(timezone)
+  ) {
+    return null;
+  }
+  return { deviceId, versionCode, versionName, timezone };
+}
+
 function isFamilyFeatureKey(key: string): key is FamilyFeatureKey {
   return (FAMILY_FEATURE_KEYS as readonly string[]).includes(key);
 }
@@ -173,7 +226,6 @@ export class FamilyHub extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
 
-    // Later tasks add health and rate_limits.
     ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS pairing_tokens (
       token TEXT PRIMARY KEY,
       expiresAt INTEGER,
@@ -196,6 +248,18 @@ export class FamilyHub extends DurableObject<Env> {
     ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS killswitches (
       key TEXT PRIMARY KEY,
       enabled INTEGER
+    )`);
+    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS health (
+      deviceId TEXT PRIMARY KEY,
+      versionCode INTEGER,
+      versionName TEXT,
+      timezone TEXT,
+      lastSeenAt INTEGER
+    )`);
+    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS rate_limits (
+      key TEXT PRIMARY KEY,
+      windowStart INTEGER,
+      count INTEGER
     )`);
     // INSERT OR IGNORE keeps any key the owner has already flipped; a feature
     // key added to FAMILY_FEATURE_KEYS later seeds itself as enabled.
@@ -245,6 +309,47 @@ export class FamilyHub extends DurableObject<Env> {
     return null;
   }
 
+  /**
+   * Fixed-window counter: true means the call is allowed. The first call in a
+   * window (or the first after `windowSeconds` have elapsed) opens a new
+   * window at count 1; once `maxCount` calls have been allowed in a window,
+   * further calls return false and write nothing at all.
+   */
+  private rateLimit(
+    key: string,
+    windowSeconds: number,
+    maxCount: number,
+  ): boolean {
+    const now = Date.now();
+    return this.ctx.storage.transactionSync(() => {
+      const row = this.ctx.storage.sql
+        .exec<RateLimitRow>(
+          "SELECT windowStart, count FROM rate_limits WHERE key = ?",
+          key,
+        )
+        .toArray()[0];
+
+      if (!row || now - row.windowStart >= windowSeconds * 1000) {
+        this.ctx.storage.sql.exec(
+          "INSERT OR REPLACE INTO rate_limits (key, windowStart, count) VALUES (?, ?, 1)",
+          key,
+          now,
+        );
+        return true;
+      }
+
+      if (row.count >= maxCount) {
+        return false;
+      }
+
+      this.ctx.storage.sql.exec(
+        "UPDATE rate_limits SET count = count + 1 WHERE key = ?",
+        key,
+      );
+      return true;
+    });
+  }
+
   private async handlePairingCreate(request: Request): Promise<Response> {
     const auth = await this.authenticate(request, this.env);
     if (auth?.role !== "admin") {
@@ -282,6 +387,20 @@ export class FamilyHub extends DurableObject<Env> {
 
     if (rows.length === 0) {
       return json({ error: "not found" }, 404);
+    }
+
+    // Only a token the owner really minted gets a counter row. Counting
+    // before this lookup would let anyone mint unbounded rate_limits rows by
+    // guessing random tokens, which is exactly the write amplification the
+    // limiter exists to prevent.
+    if (
+      !this.rateLimit(
+        `claim:${token}`,
+        CLAIM_WINDOW_SECONDS,
+        CLAIM_MAX_ATTEMPTS,
+      )
+    ) {
+      return json({ error: "too many attempts" }, 429);
     }
 
     const row = rows[0];
@@ -496,6 +615,70 @@ export class FamilyHub extends DurableObject<Env> {
     return json(this.readKillSwitches());
   }
 
+  private async handleHealthPost(request: Request): Promise<Response> {
+    const auth = await this.authenticate(request, this.env);
+    if (auth?.role !== "device") {
+      return json({ error: "unauthorized" }, 401);
+    }
+
+    const body = await readStrictJsonObject(request);
+    const report = body ? parseHealthReport(body) : null;
+    if (!report) {
+      return json({ error: "body must be a valid health report" }, 400);
+    }
+
+    // The row and the rate-limit window are keyed on the authenticated
+    // device, never on whatever deviceId the body claims, so one phone can
+    // neither overwrite another's row nor burn its window.
+    if (report.deviceId !== auth.deviceId) {
+      return json({ error: "deviceId does not match the session" }, 400);
+    }
+
+    // A rate-limited report is dropped without any error: a phone that
+    // reports too often must never see a failure, least of all in the car.
+    if (
+      this.rateLimit(
+        `health:${auth.deviceId}`,
+        HEALTH_WINDOW_SECONDS,
+        HEALTH_MAX_REPORTS,
+      )
+    ) {
+      this.ctx.storage.sql.exec(
+        `INSERT INTO health (deviceId, versionCode, versionName, timezone, lastSeenAt)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(deviceId) DO UPDATE SET
+           versionCode = excluded.versionCode,
+           versionName = excluded.versionName,
+           timezone = excluded.timezone,
+           lastSeenAt = excluded.lastSeenAt`,
+        auth.deviceId,
+        report.versionCode,
+        report.versionName,
+        report.timezone,
+        Date.now(),
+      );
+    }
+
+    return new Response(null, { status: 204 });
+  }
+
+  private async handleHealthGet(request: Request): Promise<Response> {
+    const auth = await this.authenticate(request, this.env);
+    if (auth?.role !== "admin") {
+      return json({ error: "unauthorized" }, 401);
+    }
+
+    const devices = this.ctx.storage.sql
+      .exec<HealthRow>(
+        `SELECT h.deviceId, r.deviceName, h.versionCode, h.versionName, h.timezone, h.lastSeenAt
+         FROM health h LEFT JOIN roster r ON r.deviceId = h.deviceId
+         ORDER BY h.lastSeenAt DESC, h.deviceId`,
+      )
+      .toArray();
+
+    return json({ devices });
+  }
+
   async fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
 
@@ -537,6 +720,15 @@ export class FamilyHub extends DurableObject<Env> {
       }
       if (request.method === "PUT") {
         return this.handleStationsPut(request);
+      }
+    }
+
+    if (pathname === "/health") {
+      if (request.method === "POST") {
+        return this.handleHealthPost(request);
+      }
+      if (request.method === "GET") {
+        return this.handleHealthGet(request);
       }
     }
 
