@@ -25,6 +25,7 @@ import com.metrolist.music.constants.FamilyHubClaimSecretKey
 import com.metrolist.music.constants.FamilyDeviceIdKey
 import com.metrolist.music.constants.FamilyHubSessionTokenKey
 import com.metrolist.music.constants.FamilyStationsSavedKey
+import com.metrolist.music.constants.FamilyFeaturesDisabledKey
 import com.metrolist.music.constants.FamilyStationsCacheKey
 import com.metrolist.music.constants.GrandparentRoleKey
 import com.metrolist.music.constants.IsFamilyOwnerKey
@@ -262,12 +263,14 @@ class BackupPolicyTest {
             mutablePreferencesOf(
                 GrandparentRoleKey to true,
                 FamilyStationsCacheKey to "{}",
+                FamilyFeaturesDisabledKey to setOf("sangat"),
             ).toPreferences()
 
         val sanitized = BackupPolicy.sanitize(prefs)
 
         assertNull(sanitized[GrandparentRoleKey])
         assertNull(sanitized[FamilyStationsCacheKey])
+        assertNull(sanitized[FamilyFeaturesDisabledKey])
     }
 
     @Test

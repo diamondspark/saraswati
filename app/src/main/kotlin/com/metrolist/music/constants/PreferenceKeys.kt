@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 
@@ -577,6 +578,11 @@ val GrandparentRoleKey = booleanPreferencesKey("grandparentRole")
 // Saral and the car's Stations folder read it without waiting for the network
 // (StationsCache). Not a secret; not restored from backups.
 val FamilyStationsCacheKey = stringPreferencesKey("familyStationsCache")
+
+// SARASWATI: Phase 4 Task 8 — the family features the owner has switched off on the hub, as their kill-switch
+// keys (FamilyFeatureGate). A cache of hub data, not a setting: a restored backup must not switch a feature
+// off or back on (BackupPolicy). Absent means every feature is on.
+val FamilyFeaturesDisabledKey = stringSetPreferencesKey("familyFeaturesDisabled")
 val AccountNameKey = stringPreferencesKey("accountName")
 val AccountEmailKey = stringPreferencesKey("accountEmail")
 val AccountChannelHandleKey = stringPreferencesKey("accountChannelHandle")

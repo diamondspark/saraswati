@@ -195,6 +195,81 @@ class HubClient(
             json.decodeFromString<HealthResponse>(it).devices
         }
 
+    // SARASWATI: Phase 4 Task 8 — the Sangat, Parivaar Mix and family-playlist routes. They are on HubClient
+    // alone, not on HubApi: only the Phase 4 packages call them, and the Phase 3 view models and their
+    // fakes stay as they were. Same contract as above: a Result, never a throw.
+
+    /** Rooms whose host is connected. [sessionToken] is a paired phone's (the Worker also takes the admin key). 503 means Sangat is off. */
+    suspend fun getLiveSangat(sessionToken: String): Result<List<LiveSangatRoom>> =
+        send("GET", listOf("sangat", "live"), sessionToken, null) {
+            json.decodeFromString<LiveSangatEnvelope>(it).rooms
+        }
+
+    /** The host's phone saying it is driving. 404 is an unknown room, 403 a caller that is not the room's host device. */
+    suspend fun setSangatCarMode(
+        sessionToken: String,
+        roomCode: String,
+        carMode: Boolean,
+    ): Result<Unit> =
+        send("PUT", listOf("sangat", "car"), sessionToken, json.encodeToString(CarModeRequest(roomCode, carMode))) { }
+
+    /** Sets this phone's own Parivaar Mix row; the Worker takes the device from the bearer, never from the body. */
+    suspend fun putParivaarPlaylist(
+        sessionToken: String,
+        playlistId: String,
+        memberName: String,
+    ): Result<ParivaarPlaylist> =
+        send("PUT", listOf("parivaar", "playlist"), sessionToken, json.encodeToString(ParivaarPlaylistRequest(playlistId, memberName))) {
+            json.decodeFromString<ParivaarPlaylist>(it)
+        }
+
+    /** In the Worker's order (binary collation of the name); the caller sorts for display. */
+    suspend fun getParivaarPlaylists(sessionToken: String): Result<List<ParivaarPlaylist>> =
+        send("GET", listOf("parivaar", "playlists"), sessionToken, null) {
+            json.decodeFromString<ParivaarEnvelope>(it).playlists
+        }
+
+    suspend fun getFamilyPlaylists(sessionToken: String): Result<List<FamilyPlaylist>> =
+        send("GET", listOf("family-playlists"), sessionToken, null) {
+            json.decodeFromString<FamilyPlaylistsEnvelope>(it).playlists
+        }
+
+    /** 409 is a playlist the family already has, or the twentieth being past the limit of 20. */
+    suspend fun addFamilyPlaylist(
+        sessionToken: String,
+        playlistId: String,
+        title: String,
+    ): Result<FamilyPlaylist> =
+        send("POST", listOf("family-playlists"), sessionToken, json.encodeToString(FamilyPlaylistRequest(playlistId, title))) {
+            json.decodeFromString<FamilyPlaylist>(it)
+        }
+
+    /** [auth] is the owner's admin key, or the session token of the phone that added it; any other phone gets a 403. */
+    suspend fun removeFamilyPlaylist(
+        auth: String,
+        id: String,
+    ): Result<Unit> {
+        if (!isSafeSegment(id)) return Result.failure(IllegalArgumentException("invalid playlist id"))
+        return send("DELETE", listOf("family-playlists", id), auth, null) { }
+    }
+
+    /**
+     * Where the Sangat WebSocket lives: the hub's base URL with https:// turned into wss://, plus /ws. A base that
+     * is not https (or not set, as in the foss flavor) gives "", never a ws:// address, so nothing can be sent in the clear.
+     */
+    fun sangatWebSocketUrl(): String {
+        val base = baseUrl.trim().toHttpUrlOrNull()?.takeIf { it.isHttps } ?: return ""
+        val https =
+            base
+                .newBuilder()
+                .query(null)
+                .fragment(null)
+                .addPathSegment("ws")
+                .build()
+                .toString()
+        return "wss://" + https.removePrefix("https://")
+    }
+
     private suspend fun <T> send(
         method: String,
         path: List<String>,

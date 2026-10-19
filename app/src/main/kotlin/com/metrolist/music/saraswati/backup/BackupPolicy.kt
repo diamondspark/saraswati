@@ -43,6 +43,7 @@ import com.metrolist.music.constants.DiscordButton2UrlKey
 import com.metrolist.music.constants.DiscordNameKey
 import com.metrolist.music.constants.DiscordUsernameKey
 import com.metrolist.music.constants.FamilyDeviceIdKey
+import com.metrolist.music.constants.FamilyFeaturesDisabledKey
 import com.metrolist.music.constants.FamilyStationsCacheKey
 import com.metrolist.music.constants.FamilyStationsSavedKey
 import com.metrolist.music.constants.FamilyUnauthorizedAtKey
@@ -139,6 +140,8 @@ object BackupPolicy {
                 // cache is hub data, refreshed from the hub, not a backup item.
                 GrandparentRoleKey,
                 FamilyStationsCacheKey,
+                // SARASWATI: Phase 4 Task 8 — the cached kill-switches are hub data too.
+                FamilyFeaturesDisabledKey,
                 // SARASWATI: Task 7/8 fix round 1 — this phone's own hub state,
                 // none of it a credential by name but all of it identity. A
                 // restore must not plant or clear the owner flag (Manage

@@ -181,6 +181,40 @@ data class DeviceHealth(
 )
 
 /**
+ * SARASWATI: Phase 4 Task 8 — a Sangat room whose host is connected right now (GET /sangat/live, and the
+ * answer to PUT /sangat/car). [startedAt] is the ISO-8601 string the Worker sends. The room code is a join
+ * handle, not a credential: the hub still refuses a phone that is not approved.
+ */
+@Serializable
+data class LiveSangatRoom(
+    val roomCode: String,
+    val hostName: String,
+    val hostDeviceId: String,
+    val carMode: Boolean,
+    val memberCount: Int,
+    val startedAt: String,
+)
+
+/** One phone's published Parivaar Mix playlist (PUT /parivaar/playlist, GET /parivaar/playlists). */
+@Serializable
+data class ParivaarPlaylist(
+    val deviceId: String,
+    val memberName: String,
+    val playlistId: String,
+    val updatedAt: String,
+)
+
+/** One of the family's shared YouTube playlists (GET and POST /family-playlists). */
+@Serializable
+data class FamilyPlaylist(
+    val id: String,
+    val playlistId: String,
+    val title: String,
+    val addedByDeviceId: String,
+    val addedAt: String,
+)
+
+/**
  * A non-2xx answer from the hub (or a 2xx whose body was unusable, in which
  * case [status] is that 2xx code). [status] is what callers branch on: 401
  * bad or revoked credential, 404 unknown or already used, 410 expired, 429
@@ -253,6 +287,39 @@ internal data class PairingStatusRequest(
 ) {
     override fun toString(): String = "PairingStatusRequest(deviceId=$deviceId, claimSecret=<redacted>)"
 }
+
+@Serializable
+internal data class LiveSangatEnvelope(
+    val rooms: List<LiveSangatRoom>,
+)
+
+@Serializable
+internal data class ParivaarEnvelope(
+    val playlists: List<ParivaarPlaylist>,
+)
+
+@Serializable
+internal data class FamilyPlaylistsEnvelope(
+    val playlists: List<FamilyPlaylist>,
+)
+
+@Serializable
+internal data class CarModeRequest(
+    val roomCode: String,
+    val carMode: Boolean,
+)
+
+@Serializable
+internal data class ParivaarPlaylistRequest(
+    val playlistId: String,
+    val memberName: String,
+)
+
+@Serializable
+internal data class FamilyPlaylistRequest(
+    val playlistId: String,
+    val title: String,
+)
 
 @Serializable
 internal data class HealthReportRequest(
