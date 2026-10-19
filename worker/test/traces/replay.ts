@@ -22,8 +22,8 @@ function quietMsFromEnv(): number {
   const raw = (env as unknown as { TRACE_QUIET_MS?: string }).TRACE_QUIET_MS;
   if (raw === undefined || raw === "") return DEFAULT_QUIET_MS;
   const ms = Number(raw);
-  if (!Number.isFinite(ms) || ms < 25) {
-    throw new Error(`TRACE_QUIET_MS must be a number of at least 25, got "${raw}"`);
+  if (!Number.isFinite(ms) || ms < 25 || ms > 900) {
+    throw new Error(`TRACE_QUIET_MS must be a number from 25 to 900, got "${raw}"`);
   }
   return ms;
 }

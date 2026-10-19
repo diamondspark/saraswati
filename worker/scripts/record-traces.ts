@@ -44,7 +44,17 @@ import { runScenario, type TraceTransport } from "../test/traces/runner.ts";
 import { SCENARIO_NAMES, SCENARIOS, type ScenarioName } from "../test/traces/scenarios.ts";
 
 const USER_AGENT = "saraswati-trace-recorder/1";
-const QUIET_MS = Number(process.env.TRACE_QUIET_MS ?? 500);
+// Under 25 ms settle() stops waiting for quiet; past 900 ms the request_sync
+// suppression scenario's back-to-back steps drift outside metroserver's 1 s window.
+const QUIET_MS = (() => {
+  const raw = process.env.TRACE_QUIET_MS;
+  if (raw === undefined || raw === "") return 500;
+  const ms = Number(raw);
+  if (!Number.isFinite(ms) || ms < 25 || ms > 900) {
+    throw new Error(`TRACE_QUIET_MS must be a number from 25 to 900, got "${raw}"`);
+  }
+  return ms;
+})();
 const OUT_DIR = fileURLToPath(new URL("../test/traces/", import.meta.url));
 
 // Node's global WebSocket (undici) accepts a second argument with request headers.
