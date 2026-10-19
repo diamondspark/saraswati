@@ -11,7 +11,7 @@
 // Quiet on purpose. No session (unpaired, pending, or the owner's own phone,
 // which is kept fresh by its station edits) means no request. A hub that fails,
 // a revoked phone, an empty list or a storage error all leave the cache as it
-// was. A second call while one is running returns at once, so a launch, a
+// was; a revoked phone (401) also forgets its session so it can join again. A second call while one is running returns at once, so a launch, a
 // resume and Saral's own start never queue three requests.
 package com.metrolist.music.saraswati.family
 
@@ -34,7 +34,10 @@ class StationsRefresher
             if (!running.tryLock()) return
             try {
                 val session = guarded { family.session() } ?: return
-                val fresh = hub.getStations(session.sessionToken).getOrNull() ?: return
+                val answer = hub.getStations(session.sessionToken)
+                // SARASWATI: fix wave A (M3) — a 401 means this phone was revoked; forget the session so Join works.
+                answer.exceptionOrNull()?.let { dropSessionIfRevoked(family, session, it) }
+                val fresh = answer.getOrNull() ?: return
                 guarded { cache.replace(fresh) }
             } finally {
                 running.unlock()

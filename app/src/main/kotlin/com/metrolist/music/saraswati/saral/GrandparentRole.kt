@@ -16,6 +16,11 @@
 // all), a storage error, or an answer with no role this build understands.
 // Nothing on the phone offers a way out; the owner flips the role in Manage
 // Family and the next refresh picks it up.
+//
+// Two exceptions to "nothing changes the flag but the hub's answer" (fix wave A):
+// a phone that holds the admin key is the owner's and is never Saral (it is
+// released if a stale flag has it), and a 401 clears the stored session but not
+// the flag.
 package com.metrolist.music.saraswati.saral
 
 import androidx.datastore.core.DataStore
@@ -25,6 +30,7 @@ import com.metrolist.music.constants.GrandparentRoleKey
 import com.metrolist.music.saraswati.family.DeviceRole
 import com.metrolist.music.saraswati.family.FamilyStore
 import com.metrolist.music.saraswati.family.HubApi
+import com.metrolist.music.saraswati.family.dropSessionIfRevoked
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -59,8 +65,20 @@ class GrandparentRoleSync
          * or null when there was no answer (and so no change).
          */
         suspend fun refresh(): DeviceRole? {
+            // SARASWATI: fix wave A (M2) — the owner's own phone holds the admin key, and only the full
+            // app can enter or use it, so this phone must never be locked into Saral: it is released if a
+            // stale flag has it, and the hub is not asked what it is.
+            if (guarded { family.adminKey() } != null) {
+                guarded { if (roles.isGrandparent()) roles.setGrandparent(false) }
+                return null
+            }
             val session = guarded { family.session() } ?: return null
-            val me = hub.getMe(session.sessionToken).getOrNull() ?: return null
+            val answer = hub.getMe(session.sessionToken)
+            // SARASWATI: fix wave A (M3) — a 401 means the owner revoked this phone: forget the session and
+            // device id so Join works again. The role cache stays as it is (a revoked grandparent phone
+            // stays in Saral rather than being dropped into the full app).
+            answer.exceptionOrNull()?.let { dropSessionIfRevoked(family, session, it) }
+            val me = answer.getOrNull() ?: return null
             // A role the hub left out, or one this build does not know, reads as adult elsewhere;
             // here it must be no answer at all, or it would switch Saral off.
             if (!me.roleKnown) return null

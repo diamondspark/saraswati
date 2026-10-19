@@ -127,18 +127,29 @@ class FamilyViewModel
         /** True once the owner approved this phone (it holds a hub session). Set by [refreshMembership]. */
         val isMember: StateFlow<Boolean> = _isMember.asStateFlow()
 
+        private val _hasPendingClaim = MutableStateFlow(false)
+
+        /**
+         * True while this phone has asked to join and the owner has not approved yet. The Family tab hides the
+         * owner setup link then: a phone waiting to be approved is not the owner's. Set by [refreshMembership].
+         */
+        val hasPendingClaim: StateFlow<Boolean> = _hasPendingClaim.asStateFlow()
+
         fun refreshMembership() {
             viewModelScope.launch {
-                _isMember.value =
-                    try {
-                        store.session() != null
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        false
-                    }
+                _isMember.value = readFlag { store.session() != null }
+                _hasPendingClaim.value = readFlag { store.pendingClaim() != null }
             }
         }
+
+        private suspend fun readFlag(read: suspend () -> Boolean): Boolean =
+            try {
+                read()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                false
+            }
 
         fun clearError() {
             _error.value = null

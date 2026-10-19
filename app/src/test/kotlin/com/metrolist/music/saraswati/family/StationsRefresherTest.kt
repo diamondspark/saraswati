@@ -162,4 +162,28 @@ class StationsRefresherTest {
 
         assertEquals(2, hub.callsTo("getStations").size)
     }
+
+    // SARASWATI: fix wave A (M3) — a revoked phone forgets its session so it can join again.
+    @Test
+    fun `a 401 clears the session and device id and leaves the cache`() {
+        hub.failWith("getStations", hubFailure(401))
+
+        refresh()
+
+        assertEquals(listOf("device-1"), family.cleared.toList())
+        assertEquals(null, family.session)
+        assertEquals(listOf(old), cache.snapshot())
+    }
+
+    @Test
+    fun `no other failure clears the session`() {
+        for (failure in listOf(OFFLINE, hubFailure(404), hubFailure(429), hubFailure(500), hubFailure(503))) {
+            hub.failWith("getStations", failure)
+
+            refresh()
+
+            assertEquals(failure.toString(), FamilySession("device-1", "the-session-token"), family.session)
+        }
+        assertTrue(family.cleared.isEmpty())
+    }
 }

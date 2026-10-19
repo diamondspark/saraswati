@@ -57,7 +57,18 @@ interface FamilyStore {
 
     suspend fun pendingClaim(): PendingClaim?
 
+    /**
+     * Keeps a new claim. Never replaces a stored session: throws [IllegalStateException] if there is
+     * one (a revoked phone first has its session cleared, see [clearSession]).
+     */
     suspend fun savePendingClaim(claim: PendingClaim)
+
+    /**
+     * The hub refused [deviceId]'s session (it was revoked): forgets the session and the device id so
+     * Join works again. The admin key and the Saral role cache are not touched, and a newer pairing
+     * (a different device id) is left alone.
+     */
+    suspend fun clearSession(deviceId: String)
 
     /** The owner approved: keep the session, drop the claim secret. */
     suspend fun completeClaim(
@@ -137,7 +148,10 @@ class DataStoreFamilyStore(
         withContext(io) {
             val sealed = sealedOrNull(FamilyHubClaimSecretKey, claim.claimSecret)
             dataStore.edit {
-                it.remove(FamilyHubSessionTokenKey)
+                // SARASWATI: fix wave A (M3) — a new claim used to remove the stored session here, so a
+                // phone that was still paired lost its session to a second Join. The raw slot is checked,
+                // not an unsealed value: a Keystore that is unavailable must not make a live session look absent.
+                check(it[FamilyHubSessionTokenKey] == null) { "a session is stored; a new claim must not replace it" }
                 it[FamilyDeviceIdKey] = claim.deviceId
                 it.put(FamilyHubClaimSecretKey, sealed)
             }
@@ -157,6 +171,18 @@ class DataStoreFamilyStore(
         Unit
     }
 
+    override suspend fun clearSession(deviceId: String) =
+        withContext(io) {
+            dataStore.edit {
+                if (it[FamilyDeviceIdKey] == deviceId) {
+                    it.remove(FamilyHubSessionTokenKey)
+                    it.remove(FamilyHubClaimSecretKey)
+                    it.remove(FamilyDeviceIdKey)
+                }
+            }
+            Unit
+        }
+
     override suspend fun clearPendingClaim() =
         withContext(io) {
             dataStore.edit {
@@ -173,4 +199,25 @@ class DataStoreFamilyStore(
             dataStore.edit { it[FamilyStationsSavedKey] = true }
             Unit
         }
+}
+
+/**
+ * SARASWATI: fix wave A (M3) — if [failure] is the hub's 401 for [session], the owner revoked this phone:
+ * clears the stored session and device id (never the admin key or the Saral role cache). Any other failure,
+ * or a storage error, changes nothing. Returns true when a revoked session was cleared.
+ */
+internal suspend fun dropSessionIfRevoked(
+    family: FamilyStore,
+    session: FamilySession,
+    failure: Throwable,
+): Boolean {
+    if (failure !is HubException || failure.status != 401) return false
+    return try {
+        family.clearSession(session.deviceId)
+        true
+    } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        false
+    }
 }

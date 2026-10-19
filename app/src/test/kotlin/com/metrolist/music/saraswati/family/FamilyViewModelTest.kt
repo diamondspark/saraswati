@@ -372,6 +372,42 @@ class FamilyViewModelTest {
         assertFalse(vm.isMember.value)
     }
 
+    // SARASWATI: fix wave A (M2) — the Family tab hides owner setup while a claim waits for approval.
+    @Test
+    fun `a phone with a stored claim and no session reports a pending claim`() {
+        vm.refreshMembership()
+        assertFalse(vm.hasPendingClaim.value)
+
+        store.claim = PendingClaim("d9", "secret")
+        vm.refreshMembership()
+        assertTrue(vm.hasPendingClaim.value)
+        assertFalse(vm.isMember.value)
+    }
+
+    @Test
+    fun `approval ends the pending claim`() {
+        store.claim = PendingClaim("d9", "secret")
+        vm.refreshMembership()
+        assertTrue(vm.hasPendingClaim.value)
+
+        store.session = FamilySession("d9", "tok")
+        store.claim = null
+        vm.refreshMembership()
+
+        assertFalse(vm.hasPendingClaim.value)
+        assertTrue(vm.isMember.value)
+    }
+
+    @Test
+    fun `a storage error reads as no pending claim and does not throw`() {
+        store.claim = PendingClaim("d9", "secret")
+        store.failReads = java.io.IOException("keystore unavailable")
+
+        vm.refreshMembership()
+
+        assertFalse(vm.hasPendingClaim.value)
+    }
+
     @Test
     fun `error mapping covers the hub's statuses and transport failures`() {
         assertEquals(FamilyError.INVALID_INPUT, FamilyError.from(hubFailure(400)))

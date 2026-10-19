@@ -132,7 +132,7 @@ class SaralViewModelTest {
 
     private val bollywood = Station("default-bollywood-classics", "Bollywood Classics", "seedBollyw01", 0)
     private val bhajan = Station("default-bhajans-devotional", "Bhajans & Devotional", "seedBhajan01", 2)
-    private val mine = Station("s9", "Mummy's Songs", "seedMummy001", 1)
+    private val mine = Station("s9", "Mummy's Songs", "seedMummy01", 1)
 
     private fun song(
         id: String,

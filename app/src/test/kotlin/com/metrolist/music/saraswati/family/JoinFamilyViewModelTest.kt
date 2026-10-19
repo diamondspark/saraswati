@@ -443,4 +443,62 @@ class JoinFamilyViewModelTest {
         assertEquals(JoinUiState.Claiming, vm.state.value)
         inFlight.complete(Unit)
     }
+
+    // SARASWATI: fix wave A (M3) — claim() looks again for a live session before spending the one-time link.
+    @Test
+    fun `a claim made while a session is stored does not burn the link or touch the session`() {
+        vm.submitInput(link)
+        store.session = FamilySession("device-1", "tok")
+
+        vm.claim("Mummy's Pixel", DeviceRole.ADULT)
+
+        assertEquals(JoinUiState.AlreadyPaired, vm.state.value)
+        assertTrue("the link was not spent", hub.callsTo("claimPairing").isEmpty())
+        assertEquals(FamilySession("device-1", "tok"), store.session)
+        assertNull(store.claim)
+    }
+
+    @Test
+    fun `a claim made on the owner's phone does not burn the link either`() {
+        vm.submitInput(link)
+        store.admin = TEST_ADMIN_KEY
+
+        vm.claim("Mummy's Pixel", DeviceRole.ADULT)
+
+        assertEquals(JoinUiState.AlreadyPaired, vm.state.value)
+        assertTrue(hub.callsTo("claimPairing").isEmpty())
+    }
+
+    @Test
+    fun `a revoked phone whose session was cleared can claim a new link`() {
+        store.session = FamilySession("device-1", "revoked-token")
+        hub.failWith("getMe", hubFailure(401))
+        runBlocking { GrandparentRoleSync(hub, store, roles).refresh() }
+        assertNull(store.session)
+        inbox.offer(TEST_TOKEN)
+
+        vm.start()
+        assertEquals(JoinUiState.Ready(TEST_TOKEN), vm.state.value)
+        vm.claim("Mummy's Pixel", DeviceRole.ADULT)
+
+        assertEquals(JoinUiState.Waiting, vm.state.value)
+        assertEquals(1, hub.callsTo("claimPairing").size)
+        assertEquals(PendingClaim("device-1", "claim-secret-device-1"), store.claim)
+    }
+
+    @Test
+    fun `a store that refuses to replace a session ends in an error, not a lost session`() {
+        val inFlight = kotlinx.coroutines.CompletableDeferred<Unit>()
+        hub.claimGate = inFlight
+        vm.submitInput(link)
+        vm.claim("Mummy's Pixel", DeviceRole.ADULT)
+        assertEquals(JoinUiState.Claiming, vm.state.value)
+        // A session appears between the re-check and the write.
+        store.session = FamilySession("device-9", "tok9")
+
+        inFlight.complete(Unit)
+
+        assertEquals(JoinUiState.Failed(FamilyError.UNKNOWN), vm.state.value)
+        assertEquals(FamilySession("device-9", "tok9"), store.session)
+    }
 }

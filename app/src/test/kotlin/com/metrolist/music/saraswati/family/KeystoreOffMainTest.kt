@@ -89,11 +89,12 @@ class KeystoreOffMainTest {
 
             store.saveOwner("the-admin-key")
             assertEquals("the-admin-key", store.adminKey())
-            store.completeClaim("device-1", "the-session")
-            assertEquals(FamilySession("device-1", "the-session"), store.session())
-            store.clearPendingClaim()
             store.savePendingClaim(PendingClaim("device-2", "the-secret"))
-            store.pendingClaim()
+            assertEquals(PendingClaim("device-2", "the-secret"), store.pendingClaim())
+            store.completeClaim("device-2", "the-session")
+            assertEquals(FamilySession("device-2", "the-session"), store.session())
+            store.clearPendingClaim()
+            store.clearSession("device-2")
             store.markStationsSaved()
             assertTrue(store.stationsEverSaved())
 

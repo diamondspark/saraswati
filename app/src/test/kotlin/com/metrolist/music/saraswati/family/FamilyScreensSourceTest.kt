@@ -166,4 +166,17 @@ class FamilyScreensSourceTest {
         assertFalse(waiting, waiting.contains("close the app", ignoreCase = true))
         assertTrue(waiting, waiting.contains("Keep this screen open"))
     }
+
+    // SARASWATI: fix wave A (M2) — a phone waiting to be approved is not the owner's.
+    @Test
+    fun `the owner setup link is hidden while a claim is pending`() {
+        val screen = source("$familyDir/FamilyScreen.kt")
+
+        assertTrue("the screen reads the pending-claim state", "viewModel.hasPendingClaim" in screen)
+        val guard = screen.indexOf("if (!hasPendingClaim)")
+        val link = screen.indexOf("R.string.family_owner_setup_link")
+        assertTrue("the link sits inside the guard", guard in 0 until link)
+        assertEquals("the owner setup link is offered in one place only", 1, Regex("""family_owner_setup_link""").findAll(screen).count())
+        assertEquals("and so is the route to owner setup", 1, Regex("""FamilyRoutes\.MANAGE""").findAll(screen.substringAfter("else ->")).count())
+    }
 }

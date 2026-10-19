@@ -144,6 +144,7 @@ import com.metrolist.music.saraswati.family.StationsCache
 import com.metrolist.music.saraswati.family.StationsRefresher
 import com.metrolist.music.saraswati.saral.GrandparentRoleSync
 import com.metrolist.music.saraswati.saral.SaralApp
+import com.metrolist.music.saraswati.saral.SaralActive
 import com.metrolist.music.saraswati.saral.SaralShell
 import com.metrolist.music.saraswati.family.PairingLink
 import com.metrolist.music.saraswati.security.DeepLinkGuard
@@ -473,14 +474,14 @@ class MainActivity : FragmentActivity() {
 
         // SARASWATI: Task 9 — read the cached role before the first frame, so a
         // grandparent's phone never flashes the full app, then follow it live.
-        grandparentRole = dataStore[GrandparentRoleKey] == true
+        applyGrandparentRole(dataStore[GrandparentRoleKey] == true)
         if (grandparentRole) dropIntentsForSaral(intent)
         lifecycleScope.launch {
             dataStore.data
                 .map { it[GrandparentRoleKey] == true }
                 .distinctUntilChanged()
                 .collect {
-                    grandparentRole = it
+                    applyGrandparentRole(it)
                     if (it) dropIntentsForSaral(intent)
                 }
         }
@@ -557,6 +558,13 @@ class MainActivity : FragmentActivity() {
                     )
             }
         }
+    }
+
+    // SARASWATI: fix wave A (M5) — the one place that changes the role, so the process-wide
+    // flag the crash screen reads (SaralActive) can never disagree with what is on screen.
+    private fun applyGrandparentRole(value: Boolean) {
+        grandparentRole = value
+        SaralActive.on = value
     }
 
     // SARASWATI: Task 9 — empties the launch intent and anything queued so that

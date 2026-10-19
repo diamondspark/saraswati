@@ -13,10 +13,12 @@ package com.metrolist.music.saraswati.family
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
 import com.metrolist.music.constants.FamilyAdminKeyKey
 import com.metrolist.music.constants.FamilyDeviceIdKey
 import com.metrolist.music.constants.FamilyHubClaimSecretKey
 import com.metrolist.music.constants.FamilyHubSessionTokenKey
+import com.metrolist.music.constants.GrandparentRoleKey
 import com.metrolist.music.constants.IsFamilyOwnerKey
 import com.metrolist.music.saraswati.security.CookieVault
 import com.metrolist.music.saraswati.security.SecretScrubber
@@ -41,7 +43,12 @@ import org.junit.rules.TemporaryFolder
 class DataStoreFamilyStoreTest {
     @get:Rule val folder = TemporaryFolder()
 
-    private val vault = CookieVault(SoftwareKeyProvider())
+    private val software = SoftwareKeyProvider()
+    private val vault = CookieVault(software)
+    private val failingKeys =
+        object : com.metrolist.music.saraswati.security.AesGcmKeyProvider {
+            override fun key(): javax.crypto.SecretKey = throw java.security.ProviderException("Keystore unavailable")
+        }
     private lateinit var scope: CoroutineScope
     private lateinit var dataStore: DataStore<Preferences>
     private lateinit var store: DataStoreFamilyStore
@@ -128,15 +135,75 @@ class DataStoreFamilyStoreTest {
             assertEquals(FamilySession("device-2", "token"), store.session())
         }
 
+    // SARASWATI: fix wave A (M3) — a new claim never deletes a stored session. A revoked phone first has
+    // its session cleared (clearSession), after which it can claim again.
     @Test
-    fun `a new claim replaces an old session`() =
+    fun `a new claim never replaces a stored session`() =
         runBlocking {
             store.completeClaim("device-1", "old-token")
 
-            store.savePendingClaim(PendingClaim("device-2", "new-secret"))
+            val refused = runCatching { store.savePendingClaim(PendingClaim("device-2", "new-secret")) }
+
+            assertTrue(refused.exceptionOrNull() is IllegalStateException)
+            assertEquals(FamilySession("device-1", "old-token"), store.session())
+            assertNull(raw()[FamilyHubClaimSecretKey])
+            assertEquals("device-1", raw()[FamilyDeviceIdKey])
+        }
+
+    @Test
+    fun `clearing a revoked session forgets the session and device id, so a new claim works`() =
+        runBlocking {
+            store.completeClaim("device-1", "old-token")
+
+            store.clearSession("device-1")
 
             assertNull(store.session())
+            assertNull(raw()[FamilyHubSessionTokenKey])
+            assertNull(raw()[FamilyDeviceIdKey])
+            store.savePendingClaim(PendingClaim("device-2", "new-secret"))
             assertEquals(PendingClaim("device-2", "new-secret"), store.pendingClaim())
+        }
+
+    @Test
+    fun `clearing a session leaves the admin key, the owner mark and the role cache`() =
+        runBlocking {
+            store.saveOwner("the-admin-key")
+            store.completeClaim("device-1", "old-token")
+            dataStore.edit { it[GrandparentRoleKey] = true }
+
+            store.clearSession("device-1")
+
+            assertEquals("the-admin-key", store.adminKey())
+            assertEquals(true, raw()[IsFamilyOwnerKey])
+            assertEquals(true, raw()[GrandparentRoleKey])
+        }
+
+    @Test
+    fun `clearing the session of a device that is no longer this phone's changes nothing`() =
+        runBlocking {
+            store.completeClaim("device-2", "newer-token")
+
+            store.clearSession("device-1")
+
+            assertEquals(FamilySession("device-2", "newer-token"), store.session())
+        }
+
+    // SARASWATI: fix wave A (I1) — a Keystore that is unavailable never destroys what is stored.
+    @Test
+    fun `an unavailable Keystore reads as nothing stored but destroys nothing, and a new claim cannot replace the session`() =
+        runBlocking {
+            store.saveOwner("the-admin-key")
+            store.completeClaim("device-1", "the-session")
+            val down = DataStoreFamilyStore(dataStore, CookieVault(failingKeys))
+
+            assertNull(down.adminKey())
+            assertNull(down.session())
+            assertNull(down.pendingClaim())
+            assertTrue(runCatching { down.savePendingClaim(PendingClaim("device-2", "x")) }.isFailure)
+            SecretScrubber.scrub(dataStore, CookieVault(failingKeys))
+
+            assertEquals("the-admin-key", store.adminKey())
+            assertEquals(FamilySession("device-1", "the-session"), store.session())
         }
 
     @Test

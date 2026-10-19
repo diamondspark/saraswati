@@ -207,11 +207,24 @@ class FakeStore(
         return session
     }
 
-    override suspend fun pendingClaim() = claim
+    override suspend fun pendingClaim(): PendingClaim? {
+        failReads?.let { throw it }
+        return claim
+    }
 
+    // Mirrors DataStoreFamilyStore: a stored session is never replaced by a new claim.
     override suspend fun savePendingClaim(claim: PendingClaim) {
         checkWrite()
+        check(session == null) { "a session is stored; a new claim must not replace it" }
         this.claim = claim
+    }
+
+    val cleared = CopyOnWriteArrayList<String>()
+
+    override suspend fun clearSession(deviceId: String) {
+        checkWrite()
+        cleared.add(deviceId)
+        if (session?.deviceId == deviceId) session = null
     }
 
     override suspend fun completeClaim(
@@ -240,6 +253,7 @@ val OFFLINE: Throwable = IOException("no route to host")
 
 /**
  * Mirrors DataStoreStationsCache's contract: synchronous snapshot; an empty list never replaces a good one;
+ * a station whose seed is not a valid video id is dropped;
  * [loaded] is false until storage has been read ([finishLoading]) or a list has been saved.
  */
 class FakeStationsCache(
@@ -264,8 +278,9 @@ class FakeStationsCache(
     override suspend fun replace(stations: List<Station>) {
         failWrites?.let { throw it }
         replaced.add(stations)
-        if (stations.isNotEmpty()) {
-            state.value = stations
+        val kept = stations.filter { StationVideo.isVideoId(it.seedVideoId) }
+        if (kept.isNotEmpty()) {
+            state.value = kept
             loadedState.value = true
         }
     }

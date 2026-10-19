@@ -47,6 +47,7 @@ fun FamilyScreen(
 ) {
     val (isOwner) = rememberPreference(IsFamilyOwnerKey, defaultValue = false)
     val isMember by viewModel.isMember.collectAsStateWithLifecycle()
+    val hasPendingClaim by viewModel.hasPendingClaim.collectAsStateWithLifecycle()
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshMembership() }
 
@@ -110,11 +111,15 @@ fun FamilyScreen(
                             ),
                         ),
                 )
-                TextButton(onClick = { navController.navigate(FamilyRoutes.MANAGE) }) {
-                    Text(
-                        text = stringResource(R.string.family_owner_setup_link),
-                        style = MaterialTheme.typography.labelLarge,
-                    )
+                // SARASWATI: fix wave A (M2) — a phone that has asked to join and waits for approval is
+                // not the owner's, so the way to paste an admin key is not offered on it.
+                if (!hasPendingClaim) {
+                    TextButton(onClick = { navController.navigate(FamilyRoutes.MANAGE) }) {
+                        Text(
+                            text = stringResource(R.string.family_owner_setup_link),
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
                 }
             }
         }

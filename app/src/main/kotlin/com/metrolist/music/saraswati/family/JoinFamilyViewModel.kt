@@ -139,6 +139,13 @@ class JoinFamilyViewModel
             }
             viewModelScope.launch {
                 _state.value = JoinUiState.Claiming
+                // SARASWATI: fix wave A (M3) — checked again right before the one-time link is spent: a phone
+                // that is paired by now (or is the owner's) must neither burn the link nor lose its session.
+                if (alreadyPaired()) {
+                    token = null
+                    _state.value = JoinUiState.AlreadyPaired
+                    return@launch
+                }
                 hub
                     .claimPairing(link, name, role)
                     .onSuccess { claimed ->

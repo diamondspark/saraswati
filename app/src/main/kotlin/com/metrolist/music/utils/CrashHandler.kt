@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import com.metrolist.music.BuildConfig
+import com.metrolist.music.saraswati.saral.SaralActive
 import com.metrolist.music.ui.screens.CrashActivity
 import timber.log.Timber
 import java.io.PrintWriter
@@ -28,11 +29,7 @@ class CrashHandler private constructor(
             Timber.e(throwable, "App crashed")
             
             // Launch crash activity
-            val intent = Intent(applicationContext, CrashActivity::class.java).apply {
-                putExtra(EXTRA_CRASH_LOG, crashLog)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-            }
-            applicationContext.startActivity(intent)
+            applicationContext.startActivity(crashIntent(applicationContext, crashLog))
             
             // Kill the current process
             android.os.Process.killProcess(android.os.Process.myPid())
@@ -69,6 +66,22 @@ class CrashHandler private constructor(
 
     companion object {
         const val EXTRA_CRASH_LOG = "crash_log"
+
+        // SARASWATI: fix wave A (M5) — true when Saral was the whole app at the moment of the
+        // crash. CrashActivity runs in its own process (":crash"), so this extra is the only
+        // way it can know; it then offers no Share and shows no stack trace.
+        const val EXTRA_SARAL = "saral_active"
+
+        internal fun crashIntent(
+            context: Context,
+            crashLog: String,
+            saral: Boolean = SaralActive.on,
+        ): Intent =
+            Intent(context, CrashActivity::class.java).apply {
+                putExtra(EXTRA_CRASH_LOG, crashLog)
+                putExtra(EXTRA_SARAL, saral)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+            }
 
         fun install(context: Context) {
             val handler = CrashHandler(context.applicationContext)

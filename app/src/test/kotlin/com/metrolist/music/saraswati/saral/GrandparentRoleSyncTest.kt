@@ -84,11 +84,103 @@ class GrandparentRoleSyncTest {
     fun `any hub failure keeps Saral on, including a revoked phone and a server error`() {
         roles.grandparent = true
         for (status in listOf(401, 404, 429, 500, 503)) {
+            family.session = FamilySession("device-1", "the-session-token")
             hub.failWith("getMe", hubFailure(status))
 
             assertNull(refresh())
             assertTrue("HTTP $status must not leave Saral", roles.grandparent)
         }
+    }
+
+    // SARASWATI: fix wave A (M3) — a revoked phone can join again.
+    @Test
+    fun `a 401 clears the session and the device id so Join works again, and leaves Saral as it was`() {
+        roles.grandparent = true
+        hub.failWith("getMe", hubFailure(401))
+
+        assertNull(refresh())
+
+        assertEquals(listOf("device-1"), family.cleared.toList())
+        assertNull(family.session)
+        assertTrue("the role cache stays untouched", roles.grandparent)
+        assertTrue(roles.writes.isEmpty())
+    }
+
+    @Test
+    fun `a 401 on an adult phone also leaves the role cache alone`() {
+        roles.grandparent = false
+        hub.failWith("getMe", hubFailure(401))
+
+        refresh()
+
+        assertNull(family.session)
+        assertFalse(roles.grandparent)
+        assertTrue(roles.writes.isEmpty())
+    }
+
+    @Test
+    fun `no other failure clears the session`() {
+        for (failure in listOf(OFFLINE, hubFailure(404), hubFailure(429), hubFailure(500), hubFailure(503), hubFailure(403))) {
+            hub.failWith("getMe", failure)
+
+            assertNull(refresh())
+
+            assertEquals(failure.toString(), FamilySession("device-1", "the-session-token"), family.session)
+        }
+        assertTrue(family.cleared.isEmpty())
+    }
+
+    @Test
+    fun `a storage error while clearing the session does not throw`() {
+        hub.failWith("getMe", hubFailure(401))
+        family.failWrites = java.io.IOException("disk full")
+
+        assertNull(refresh())
+
+        assertEquals(FamilySession("device-1", "the-session-token"), family.session)
+    }
+
+    // SARASWATI: fix wave A (M2) — the owner's own phone is never Saral.
+    @Test
+    fun `a phone that holds the admin key is never set to grandparent, whatever the hub says`() {
+        family.admin = TEST_ADMIN_KEY
+        hub.meRole = DeviceRole.GRANDPARENT
+
+        assertNull(refresh())
+
+        assertFalse(roles.grandparent)
+        assertTrue(roles.writes.isEmpty())
+        assertTrue("the hub is not even asked", hub.callsTo("getMe").isEmpty())
+    }
+
+    @Test
+    fun `an owner phone with a session the hub calls grandparent is still not locked in`() {
+        family.admin = TEST_ADMIN_KEY
+        family.session = FamilySession("device-1", "the-session-token")
+        hub.meRole = DeviceRole.GRANDPARENT
+
+        refresh()
+
+        assertFalse(roles.grandparent)
+    }
+
+    @Test
+    fun `a stale Saral flag on an owner phone is released`() {
+        family.admin = TEST_ADMIN_KEY
+        roles.grandparent = true
+
+        refresh()
+
+        assertFalse(roles.grandparent)
+        assertEquals(listOf(false), roles.writes.toList())
+    }
+
+    @Test
+    fun `an owner phone whose role store fails does not throw`() {
+        family.admin = TEST_ADMIN_KEY
+        roles.failReads = java.io.IOException("disk")
+
+        assertNull(refresh())
     }
 
     @Test

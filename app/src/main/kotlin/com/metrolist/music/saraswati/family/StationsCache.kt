@@ -13,6 +13,11 @@
 // "no stations set", not "delete the ones you have", so it is ignored: tiles
 // that were working keep working if the hub is reset or misreports.
 //
+// Fix wave A (M4): stations are filtered here, once, for every reader: one
+// whose seed is not a valid video id (StationVideo.isVideoId, the check the car
+// has always made) is dropped, so a bad hub entry never makes a Saral tile that
+// cannot play. A list with nothing valid left counts as empty.
+//
 // Task 11: [loaded] says whether the list is the real one yet. The cache fills
 // from storage a moment after the process starts, and Android Auto can ask the
 // car's Stations folder before that: an empty list while not loaded means "not
@@ -49,7 +54,10 @@ interface StationsCache {
     /** The cached list right now. Never suspends, never touches storage or the network. */
     fun snapshot(): List<Station> = stations.value
 
-    /** Keeps [stations] as the cache. An empty list is ignored. */
+    /**
+     * Keeps [stations] as the cache, minus any whose seed is not a valid video id (a bad hub entry must
+     * never become a tile that cannot play). A list with nothing left is ignored.
+     */
     suspend fun replace(stations: List<Station>)
 }
 
@@ -82,8 +90,8 @@ class DataStoreStationsCache(
         }
 
     override suspend fun replace(stations: List<Station>) {
-        if (stations.isEmpty()) return
-        val kept = stations.take(MAX_STATIONS)
+        val kept = stations.filter { StationVideo.isVideoId(it.seedVideoId) }.take(MAX_STATIONS)
+        if (kept.isEmpty()) return
         synchronized(lock) {
             settled = true
             state.value = kept

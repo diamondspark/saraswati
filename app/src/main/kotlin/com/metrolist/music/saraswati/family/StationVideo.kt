@@ -16,7 +16,15 @@ import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 object StationVideo {
-    private val VIDEO_ID = Regex("^[A-Za-z0-9_-]{11}$")
+    /**
+     * What a YouTube video id looks like: eleven letters, digits, "_" or "-". The one definition the
+     * editor, the station cache and the car all use, so a station one accepts is never dropped by another.
+     */
+    const val ID_PATTERN = "[A-Za-z0-9_-]{11}"
+    private val VIDEO_ID = Regex("^$ID_PATTERN$")
+
+    fun isVideoId(text: String): Boolean = VIDEO_ID.matches(text)
+
     private val YOUTUBE_HOSTS = setOf("youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com")
     private val ID_IN_PATH = setOf("shorts", "embed", "live", "v")
 
