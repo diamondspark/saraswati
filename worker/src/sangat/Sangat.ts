@@ -46,7 +46,7 @@ import {
   handleRejectJoin,
   handleTransferHost,
 } from "./rooms";
-import { Store } from "./store";
+import { Store, type Room } from "./store";
 import { handleApproveSuggestion, handleRejectSuggestion, handleSuggestTrack } from "./suggestions";
 import type { Attachment, Conn, Handler, Out, Runtime } from "./types";
 
@@ -272,14 +272,25 @@ export class Sangat {
     return this.store
       .openRooms()
       .filter(hostIsConnected)
-      .map((room) => ({
-        roomCode: room.code,
-        hostName: this.store.member(room.hostUserId)?.username ?? "",
-        hostDeviceId: room.hostDeviceId,
-        carMode: room.carMode,
-        memberCount: this.store.connectedCount(room.code),
-        startedAt: room.createdAt,
-      }));
+      .map((room) => this.liveRoomOf(room));
+  }
+
+  /** One open room as GET /sangat/live lists it, whether or not its host is connected; null if there is none. */
+  roomView(roomCode: string): LiveRoom | null {
+    this.reconcileNow();
+    const room = this.store.getOpenRoom(roomCode);
+    return room ? this.liveRoomOf(room) : null;
+  }
+
+  private liveRoomOf(room: Room): LiveRoom {
+    return {
+      roomCode: room.code,
+      hostName: this.store.member(room.hostUserId)?.username ?? "",
+      hostDeviceId: room.hostDeviceId,
+      carMode: room.carMode,
+      memberCount: this.store.connectedCount(room.code),
+      startedAt: room.createdAt,
+    };
   }
 
   /** Car mode is the host device's to switch, for PUT /sangat/car. */
@@ -315,6 +326,8 @@ export class Sangat {
         this.store.deletePendingJoinsOfDevice(deviceId);
         const result: Out[] = [];
         for (const member of this.store.membersOfDevice(deviceId)) {
+          // What the phone suggested goes with it: the host should not be asked to approve a revoked phone's pick.
+          this.store.deleteSuggestionsOfUser(member.userId);
           const room = this.store.getRoom(member.roomCode);
           if (!room || room.emptySince !== null) this.store.deleteMember(member.userId);
           else result.push(...removeFromRoom(this.store, room, member, now));

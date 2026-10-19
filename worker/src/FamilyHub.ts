@@ -1,6 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "./index";
-import { Sangat } from "./sangat/Sangat";
+import { isNonEmptyString, json, readJsonBody, readStrictJsonObject } from "./http";
+import { CLOSE_DEVICE_REVOKED, CLOSE_SANGAT_DISABLED } from "./sangat/limits";
+import { Sangat, type LiveRoom } from "./sangat/Sangat";
 import { createSangatTables } from "./sangat/schema";
 
 const PAIRING_TOKEN_TTL_MS = 15 * 60 * 1000;
@@ -141,54 +143,6 @@ function secretsMatch(provided: string, stored: string): boolean {
   return a.byteLength === b.byteLength && crypto.subtle.timingSafeEqual(a, b);
 }
 
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
-}
-
-async function readJsonBody(
-  request: Request,
-): Promise<Record<string, unknown>> {
-  try {
-    const parsed = await request.json();
-    return typeof parsed === "object" && parsed !== null
-      ? (parsed as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
-  }
-}
-
-/**
- * Unlike readJsonBody, which maps anything unparseable to `{}`, this tells
- * "no valid JSON object" (null) apart from an empty object, so a PUT that
- * replaces stored state can reject a malformed body instead of treating it
- * as a no-op.
- */
-async function readStrictJsonObject(
-  request: Request,
-): Promise<Record<string, unknown> | null> {
-  try {
-    const parsed: unknown = await request.json();
-    if (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      !Array.isArray(parsed)
-    ) {
-      return parsed as Record<string, unknown>;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0;
-}
-
 /** Returns the cleaned station list, or null if any part of it is invalid. */
 function parseStations(value: unknown): Station[] | null {
   if (
@@ -261,6 +215,11 @@ function isDeviceRole(value: unknown): value is DeviceRole {
 
 function isFamilyFeatureKey(key: string): key is FamilyFeatureKey {
   return (FAMILY_FEATURE_KEYS as readonly string[]).includes(key);
+}
+
+/** A room as the hub's JSON routes show it: LiveRoom with startedAt as an ISO time. */
+function liveRoomJson(room: LiveRoom) {
+  return { ...room, startedAt: new Date(room.startedAt).toISOString() };
 }
 
 /**
@@ -735,6 +694,10 @@ export class FamilyHub extends DurableObject<Env> {
       "UPDATE roster SET status = 'revoked', sessionToken = NULL, claimSecret = NULL WHERE deviceId = ?",
       deviceId,
     );
+    // The same turn as the update, with nothing awaited in between: no upgrade can
+    // authenticate the device in the gap. Its sockets close at once (4001) and its seats,
+    // and with them its reconnect tokens, go; waiting for a reconnect would be too late.
+    this.sangat.closeDevice(deviceId, CLOSE_DEVICE_REVOKED, "revoked");
 
     return json({ deviceId, status: "revoked" });
   }
@@ -866,6 +829,11 @@ export class FamilyHub extends DurableObject<Env> {
         );
       }
     });
+    // Switching Sangat off ends it now: every socket closes (4003, which the app does
+    // not retry) and every room goes, so a re-enable starts with none.
+    if (changes.some(([key, enabled]) => key === "sangat" && !enabled)) {
+      this.sangat.closeAll(CLOSE_SANGAT_DISABLED, "sangat disabled");
+    }
 
     return json(this.readKillSwitches());
   }
@@ -965,6 +933,58 @@ export class FamilyHub extends DurableObject<Env> {
     return this.sangat.accept(auth.deviceId);
   }
 
+  /** GET /sangat/live: the rooms whose host is connected. A device or the admin may ask. */
+  private async handleSangatLive(request: Request): Promise<Response> {
+    const auth = await this.authenticate(request, this.env);
+    if (!auth) {
+      return json({ error: "unauthorized" }, 401);
+    }
+
+    const throttled = this.throttleAdmin(auth);
+    if (throttled) {
+      return throttled;
+    }
+
+    if (!this.readKillSwitches().sangat) {
+      return json({ error: "feature disabled" }, 503);
+    }
+
+    return json({ rooms: this.sangat.liveRooms().map(liveRoomJson) });
+  }
+
+  /**
+   * PUT /sangat/car: the host's phone says it is driving. Car mode is set over
+   * HTTP rather than the WebSocket protocol, which has no message for it.
+   */
+  private async handleSangatCar(request: Request): Promise<Response> {
+    const auth = await this.authenticate(request, this.env);
+    if (auth?.role !== "device") {
+      return json({ error: "unauthorized" }, 401);
+    }
+
+    if (!this.readKillSwitches().sangat) {
+      return json({ error: "feature disabled" }, 503);
+    }
+
+    const body = await readStrictJsonObject(request);
+    const roomCode = body?.roomCode;
+    const carMode = body?.carMode;
+    if (!isNonEmptyString(roomCode) || typeof carMode !== "boolean") {
+      return json({ error: "roomCode and a boolean carMode are required" }, 400);
+    }
+
+    const result = this.sangat.setCarMode(roomCode, auth.deviceId, carMode);
+    if (result === "not_found") {
+      return json({ error: "room not found" }, 404);
+    }
+    if (result === "not_host") {
+      return json({ error: "only the host device can change car mode" }, 403);
+    }
+
+    const room = this.sangat.roomView(roomCode);
+    return room ? json(liveRoomJson(room)) : json({ error: "room not found" }, 404);
+  }
+
   async webSocketMessage(
     ws: WebSocket,
     message: string | ArrayBuffer,
@@ -999,6 +1019,14 @@ export class FamilyHub extends DurableObject<Env> {
 
     if (request.method === "GET" && pathname === "/ws") {
       return this.handleSangatSocket(request);
+    }
+
+    if (request.method === "GET" && pathname === "/sangat/live") {
+      return this.handleSangatLive(request);
+    }
+
+    if (request.method === "PUT" && pathname === "/sangat/car") {
+      return this.handleSangatCar(request);
     }
 
     if (request.method === "GET" && pathname === "/ping") {

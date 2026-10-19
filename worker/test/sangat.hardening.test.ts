@@ -36,6 +36,7 @@ import {
   createRoom,
   HUB_ORIGIN,
   hubStub,
+  joinAndApprove,
   openFamily,
   resetHub,
   seedDevice,
@@ -49,6 +50,8 @@ import {
 beforeEach(resetHub);
 afterEach(closeAllClients);
 
+// Must match the ADMIN_KEY binding injected in vitest.config.ts.
+const TEST_ADMIN_KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const MINUTE = 60_000;
 const GRACE = 15 * MINUTE;
 
@@ -165,6 +168,30 @@ describe("a socket the server has closed", () => {
 
     expect(await sql(hub, (db) => db.exec("SELECT COUNT(*) AS n FROM sangat_rooms").one().n)).toBe(0);
     expect(await sql(hub, (db) => db.exec("SELECT COUNT(*) AS n FROM sangat_members WHERE deviceId = ?", device.deviceId).one().n)).toBe(0);
+  });
+
+  it("a revoke over HTTP leaves a message still being decoded inert: no room is created", async () => {
+    const hub = hubStub();
+    const device = await seedDevice(hub, "a");
+    const client = await SangatClient.connect(hub, device.token);
+    await client.send("ping");
+    await client.next("pong");
+
+    client.sendRaw(
+      await slowFrame("create_room", toBinary(CreateRoomPayloadSchema, create(CreateRoomPayloadSchema, { username: "Asha" })), 400_000),
+    );
+    await sleep(40);
+    const revoked = await hub.fetch(`${HUB_ORIGIN}/roster/${device.deviceId}/revoke`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${TEST_ADMIN_KEY}` },
+    });
+    expect(revoked.status).toBe(200);
+    await revoked.text();
+    expect(await client.closed).toEqual({ code: 4001, reason: "revoked" });
+    await sleep(1000);
+
+    expect(await sql(hub, (db) => db.exec("SELECT COUNT(*) AS n FROM sangat_rooms").one().n)).toBe(0);
+    expect(await sql(hub, (db) => db.exec("SELECT COUNT(*) AS n FROM sangat_members").one().n)).toBe(0);
   });
 
   it("closeDevice closes the sockets before it touches storage: an unreadable room cannot leave a revoked phone connected", async () => {
@@ -378,6 +405,86 @@ describe("per-device caps", () => {
     await runDurableObjectAlarm(hub);
     await client.send("create_room", { username: "Asha" });
     await client.next("room_created");
+  });
+
+  describe("transfer_host", () => {
+    async function hostOf(hub: Hub, code: string) {
+      return sql(hub, (db) =>
+        db.exec<{ hostUserId: string; hostDeviceId: string }>("SELECT hostUserId, hostDeviceId FROM sangat_rooms WHERE code = ?", code).one(),
+      );
+    }
+
+    it("refuses a target whose device already hosts 2 rooms, with room_limit_reached, and changes nothing", async () => {
+      const hub = hubStub();
+      const [a, b] = [await seedDevice(hub, "a"), await seedDevice(hub, "b")];
+      const host = await createRoom(hub, a);
+      const bharat = await joinAndApprove(hub, host.client, host.code, b, "Bharat");
+      await host.client.next("user_joined");
+      // Bharat's device hosts two rooms of its own, on other sockets.
+      const own = [await createRoom(hub, b, "B1"), await createRoom(hub, b, "B2")];
+      expect(await sql(hub, (db) => db.exec("SELECT COUNT(*) AS n FROM sangat_rooms WHERE hostDeviceId = ?", b.deviceId).one().n)).toBe(MAX_ROOMS_PER_DEVICE);
+
+      await host.client.send("transfer_host", { new_host_id: bharat.userId });
+
+      expect((await host.client.next("error")).payload).toEqual({
+        code: "room_limit_reached",
+        message: "That device is hosting as many rooms as it may",
+      });
+      expect(await hostOf(hub, host.code)).toEqual({ hostUserId: host.userId, hostDeviceId: a.deviceId });
+      expect(await host.client.quiet(100)).toEqual([]);
+      expect(await bharat.client.quiet(0)).toEqual([]);
+
+      // Once one of those rooms is gone for good, the handover goes through.
+      await own[0].client.send("leave_room");
+      await sleep(30);
+      await sql(hub, (db) => db.exec("UPDATE sangat_rooms SET emptySince = ? WHERE emptySince IS NOT NULL", Date.now() - 6 * MINUTE));
+      await runDurableObjectAlarm(hub);
+      await host.client.send("transfer_host", { new_host_id: bharat.userId });
+      expect((await host.client.next("host_changed")).payload.new_host_id).toBe(bharat.userId);
+      expect(await hostOf(hub, host.code)).toEqual({ hostUserId: bharat.userId, hostDeviceId: b.deviceId });
+    });
+
+    it("counts rooms awaiting deletion, as create_room does", async () => {
+      const hub = hubStub();
+      const [a, b] = [await seedDevice(hub, "a"), await seedDevice(hub, "b")];
+      const host = await createRoom(hub, a);
+      const bharat = await joinAndApprove(hub, host.client, host.code, b, "Bharat");
+      await host.client.next("user_joined");
+      for (let i = 0; i < MAX_ROOMS_PER_DEVICE; i++) {
+        const own = await createRoom(hub, b, `B${i}`);
+        await own.client.send("leave_room");
+        await sleep(30);
+      }
+
+      await host.client.send("transfer_host", { new_host_id: bharat.userId });
+
+      expect((await host.client.next("error")).payload.code).toBe("room_limit_reached");
+    });
+
+    it("lets a device that is under the cap receive a room, and one at the cap hand it to its own other socket", async () => {
+      const hub = hubStub();
+      const [a, b] = [await seedDevice(hub, "a"), await seedDevice(hub, "b")];
+      const host = await createRoom(hub, a);
+      await createRoom(hub, a, "Asha2"); // device a is now at the cap
+      const sameDevice = await joinAndApprove(hub, host.client, host.code, a, "Asha's tablet");
+      await host.client.next("user_joined");
+      const bharat = await joinAndApprove(hub, host.client, host.code, b, "Bharat");
+      await host.client.next("user_joined");
+      await sameDevice.client.next("user_joined");
+      await createRoom(hub, b, "B1"); // device b has one room: one below the cap
+
+      await host.client.send("transfer_host", { new_host_id: bharat.userId });
+      expect((await host.client.next("host_changed")).payload.new_host_id).toBe(bharat.userId);
+      await bharat.client.next("host_changed");
+      expect((await hostOf(hub, host.code)).hostDeviceId).toBe(b.deviceId);
+
+      // Device b is now at the cap too; its other socket may still take over from it.
+      const second = await joinAndApprove(hub, bharat.client, host.code, b, "Bharat's tablet");
+      await bharat.client.next("user_joined");
+      await bharat.client.send("transfer_host", { new_host_id: second.userId });
+      expect((await bharat.client.next("host_changed")).payload.new_host_id).toBe(second.userId);
+      expect((await hostOf(hub, host.code)).hostDeviceId).toBe(b.deviceId);
+    });
   });
 });
 

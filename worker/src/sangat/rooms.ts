@@ -269,6 +269,11 @@ export const handleTransferHost: Handler = (rt, conn, payload) => {
   if (p.newHostId === me) return [fail(me, "cannot_transfer_to_self", "You are already the host")];
   const target = connectedMemberOf(store, room.code, p.newHostId);
   if (!target) return [fail(me, "user_not_found", "Target user not found in room")];
+  // A handover is one more room for the target's device to host, so the per-device cap
+  // applies as it does to create_room. A device that already hosts this room gains none.
+  if (target.deviceId !== room.hostDeviceId && store.roomsHostedBy(target.deviceId) >= MAX_ROOMS_PER_DEVICE) {
+    return [fail(me, "room_limit_reached", "That device is hosting as many rooms as it may")];
+  }
 
   setHost(store, room, target);
   store.saveRoom(room);

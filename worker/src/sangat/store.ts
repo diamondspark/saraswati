@@ -496,6 +496,10 @@ export class Store {
     this.sql.exec("DELETE FROM sangat_suggestions WHERE id = ?", id);
   }
 
+  deleteSuggestionsOfUser(userId: string): void {
+    this.sql.exec("DELETE FROM sangat_suggestions WHERE fromUserId = ?", userId);
+  }
+
   deleteSuggestionsOfRoom(roomCode: string): void {
     this.sql.exec("DELETE FROM sangat_suggestions WHERE roomCode = ?", roomCode);
   }
