@@ -1,12 +1,14 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "./index";
 import type { HubContext, RouteHandler } from "./hubContext";
+import { bindingRunner } from "./ask/ai";
 import { isNonEmptyString, json, readJsonBody, readStrictJsonObject } from "./http";
 import {
   addFamilyPlaylist,
   deleteFamilyPlaylist,
   listFamilyPlaylists,
 } from "./routes/familyPlaylists";
+import { handleAsk } from "./routes/ask";
 import { listParivaarPlaylists, putParivaarPlaylist } from "./routes/parivaar";
 import { CLOSE_DEVICE_REVOKED, CLOSE_SANGAT_DISABLED } from "./sangat/limits";
 import { Sangat, type LiveRoom } from "./sangat/Sangat";
@@ -33,13 +35,14 @@ const ADMIN_MAX_REQUESTS = 20;
 // Storage hygiene for the free-text fields of a health report.
 const MAX_HEALTH_TEXT_LENGTH = 128;
 
-// Mirrors the app's FamilyFeature enum. Order here is the order the
-// kill-switch map is returned in.
+// Mirrors the app's FamilyFeature enum (which gains ASK_SARASWATI with the Ask client). Order
+// here is the order the kill-switch map is returned in.
 const FAMILY_FEATURE_KEYS = [
   "sangat",
   "parivaar_mix",
   "family_playlists",
   "cast_relay",
+  "ask_saraswati",
 ] as const;
 export type FamilyFeatureKey = (typeof FAMILY_FEATURE_KEYS)[number];
 
@@ -312,6 +315,14 @@ export class FamilyHub extends DurableObject<Env> {
       title TEXT NOT NULL,
       addedByDeviceId TEXT NOT NULL,
       addedAt INTEGER NOT NULL
+    )`);
+    // Ask Saraswati: how many asks each phone and the family have used on a UTC day. Counts
+    // only; the question is never stored.
+    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS ask_usage (
+      day TEXT,
+      key TEXT,
+      count INTEGER NOT NULL,
+      PRIMARY KEY (day, key)
     )`);
     createSangatTables(ctx.storage.sql);
     // INSERT OR IGNORE keeps any key the owner has already flipped; a feature
@@ -1102,6 +1113,12 @@ export class FamilyHub extends DurableObject<Env> {
 
     if (request.method === "PUT" && pathname === "/parivaar/playlist") {
       return this.runRoute(request, "device", putParivaarPlaylist);
+    }
+
+    if (request.method === "POST" && pathname === "/ask") {
+      return this.runRoute(request, "device", (ctx, req, auth) =>
+        handleAsk(ctx, req, auth, bindingRunner(this.env.AI)),
+      );
     }
 
     if (request.method === "GET" && pathname === "/parivaar/playlists") {

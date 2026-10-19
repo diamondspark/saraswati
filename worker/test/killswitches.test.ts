@@ -1,5 +1,6 @@
 import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import { FamilyHub } from "../src/FamilyHub";
 
 // Must match the ADMIN_KEY binding injected in vitest.config.ts.
 const TEST_ADMIN_KEY =
@@ -11,6 +12,7 @@ const ALL_ENABLED = {
   parivaar_mix: true,
   family_playlists: true,
   cast_relay: true,
+  ask_saraswati: true,
 };
 
 function getFamilyHubStub() {
@@ -91,13 +93,49 @@ async function revokedDeviceToken(stub: Stub, deviceId: string) {
 }
 
 describe("GET /killswitches", () => {
-  it("returns all four keys enabled before any PUT", async () => {
+  it("returns all five keys enabled before any PUT", async () => {
     const stub = getFamilyHubStub();
 
     const response = await getKillSwitches(stub, TEST_ADMIN_KEY);
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(ALL_ENABLED);
+  });
+
+  it("GET lists five keys with ask_saraswati enabled by default", async () => {
+    const stub = getFamilyHubStub();
+    const deviceToken = await approvedDeviceToken(
+      stub,
+      "e4444444-4444-4444-4444-444444444444",
+    );
+
+    for (const token of [TEST_ADMIN_KEY, deviceToken]) {
+      const body = (await (await getKillSwitches(stub, token)).json()) as Record<string, boolean>;
+      expect(Object.keys(body)).toEqual([
+        "sangat",
+        "parivaar_mix",
+        "family_playlists",
+        "cast_relay",
+        "ask_saraswati",
+      ]);
+      expect(body.ask_saraswati).toBe(true);
+    }
+  });
+
+  it("a hub from before ask_saraswati gains the key, switched on, when it starts", async () => {
+    const stub = getFamilyHubStub();
+    await resetAllEnabled(stub);
+    // Starting the class again over the same storage is what a deploy does to a live hub.
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec("DELETE FROM killswitches WHERE key = 'ask_saraswati'");
+      new FamilyHub(state, env as never);
+    });
+
+    expect(await adminKillSwitches(stub)).toEqual(ALL_ENABLED);
+    // The row exists again, so a switch-off sticks instead of being a silent no-op.
+    expect((await putKillSwitches(stub, { ask_saraswati: false })).status).toBe(200);
+    expect(await adminKillSwitches(stub)).toEqual({ ...ALL_ENABLED, ask_saraswati: false });
+    await resetAllEnabled(stub);
   });
 
   it("returns 401 with no Authorization header", async () => {
@@ -228,6 +266,7 @@ describe("PUT /killswitches", () => {
       parivaar_mix: false,
       family_playlists: true,
       cast_relay: false,
+      ask_saraswati: true,
     });
 
     expect((await putKillSwitches(stub, { sangat: true })).status).toBe(200);
@@ -236,7 +275,21 @@ describe("PUT /killswitches", () => {
       parivaar_mix: false,
       family_playlists: true,
       cast_relay: false,
+      ask_saraswati: true,
     });
+  });
+
+  it("switches ask_saraswati off and on without touching the other four", async () => {
+    const stub = getFamilyHubStub();
+    await resetAllEnabled(stub);
+
+    const off = await putKillSwitches(stub, { ask_saraswati: false });
+
+    expect(off.status).toBe(200);
+    expect(await off.json()).toEqual({ ...ALL_ENABLED, ask_saraswati: false });
+    expect(await adminKillSwitches(stub)).toEqual({ ...ALL_ENABLED, ask_saraswati: false });
+    expect((await putKillSwitches(stub, { ask_saraswati: true })).status).toBe(200);
+    expect(await adminKillSwitches(stub)).toEqual(ALL_ENABLED);
   });
 
   it("treats an empty map as a no-op that returns the full map", async () => {
@@ -257,6 +310,8 @@ describe("PUT /killswitches", () => {
 
   const rejectedBodies: Array<[string, unknown]> = [
     ["an unknown key", { bogus: false }],
+    ["ask_saraswati with a string", { ask_saraswati: "false" }],
+    ["a near miss of ask_saraswati", { ask_saraswati_: false }],
     ["an unknown key alongside a valid one", { sangat: false, bogus: true }],
     ["a key differing only in case", { Sangat: false }],
     ["a non-boolean value (string)", { sangat: "false" }],
