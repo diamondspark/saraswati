@@ -416,6 +416,40 @@ the old one. For Saraswati:
    old key's secrets from the `release` environment and its own
    encrypted backup.
 
+## Phase 3 rollout
+
+How a build gets onto a family phone, in order:
+
+1. **Ship the build.** Release to `beta` ("How to release"), wait out the
+   48 hours, then promote to `stable` ("How to promote"). The family phones
+   follow Stable.
+2. **Set up the family hub once** (owner only): `cd worker && npx wrangler
+   deploy`, then `npx wrangler secret put ADMIN_KEY` with a value from `openssl
+   rand -hex 32` typed only into your own terminal, then paste it once into the
+   app's Manage Family setup. Never put the key in chat or a file. Deploy from
+   commit `53351555` or later onto a fresh hub: the roster table has no
+   migration for its newest column. Step by step in
+   [`rollout-checklist.md`](rollout-checklist.md#before-the-first-phone).
+3. **Set up each phone** with [`rollout-checklist.md`](rollout-checklist.md):
+   one checklist per phone, covering the architecture check, developer
+   verification, install, phone hygiene, pairing and approval, role (adult or
+   grandparent), Android Auto, and the 30-day reminder to uninstall Metrolist.
+   The family member follows the setup guide, live on a video call:
+   <https://diamondspark.github.io/saraswati/setup-guide/> (published by Phase 3
+   Task 12; not live until that task lands).
+
+Known limits, also listed in the checklist:
+
+- The hub caps owner actions at 20 a minute, so a refresh-happy Manage Family
+  screen can show "try again in a minute".
+- The free Cloudflare plan's daily request quota is a residual risk if a phone
+  misbehaves. Revoking that phone in Manage Family is the fix.
+- A pairing link expires after 15 minutes and works once.
+
+Developer verification is a per-phone step (see "Developer verification (Task
+13)" above); the full procedure is in
+[`developer-verification.md`](developer-verification.md).
+
 ## Upstream sync bot (Task 9): sync PRs need a real merge commit — HUMAN ACTION NEEDED
 
 **Merge every `sync/upstream-<date>` PR with "Create a merge commit." Never
