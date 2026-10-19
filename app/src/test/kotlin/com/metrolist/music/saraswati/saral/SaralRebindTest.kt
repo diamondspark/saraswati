@@ -30,6 +30,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -270,6 +271,40 @@ class PlayerProblemDelayTest {
         dispatcher.advanceBy(1)
 
         assertEquals(PlaybackProblem.COULD_NOT_PLAY, seen.last())
+    }
+
+    // SARASWATI: fix wave B3 — binding during a problem (a rotation under the error card) must not hold the
+    // whole player snapshot back until the problem has lasted.
+    @Test
+    fun `a problem that is already there when a screen binds does not hold the rest of the snapshot back`() {
+        val problem = MutableStateFlow<PlaybackProblem?>(PlaybackProblem.COULD_NOT_PLAY)
+        val track = MutableStateFlow("Kabhi Kabhie")
+        val got = mutableListOf<Pair<String, PlaybackProblem?>>()
+        scope.launch { combine(track, problem.lasting(PLAYER_PROBLEM_DELAY_MS)) { t, p -> t to p }.collect { got.add(it) } }
+
+        dispatcher.runCurrent()
+        assertEquals("the track is there at once, with no problem yet", listOf<Pair<String, PlaybackProblem?>>("Kabhi Kabhie" to null), got)
+
+        track.value = "Lag Ja Gale"
+        dispatcher.advanceBy(PLAYER_PROBLEM_DELAY_MS - 1)
+        assertEquals("the track keeps moving while the problem waits", "Lag Ja Gale" to null, got.last())
+
+        dispatcher.advanceBy(1)
+        assertEquals("and the problem shows once it has lasted", "Lag Ja Gale" to PlaybackProblem.COULD_NOT_PLAY, got.last())
+    }
+
+    @Test
+    fun `a problem that is there at the start and gone before it has lasted is never shown`() {
+        val problem = MutableStateFlow<PlaybackProblem?>(PlaybackProblem.OFFLINE)
+        val got = mutableListOf<PlaybackProblem?>()
+        scope.launch { problem.lasting(PLAYER_PROBLEM_DELAY_MS).collect { got.add(it) } }
+        dispatcher.runCurrent()
+
+        dispatcher.advanceBy(PLAYER_PROBLEM_DELAY_MS - 1)
+        problem.value = null
+        dispatcher.advanceBy(PLAYER_PROBLEM_DELAY_MS)
+
+        assertEquals(listOf<PlaybackProblem?>(null), got)
     }
 
     @Test

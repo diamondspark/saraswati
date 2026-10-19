@@ -403,14 +403,23 @@ class SaralViewModel
                     val seed = festivalRadio.seedFor(today)
                     // A search that was replaced may still hand back a (wrapped) failure; it must not speak.
                     coroutineContext.ensureActive()
-                    searchingFestival.value = null
                     when (seed) {
                         is FestivalSeed.Found -> {
+                            // The request first and the searching flag off last (after the player has been handed the
+                            // radio, which gives it a fresh queue watch): any other order lets a frame show the old
+                            // request's status, or the old queue's track as the festival's.
                             startRequest(SaralRequest.Festival(today))
                             whenPlayerReady { it.playRadio(seed.videoId) }
+                            searchingFestival.value = null
                         }
-                        FestivalSeed.NotFound -> problem.value = PlaybackProblem.COULD_NOT_PLAY
-                        is FestivalSeed.Failed -> problem.value = if (seed.offline) PlaybackProblem.OFFLINE else PlaybackProblem.COULD_NOT_PLAY
+                        FestivalSeed.NotFound -> {
+                            problem.value = PlaybackProblem.COULD_NOT_PLAY
+                            searchingFestival.value = null
+                        }
+                        is FestivalSeed.Failed -> {
+                            problem.value = if (seed.offline) PlaybackProblem.OFFLINE else PlaybackProblem.COULD_NOT_PLAY
+                            searchingFestival.value = null
+                        }
                     }
                 }
         }

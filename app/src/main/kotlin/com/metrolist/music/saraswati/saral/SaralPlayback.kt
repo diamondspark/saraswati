@@ -40,6 +40,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.transformLatest
 import timber.log.Timber
 
@@ -57,7 +58,8 @@ internal const val PLAYER_PROBLEM_DELAY_MS = 1_800L
 /**
  * A problem shows only if it is still there after [delayMs]: one that clears sooner is never emitted. Going from
  * a problem to none is immediate, and a change from one problem to another keeps the old one on until the new one
- * has lasted.
+ * has lasted. The first value is always "none", at once, even if a problem is already there: a combine that waits
+ * for this flow (the whole player snapshot) is then not held back when a screen binds during a problem.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 internal fun Flow<PlaybackProblem?>.lasting(delayMs: Long): Flow<PlaybackProblem?> =
@@ -65,7 +67,8 @@ internal fun Flow<PlaybackProblem?>.lasting(delayMs: Long): Flow<PlaybackProblem
         .transformLatest { problem ->
             if (problem != null) delay(delayMs)
             emit(problem)
-        }.distinctUntilChanged()
+        }.onStart { emit(null) }
+        .distinctUntilChanged()
 
 /** What the player is doing, joined with the queue Saral last started (and so with whose track it is). */
 @OptIn(ExperimentalCoroutinesApi::class)

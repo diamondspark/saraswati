@@ -16,6 +16,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume
 import org.junit.Test
 import java.time.Clock
 import java.time.Instant
@@ -340,15 +341,92 @@ class FestivalCalendarTest {
         assertEquals(LocalDate.parse("2028-10-19"), festivals.maxOf { it.endDate })
     }
 
+    // The strict mode is for the weekly festival-table workflow and a deliberate manual run only, never for
+    // saraswati-ci or a release: a stale hand-sourced calendar must not be able to hold back a fix (see
+    // docs/release-runbook.md, "Before every release"). Gradle passes it on with -Psaraswati.strictFestivalTable=true.
+    private fun strictMode() = System.getProperty("saraswati.strictFestivalTable") == "true"
+
+    private fun extendTheTableMessage(
+        ends: LocalDate,
+        today: LocalDate,
+    ) = "The festival table ends on $ends and today is $today: extend FestivalCalendar.all (and the pinned " +
+        "copy in this test) with the next years from Drik Panchang before the table runs out. " +
+        "See docs/release-runbook.md, \"Before every release\"."
+
+    /**
+     * The live check, with the clock and the mode handed in. Within six months of the table's end it prints a
+     * `::warning::` line (GitHub shows it on the run) and then either fails (strict) or skips (the default).
+     */
+    private fun checkTable(
+        today: LocalDate,
+        ends: LocalDate,
+        strict: Boolean,
+        warn: (String) -> Unit = ::println,
+    ) {
+        val message = extendTheTableMessage(ends, today)
+        val nearlyOut = tableNearlyOut(today, ends)
+        if (nearlyOut) warn("::warning title=Festival table is running out::$message")
+        if (strict) {
+            assertTrue(message, !nearlyOut)
+        } else {
+            // A skip, not a failure: the app is fine without the next years (no banner shows), and this must never block a release.
+            Assume.assumeTrue(message, !nearlyOut)
+        }
+    }
+
     @Test
     fun `the festival table is not within six months of running out`() {
-        val ends = festivals.maxOf { it.endDate }
+        checkTable(LocalDate.now(), festivals.maxOf { it.endDate }, strictMode())
+    }
 
-        assertTrue(
-            "The festival table ends on $ends and today is ${LocalDate.now()}: extend FestivalCalendar.all (and the pinned " +
-                "copy in this test) with the next years from Drik Panchang before the next release. " +
-                "See docs/release-runbook.md, \"Before every release\".",
-            !tableNearlyOut(LocalDate.now(), ends),
-        )
+    @Test
+    fun `near the end of the table the default mode skips with the extend-the-table message and a warning line`() {
+        val ends = LocalDate.parse("2028-10-19")
+        val warnings = mutableListOf<String>()
+
+        val skipped = runCatching { checkTable(LocalDate.parse("2028-05-01"), ends, strict = false, warn = warnings::add) }.exceptionOrNull()
+
+        assertTrue("a skip, not a failure: $skipped", skipped is org.junit.AssumptionViolatedException)
+        assertTrue(skipped!!.message!!.contains("extend FestivalCalendar.all"))
+        assertTrue(skipped.message!!.contains("2028-10-19"))
+        assertEquals(1, warnings.size)
+        assertTrue(warnings[0].startsWith("::warning title=Festival table is running out::"))
+        assertTrue(warnings[0].contains("Before every release"))
+    }
+
+    @Test
+    fun `near the end of the table the strict mode fails with the same message`() {
+        val ends = LocalDate.parse("2028-10-19")
+        val warnings = mutableListOf<String>()
+
+        val failed = runCatching { checkTable(LocalDate.parse("2028-05-01"), ends, strict = true, warn = warnings::add) }.exceptionOrNull()
+
+        assertTrue("a failure: $failed", failed is AssertionError)
+        assertTrue(failed!!.message!!.contains("extend FestivalCalendar.all"))
+        assertEquals(1, warnings.size)
+    }
+
+    @Test
+    fun `well before the end of the table neither mode warns, skips or fails`() {
+        val ends = LocalDate.parse("2028-10-19")
+        val warnings = mutableListOf<String>()
+
+        checkTable(LocalDate.parse("2026-10-19"), ends, strict = false, warn = warnings::add)
+        checkTable(LocalDate.parse("2028-04-18"), ends, strict = true, warn = warnings::add)
+
+        assertTrue(warnings.isEmpty())
+    }
+
+    @Test
+    fun `the strict mode is a system property that only the weekly workflow and a manual run switch on`() {
+        val root = generateSequence(java.io.File(".").absoluteFile) { it.parentFile }.first { java.io.File(it, "settings.gradle.kts").isFile }
+        val workflows = java.io.File(root, ".github/workflows")
+
+        val strict = workflows.listFiles()!!.filter { it.isFile && it.readText().contains("saraswati.strictFestivalTable") }.map { it.name }
+
+        assertEquals("only the scheduled festival-table check runs the strict mode", listOf("saraswati-festival-table.yml"), strict)
+        val text = java.io.File(workflows, "saraswati-festival-table.yml").readText()
+        assertTrue(text.contains("schedule:"))
+        assertTrue(text.contains("--tests '*FestivalCalendarTest'"))
     }
 }

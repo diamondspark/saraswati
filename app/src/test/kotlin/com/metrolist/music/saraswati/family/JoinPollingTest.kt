@@ -175,6 +175,67 @@ class JoinPollingTest {
         assertEquals("the poll ended with the approval", 1, polls())
     }
 
+    // --- SARASWATI: fix wave B3 — a pause while start() or checkAgain() is still reading storage ---------
+
+    @Test
+    fun `a pause while start is still reading storage means no poll behind the paused screen`() {
+        val slowStorage = CompletableDeferred<Unit>()
+        store.pendingClaimGate = slowStorage
+        vm.start()
+        time.runCurrent()
+
+        vm.stop()
+        slowStorage.complete(Unit)
+        time.runCurrent()
+        time.advanceBy(30 * minute)
+
+        assertEquals("the screen shows the wait", waiting, vm.state.value)
+        assertEquals("but nothing asks the hub while it is paused", 0, polls())
+
+        store.pendingClaimGate = null
+        start()
+        time.advanceBy(interval)
+        assertEquals("coming back polls", 1, polls())
+    }
+
+    @Test
+    fun `a pause while check again is still reading storage means no poll either`() {
+        start()
+        time.advanceBy(cap)
+        val atCap = polls()
+        val slowStorage = CompletableDeferred<Unit>()
+        store.pendingClaimGate = slowStorage
+        vm.checkAgain()
+        time.runCurrent()
+
+        vm.stop()
+        slowStorage.complete(Unit)
+        time.runCurrent()
+        time.advanceBy(30 * minute)
+
+        assertEquals(atCap, polls())
+        assertEquals(waiting, vm.state.value)
+
+        store.pendingClaimGate = null
+        start()
+        time.advanceBy(interval)
+        assertEquals(atCap + 1, polls())
+    }
+
+    @Test
+    fun `without a pause the slow storage changes nothing`() {
+        val slowStorage = CompletableDeferred<Unit>()
+        store.pendingClaimGate = slowStorage
+        vm.start()
+        time.runCurrent()
+
+        slowStorage.complete(Unit)
+        time.runCurrent()
+        time.advanceBy(interval)
+
+        assertEquals(1, polls())
+    }
+
     // --- the 15-minute cap ----------------------------------------------------
 
     @Test

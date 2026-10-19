@@ -306,6 +306,49 @@ class SaralFestivalTest {
         assertEquals(listOf("radio(seedBollyw01)"), playback.calls.toList())
     }
 
+    // SARASWATI: fix wave B3 — a failed search leaves the festival out of it altogether: no request was begun, so the
+    // next thing the person does reports the station that is really playing. (If the request began at the tap, this
+    // would say the festival was playing.)
+    @Test
+    fun `after a festival search finds nothing, play and pause names the station that is playing`() {
+        search.answers["Diwali songs"] = Result.success(null)
+        val vm = newVm().ready()
+        startBollywoodPlaying(vm)
+        vm.onFestivalTapped()
+        assertEquals(SaralStatus.Problem(PlaybackProblem.COULD_NOT_PLAY), vm.status.value)
+
+        vm.onPlayPause()
+
+        assertEquals(listOf("radio(seedBollyw01)", "toggle"), playback.calls.toList())
+        assertEquals(SaralStatus.Playing(SaralSubject.Station(vm.tile(bollywood))), vm.status.value)
+        assertEquals(bollywood.id, vm.status.value.stationId())
+    }
+
+    @Test
+    fun `after a festival search with no signal, play and pause names the station that is playing`() {
+        search.answers["Diwali songs"] = Result.failure(UnknownHostException("music.youtube.com"))
+        val vm = newVm().ready()
+        startBollywoodPlaying(vm)
+        vm.onFestivalTapped()
+        assertEquals(SaralStatus.Problem(PlaybackProblem.OFFLINE), vm.status.value)
+
+        vm.onPlayPause()
+
+        assertEquals(SaralStatus.Playing(SaralSubject.Station(vm.tile(bollywood))), vm.status.value)
+    }
+
+    @Test
+    fun `after a failed festival search the station that was playing keeps its ring`() {
+        search.answers["Diwali songs"] = Result.success(null)
+        val vm = newVm().ready()
+        startBollywoodPlaying(vm)
+        vm.onFestivalTapped()
+
+        vm.onNext()
+
+        assertEquals(bollywood.id, vm.status.value.stationId())
+    }
+
     @Test
     fun `a festival search with no signal says so while a station plays`() {
         search.answers["Diwali songs"] = Result.failure(UnknownHostException("music.youtube.com"))

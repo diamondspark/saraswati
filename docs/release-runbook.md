@@ -278,8 +278,21 @@ entirely in the owner's hands.
   Panchang, and the table currently ends on **2028-10-19** (Diwali 2028). Extend it
   (and the second, independently typed copy in `FestivalCalendarTest`) with the
   next years **before 2028-10-19**: after the last entry no festival shows and
-  nothing else says why. The unit test `the festival table is not within six months of running out`
-  starts failing on 2028-04-19 as the reminder: extend the table, do not skip the test.
+  nothing else says why (the app is otherwise unaffected: it costs a banner, not
+  playback).
+  - It never blocks a release. From 2028-04-19 the unit test `the festival table is
+    not within six months of running out` **skips** (it shows as skipped, with the
+    extend-the-table message, and prints a `::warning::` line) in `saraswati-ci`
+    and in the release `verify` job.
+  - The alert is the weekly `festival-table` workflow
+    (`.github/workflows/saraswati-festival-table.yml`, Mondays 05:23 UTC, also
+    runnable by hand from Actions): it runs only that test in its strict mode,
+    where it **fails** from 2028-04-19 and GitHub emails the owner. The strict
+    mode is the Gradle property `-Psaraswati.strictFestivalTable=true` and is
+    used nowhere else. To check by hand:
+    `source scripts/dev-env.sh && sar_gradle :app:testGmsDebugUnitTest --tests '*FestivalCalendarTest' -Psaraswati.strictFestivalTable=true`.
+  - Add a calendar reminder for 2028-04 as well; the workflow only helps while
+    its notification emails are read.
 - Put "festival table extended through <year>" in the release notes the first time
   this is done, so the next person can see when it was last looked at.
 

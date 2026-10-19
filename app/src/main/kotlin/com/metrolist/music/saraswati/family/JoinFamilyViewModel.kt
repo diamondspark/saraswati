@@ -134,7 +134,9 @@ class JoinFamilyViewModel
                 if (claim != null) {
                     inbox.take()
                     _state.value = JoinUiState.Waiting(ClaimCode.of(claim.deviceId))
-                    poll(claim)
+                    // SARASWATI: fix wave B3 — the reads above suspend, and the screen may have been paused in
+                    // that time (stop() found no poll to end); polling now would run behind a screen nobody sees.
+                    if (!paused) poll(claim)
                     return@launch
                 }
                 inbox.take()?.let {
@@ -169,7 +171,8 @@ class JoinFamilyViewModel
                     return@launch
                 }
                 _state.value = JoinUiState.Waiting(ClaimCode.of(claim.deviceId))
-                poll(claim, askAtOnce = true)
+                // SARASWATI: fix wave B3 — as in start(): a pause during the reads above means no poll.
+                if (!paused) poll(claim, askAtOnce = true)
             }
         }
 

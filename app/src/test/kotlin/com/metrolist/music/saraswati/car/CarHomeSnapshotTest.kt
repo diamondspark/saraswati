@@ -17,6 +17,7 @@ import com.metrolist.music.playback.MusicService
 import com.metrolist.music.saraswati.family.VirtualTimeDispatcher
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -401,6 +402,150 @@ class CarHomeSnapshotTest {
         }
 
         assertEquals("told once, however often it asks", listOf(2), seen)
+    }
+
+    // --- signing out (fix wave B3) ----------------------------------------------------------------------
+
+    private fun treeOver(snapshot: CarHomeSnapshot) =
+        CarBrowseTree(
+            resources = CarResources(string = { "string#$it" }, iconUri = { Uri.parse("icon://$it") }),
+            stations = com.metrolist.music.saraswati.family.FakeStationsCache(),
+            librarySections = { emptyList() },
+            homeShelves = { snapshot.current() },
+        )
+
+    private fun carHome(tree: CarBrowseTree) = runBlocking { withTimeout(2_000) { tree.childrenOf(MusicService.CAR_HOME) } }!!
+
+    private var registered: CarHomeSnapshot? = null
+
+    private fun register(snapshot: CarHomeSnapshot) {
+        registered = snapshot
+        CarHomeHolder.register(snapshot)
+    }
+
+    @After
+    fun unregisterTheSnapshot() {
+        registered?.let(CarHomeHolder::unregister)
+    }
+
+    @Test
+    fun `signing out empties the car's Home and removes the saved Home`() {
+        store.stored = first
+        val snapshot = snapshot()
+        register(snapshot)
+        val tree = treeOver(snapshot)
+        assertEquals("the snapshot is served", listOf("a", "b"), ids(carHome(tree)))
+        dispatcher.runCurrent()
+        seen.clear()
+        fetchBody = { null }
+
+        CarHomeHolder.forget(store)
+
+        assertNull("the saved Home is gone", store.stored)
+        dispatcher.runCurrent()
+        assertTrue("the car's Home is empty", carHome(tree).isEmpty())
+        assertEquals("and the car is told to ask again", listOf(0), seen)
+    }
+
+    @Test
+    fun `a refresh that was running when the person signed out cannot bring the old Home back`() {
+        store.stored = first
+        val gate = CompletableDeferred<List<MediaItem>?>()
+        fetchBody = { gate.await() }
+        val snapshot = snapshot()
+        register(snapshot)
+        val tree = treeOver(snapshot)
+        assertEquals(listOf("a", "b"), ids(carHome(tree)))
+        dispatcher.runCurrent()
+        assertEquals("the refresh is under way", 1, fetchCalls)
+        seen.clear()
+
+        CarHomeHolder.forget(store)
+        gate.complete(second)
+        dispatcher.runCurrent()
+        dispatcher.advanceBy(CarHomeSnapshot.FETCH_TIMEOUT_MS)
+
+        assertNull("nothing was written after the clear", store.stored)
+        assertEquals("nothing was written, however late the refresh landed", 0, store.writes)
+        assertEquals("the car was told about the clear and about nothing else", listOf(0), seen)
+        assertEquals("the refresh was cancelled at the clear", 1, fetchCancelled)
+    }
+
+    @Test
+    fun `a refresh that has already fetched when the person signs out is refused at the commit`() {
+        store.stored = first
+        fetchBody = { second }
+        lateinit var snapshot: CarHomeSnapshot
+        // The sign-out comes in after the fetch returned and before the commit, when there is nothing left to cancel.
+        snapshot =
+            CarHomeSnapshot(
+                store = store,
+                fetch = { fetchBody() },
+                scope = scope,
+                io = dispatcher,
+                clock = { dispatcher.currentTime },
+                afterFetch = { snapshot.clear() },
+            )
+        scope.launch { snapshot.changes.collect { seen.add(it) } }
+        dispatcher.runCurrent()
+        snapshot.current()
+        seen.clear()
+
+        dispatcher.runCurrent()
+
+        assertNull("the clear removed the file and the refresh did not put it back", store.stored)
+        assertEquals(0, store.writes)
+        assertEquals("only the clear was announced", listOf(0), seen)
+    }
+
+    @Test
+    fun `after the sign-out a new look starts a fresh refresh at once, and what it brings is kept`() {
+        store.stored = first
+        fetchBody = { second }
+        val snapshot = snapshot(minGap = 60_000)
+        snapshot.current()
+        dispatcher.runCurrent()
+        assertEquals(1, fetchCalls)
+
+        snapshot.clear()
+        dispatcher.runCurrent()
+        seen.clear()
+        assertTrue(snapshot.current().isEmpty())
+        dispatcher.runCurrent()
+
+        assertEquals("the minute between refreshes does not hold back the first look after a sign-out", 2, fetchCalls)
+        assertEquals(listOf(3), seen)
+        assertEquals(listOf("a", "b", "c"), ids(snapshot.current()))
+    }
+
+    @Test
+    fun `clearing twice, or before anything was loaded, is harmless`() {
+        val snapshot = snapshot()
+
+        snapshot.clear()
+        snapshot.clear()
+
+        assertTrue(snapshot.current().isEmpty())
+    }
+
+    @Test
+    fun `a store that will not clear does not stop the memory from being emptied`() {
+        store.stored = first
+        val snapshot = snapshot()
+        register(snapshot)
+        assertEquals(2, snapshot.current().size)
+        val stubborn =
+            object : CarHomeStore {
+                override fun read() = null
+
+                override fun write(items: List<MediaItem>) = Unit
+
+                override fun clear() = throw IOException("read-only")
+            }
+
+        CarHomeHolder.forget(stubborn)
+
+        assertTrue(snapshot.current().isEmpty())
     }
 
     // --- through the tree, as the car sees it ---------------------------------------------------------

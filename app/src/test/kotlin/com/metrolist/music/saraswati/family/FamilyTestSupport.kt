@@ -227,6 +227,12 @@ class FakeStore(
     var strikes = UnauthorizedStrikes.NONE
     var failProbe: Throwable? = null
 
+    /** While set, pendingClaim() waits on it: storage that is slow to answer. */
+    @Volatile var pendingClaimGate: CompletableDeferred<Unit>? = null
+
+    /** Runs at the start of unauthorizedStrikes(): lets a test hold a verdict in the middle of reading the record. */
+    @Volatile var onReadStrikes: (suspend () -> Unit)? = null
+
     private fun checkWrite() {
         failWrites?.let { throw it }
     }
@@ -251,6 +257,7 @@ class FakeStore(
 
     override suspend fun pendingClaim(): PendingClaim? {
         failReads?.let { throw it }
+        pendingClaimGate?.await()
         return claim
     }
 
@@ -274,6 +281,7 @@ class FakeStore(
 
     override suspend fun unauthorizedStrikes(): UnauthorizedStrikes {
         failReads?.let { throw it }
+        onReadStrikes?.invoke()
         return strikes
     }
 

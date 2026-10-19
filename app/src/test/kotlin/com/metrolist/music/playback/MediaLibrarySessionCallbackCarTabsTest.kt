@@ -129,7 +129,7 @@ class MediaLibrarySessionCallbackCarTabsTest {
     fun `the snapshot's refresh is limited to eight seconds and runs in the background`() {
         assertTrue(homeSnapshot.contains("withTimeoutOrNull(timeoutMs) { fetch() }"))
         assertTrue(homeSnapshot.contains("FETCH_TIMEOUT_MS = 8_000L"))
-        assertTrue(homeSnapshot.contains("scope.launch(io) { refresh() }"))
+        assertTrue(homeSnapshot.contains("scope.launch(io) { refresh(startedIn) }"))
         val current = bodyOf(homeSnapshot, "fun current()")
         assertFalse("current() cannot wait", current.contains("runBlocking") || current.contains("await") || current.contains("suspend"))
     }
@@ -140,9 +140,19 @@ class MediaLibrarySessionCallbackCarTabsTest {
         assertTrue(service.contains("notifyChildrenChanged(MusicService.CAR_HOME"))
     }
 
+    // The behaviour (memory, file and a refresh in flight) is tested in CarHomeSnapshotTest; App.forgetAccount cannot run
+    // on the JVM, so this only pins that it reaches the holder, and only once the YouTube auth state is already cleared.
     @Test
-    fun `signing out deletes the kept Home`() {
-        assertTrue(source("src/main/kotlin/com/metrolist/music/App.kt").contains("FileCarHomeStore.forget(context)"))
+    fun `signing out reaches the live Home snapshot, after the account's auth state is cleared`() {
+        val app = source("src/main/kotlin/com/metrolist/music/App.kt")
+        val forget = bodyOf(app, "suspend fun forgetAccount")
+
+        val authCleared = forget.indexOf("YouTube.authUser = \"0\"")
+        val holder = forget.indexOf("CarHomeHolder.forget(context)")
+        assertTrue("forgetAccount clears the car's Home", holder >= 0)
+        assertTrue("after the auth state, so a refresh started from then on is anonymous", holder > authCleared && authCleared >= 0)
+        assertTrue("the callback registers its snapshot where the holder can find it", callback.contains(".also(CarHomeHolder::register)"))
+        assertTrue(callback.contains("CarHomeHolder.unregister(homeSnapshot)"))
     }
 
     @Test

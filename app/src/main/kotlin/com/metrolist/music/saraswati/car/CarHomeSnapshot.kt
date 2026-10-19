@@ -21,8 +21,10 @@
 // that has not loaded. A failed or empty fetch never replaces a good snapshot
 // and never notifies, so the car is not sent round in circles. The file lives
 // in the app's no-backup folder: it is a cache of one person's YouTube
-// suggestions, not something to restore on another phone, and logging out
-// deletes it (App.forgetAccount).
+// suggestions, not something to restore on another phone. Logging out clears it
+// (App.forgetAccount -> CarHomeHolder.forget): the memory, the file and any
+// refresh already under way, which is told apart by an epoch and can neither
+// refill the memory nor rewrite the file after the clear.
 package com.metrolist.music.saraswati.car
 
 import android.content.Context
@@ -125,10 +127,6 @@ internal class FileCarHomeStore(
 
         fun of(context: Context): FileCarHomeStore = FileCarHomeStore(File(context.noBackupFilesDir, FILE_NAME))
 
-        /** Deletes the kept Home, e.g. when the person signs out. */
-        fun forget(context: Context) {
-            runCatching { of(context).clear() }
-        }
     }
 }
 
@@ -140,6 +138,9 @@ internal class CarHomeSnapshot(
     private val clock: () -> Long = SystemClock::elapsedRealtime,
     private val timeoutMs: Long = FETCH_TIMEOUT_MS,
     private val minRefreshGapMs: Long = MIN_REFRESH_GAP_MS,
+    // A seam for the test of the epoch check: runs between the fetch returning and the commit under the lock, the one
+    // window in which a clear() can come in with nothing left to cancel.
+    private val afterFetch: () -> Unit = {},
 ) {
     @Volatile private var memory: List<MediaItem>? = null
 
@@ -148,6 +149,9 @@ internal class CarHomeSnapshot(
     private var refreshJob: Job? = null
     private var lastRefreshAt: Long? = null
     private val lock = Any()
+
+    // Bumped by clear(); a refresh that started before a clear is not allowed to keep what it fetched.
+    private var epoch = 0L
 
     private val _changes = MutableSharedFlow<Int>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
@@ -197,11 +201,36 @@ internal class CarHomeSnapshot(
             val now = clock()
             lastRefreshAt?.let { if (now - it < minRefreshGapMs) return }
             lastRefreshAt = now
-            refreshJob = scope.launch(io) { refresh() }
+            val startedIn = epoch
+            refreshJob = scope.launch(io) { refresh(startedIn) }
         }
     }
 
-    private suspend fun refresh() {
+    /**
+     * Forgets everything: the Home in memory, the kept file and the refresh in flight (cancelled, and, should it be past
+     * cancelling, refused when it lands). The car is told to ask again, and the next look starts a fresh refresh.
+     */
+    fun clear() {
+        val running: Job?
+        synchronized(lock) {
+            epoch++
+            running = refreshJob
+            refreshJob = null
+            memory = null
+            memoryRows = null
+            storeRead = true
+            lastRefreshAt = null
+            try {
+                store.clear()
+            } catch (e: Exception) {
+                // Nothing more can be done about a file that will not go; memory is already empty.
+            }
+        }
+        running?.cancel()
+        _changes.tryEmit(0)
+    }
+
+    private suspend fun refresh(startedIn: Long) {
         val fresh =
             try {
                 withTimeoutOrNull(timeoutMs) { fetch() }
@@ -212,18 +241,19 @@ internal class CarHomeSnapshot(
             }
         // Nothing, or an empty answer, never replaces a good Home: a car with a Home that worked yesterday keeps it.
         if (fresh.isNullOrEmpty()) return
+        afterFetch()
         val rows = fresh.map { it.toHomeRow() }
         synchronized(lock) {
+            // A sign-out (clear) since this refresh began: what it fetched may belong to the account that left.
+            if (epoch != startedIn) return
             if (rows == memoryRows) return
             memory = fresh
             memoryRows = rows
-        }
-        try {
-            store.write(fresh)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            // The snapshot is a convenience; the next run simply starts without it.
+            try {
+                store.write(fresh)
+            } catch (e: Exception) {
+                // The snapshot is a convenience; the next run simply starts without it.
+            }
         }
         _changes.tryEmit(fresh.size)
     }
@@ -235,4 +265,36 @@ internal class CarHomeSnapshot(
         /** A car that keeps asking does not make a request each time. */
         const val MIN_REFRESH_GAP_MS = 60_000L
     }
+}
+
+/**
+ * The one live [CarHomeSnapshot] of the process, so the sign-out path (which has only a Context) can reach it the way the
+ * Saral screen reaches its queue watch. The service's callback registers its snapshot when it is built and lets go of it
+ * when it is released.
+ */
+internal object CarHomeHolder {
+    @Volatile private var live: CarHomeSnapshot? = null
+
+    fun register(snapshot: CarHomeSnapshot) {
+        live = snapshot
+    }
+
+    fun unregister(snapshot: CarHomeSnapshot) {
+        if (live === snapshot) live = null
+    }
+
+    /**
+     * Sign-out: the live snapshot forgets its Home (and any refresh under way), and the file goes whether or not the
+     * music service is running.
+     */
+    fun forget(store: CarHomeStore) {
+        live?.clear()
+        try {
+            store.clear()
+        } catch (e: Exception) {
+            // See CarHomeSnapshot.clear.
+        }
+    }
+
+    fun forget(context: Context) = forget(FileCarHomeStore.of(context))
 }

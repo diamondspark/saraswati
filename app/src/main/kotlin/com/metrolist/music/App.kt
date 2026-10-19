@@ -29,7 +29,7 @@ import com.metrolist.kugou.KuGou
 import com.metrolist.lastfm.LastFM
 import com.metrolist.music.BuildConfig
 import com.metrolist.music.saraswati.SaraswatiFeatures
-import com.metrolist.music.saraswati.car.FileCarHomeStore
+import com.metrolist.music.saraswati.car.CarHomeHolder
 import com.metrolist.music.saraswati.saral.SaralActive
 import com.metrolist.music.saraswati.security.OpenResult
 import com.metrolist.music.saraswati.security.SaraswatiVault
@@ -429,10 +429,6 @@ class App :
                 Timber.d("forgetAccount: DataStore preferences cleared")
             }
 
-            // SARASWATI: fix wave B2 — the car's Home tab keeps the last suggestions YouTube gave this
-            // account in a file; they go with the account.
-            FileCarHomeStore.forget(context)
-
             // Immediately clear YouTube object's auth state
             Timber.d("forgetAccount: Clearing YouTube object auth state")
             YouTube.cookie = null
@@ -440,6 +436,11 @@ class App :
             YouTube.dataSyncId = null
             YouTube.authUser = "0"
             Timber.d("forgetAccount: YouTube object auth state cleared")
+
+            // SARASWATI: fix wave B3 — the car's Home tab keeps the last suggestions YouTube gave this account
+            // (in memory, in a file, and in a refresh that may be under way); they go with the account. After the
+            // auth state is cleared above, so a refresh that starts from here on is anonymous.
+            CarHomeHolder.forget(context)
 
             // Clear WebView cookies to prevent auto-relogin
             Timber.d("forgetAccount: Clearing WebView CookieManager")

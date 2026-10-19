@@ -12,7 +12,8 @@
 // counted (the launch refresh and the stations refresh run together and would
 // otherwise count one outage twice) and does not reset the run. Only a success
 // (any 2xx) resets it, because only a success proves the session works; no signal
-// or a 5xx says nothing either way and leaves the record as it was. The count
+// or a 5xx says nothing either way and leaves the record as it was. An answer about a
+// session the phone no longer holds changes nothing. The count
 // and the time of the last counted 401 are plain DataStore values (not secrets),
 // so they survive restarts.
 package com.metrolist.music.saraswati.family
@@ -36,7 +37,8 @@ private val verdictLock = Mutex()
  * Judges the hub's [answer] to a call made with [session]. A success resets the run of 401s. A 401 is
  * counted when it is the first or at least [SessionVerdict.MIN_GAP_MS] after the last counted one, and
  * the third counted one clears the stored session and device id (never the admin key or the Saral role cache).
- * A failure that is not a 401, and a storage error, change nothing. Returns true when the session was cleared. [nowMs] is wall-clock time: the record outlives a restart.
+ * A failure that is not a 401, a storage error, and an answer about a session that is not the stored one any more
+ * change nothing. Returns true when the session was cleared. [nowMs] is wall-clock time: the record outlives a restart.
  */
 internal suspend fun judgeSessionAnswer(
     family: FamilyStore,
@@ -47,13 +49,18 @@ internal suspend fun judgeSessionAnswer(
     verdictLock.withLock {
         try {
             val failure = answer.exceptionOrNull()
+            val unauthorized = failure is HubException && failure.status == 401
             when {
+                // No signal, a 4xx or a 5xx says nothing about the session either way.
+                failure != null && !unauthorized -> false
+                // The answer is about [session]; if the phone holds another one by now (or none, or one it cannot
+                // open right now) it says nothing about the stored record, which belongs to the stored session.
+                family.session() != session -> false
                 failure == null -> {
                     family.resetUnauthorizedStrikes()
                     false
                 }
-                failure is HubException && failure.status == 401 -> countUnauthorized(family, session, nowMs())
-                else -> false
+                else -> countUnauthorized(family, session, nowMs())
             }
         } catch (e: CancellationException) {
             throw e
@@ -61,6 +68,18 @@ internal suspend fun judgeSessionAnswer(
             false
         }
     }
+
+/**
+ * A call made with [session] was accepted by the hub (the health report, which never counts a 401 of its own): resets
+ * the run of 401s, under the same lock as [judgeSessionAnswer], so it cannot land between a verdict's read of the
+ * record and its write. Does nothing if [session] is no longer the stored one.
+ */
+internal suspend fun markSessionWorking(
+    family: FamilyStore,
+    session: FamilySession,
+) {
+    judgeSessionAnswer(family, session, Result.success(Unit)) { 0L }
+}
 
 private suspend fun countUnauthorized(
     family: FamilyStore,

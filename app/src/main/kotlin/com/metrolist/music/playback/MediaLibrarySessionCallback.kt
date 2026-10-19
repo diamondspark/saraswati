@@ -70,6 +70,7 @@ import com.metrolist.music.constants.AutoRadioQueueKey
 import com.metrolist.music.playback.queues.ListQueue
 import com.metrolist.music.playback.queues.YouTubeQueue
 import com.metrolist.music.saraswati.car.CarBrowseTree
+import com.metrolist.music.saraswati.car.CarHomeHolder
 import com.metrolist.music.saraswati.car.CarHomeSnapshot
 import com.metrolist.music.saraswati.car.FileCarHomeStore
 import com.metrolist.music.saraswati.car.CarResources
@@ -104,7 +105,7 @@ constructor(
             store = FileCarHomeStore.of(context),
             fetch = ::loadHomeShelves,
             scope = scope,
-        )
+        ).also(CarHomeHolder::register)
 
     /** How many rows the car's Home tab now has, each time a background refresh brought a new one. */
     val homeChanges get() = homeSnapshot.changes
@@ -136,6 +137,8 @@ constructor(
     var addToTargetPlaylist: () -> Unit = {}
 
     fun release() {
+        // SARASWATI: fix wave B3 — a released callback must not be what a later sign-out tries to clear.
+        CarHomeHolder.unregister(homeSnapshot)
         scope.cancel()
     }
 

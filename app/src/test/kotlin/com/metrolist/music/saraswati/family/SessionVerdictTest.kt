@@ -19,11 +19,15 @@ import com.metrolist.music.constants.FamilyUnauthorizedCountKey
 import com.metrolist.music.saraswati.saral.GrandparentRoleSync
 import com.metrolist.music.saraswati.security.CookieVault
 import com.metrolist.music.saraswati.security.SoftwareKeyProvider
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -335,6 +339,68 @@ class SessionVerdictTest {
         hub.heal("reportHealth")
         runBlocking { reporter.report() }
         assertEquals(UnauthorizedStrikes.NONE, family.strikes)
+    }
+
+    // --- SARASWATI: fix wave B3 — a verdict is about one session, and is atomic ------------------------------
+
+    @Test
+    fun `an answer about a session the phone no longer holds changes nothing`() {
+        family.strikes = UnauthorizedStrikes(2, wall.nowMs - gap)
+        family.session = FamilySession("device-2", "the-new-token")
+        val stale = session
+
+        runBlocking { judgeSessionAnswer(family, stale, Result.success(Unit), wall.reading) }
+        assertEquals("a success for the old session does not wipe the new session's record", 2, family.strikes.count)
+
+        runBlocking { judgeSessionAnswer(family, stale, Result.failure<Unit>(hubFailure(401)), wall.reading) }
+        assertEquals("nor does its 401 count against the new one", UnauthorizedStrikes(2, wall.nowMs - gap), family.strikes)
+        assertEquals(FamilySession("device-2", "the-new-token"), family.session)
+        assertTrue(family.cleared.isEmpty())
+    }
+
+    @Test
+    fun `an answer when the stored session cannot be opened right now changes nothing`() {
+        family.strikes = UnauthorizedStrikes(2, wall.nowMs - gap)
+        family.failReads = IOException("Keystore unavailable")
+
+        runBlocking { judgeSessionAnswer(family, session, Result.success(Unit), wall.reading) }
+
+        assertEquals(2, family.strikes.count)
+    }
+
+    @Test
+    fun `a health report that the hub accepted waits for a verdict that is under way`() {
+        family.strikes = UnauthorizedStrikes(2, wall.nowMs - gap)
+        val inside = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        family.onReadStrikes = {
+            inside.complete(Unit)
+            release.await()
+        }
+        hub.failWith("getMe", hubFailure(401))
+        val background = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        try {
+            val verdict = background.launch { sync.refresh() }
+            runBlocking { withTimeout(5_000) { inside.await() } }
+            val reporter =
+                HealthReporter(hub, family, noThrottle(), versionCode = 1, versionName = "1.0", timezone = { "UTC" }, io = Dispatchers.Default)
+            val report = background.launch { reporter.report() }
+            runBlocking { delay(300) }
+
+            assertEquals("the reset did not slip in between the verdict's read and its write", 2, family.strikes.count)
+
+            release.complete(Unit)
+            runBlocking {
+                withTimeout(5_000) {
+                    verdict.join()
+                    report.join()
+                }
+            }
+            assertNull("the verdict ran to its end: the third counted 401 cleared the session", family.session)
+            assertEquals(UnauthorizedStrikes.NONE, family.strikes)
+        } finally {
+            background.cancel()
+        }
     }
 }
 
