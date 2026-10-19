@@ -313,31 +313,56 @@ export class Sangat {
    * inert, so a revoked phone loses its authority even if the storage work below
    * fails (a room whose state cannot be read, say). Then its members stay marked
    * connected, and the close event and the grace expiry clean them up.
+   *
+   * The storage work is split so that one failure costs only its own part: the
+   * device's join requests and suggestions, in every room, are one step, and each
+   * seat's removal from its room is another.
    */
   closeDevice(deviceId: string, code: number, reason: string): void {
+    // Members whose sockets died with an earlier instance are still marked connected;
+    // settle that before a host is chosen from among them.
+    this.reconcileNow();
     for (const ws of this.ctx.getWebSockets()) {
       const att = this.attachmentOf(ws);
       if (att?.deviceId === deviceId) this.closeSocket(ws, att, code, reason);
     }
     const now = Date.now();
-    let outs: Out[] = [];
-    try {
-      outs = this.store.transaction(() => {
+    const outs: Out[] = [];
+
+    // What the phone asked for and suggested must not outlive it: the host should not be
+    // asked to approve a revoked phone's pick. Plain deletes, so no room has to be readable.
+    this.attempt("removing a closed device's join requests and suggestions", () =>
+      this.store.transaction(() => {
         this.store.deletePendingJoinsOfDevice(deviceId);
-        const result: Out[] = [];
-        for (const member of this.store.membersOfDevice(deviceId)) {
-          // What the phone suggested goes with it: the host should not be asked to approve a revoked phone's pick.
-          this.store.deleteSuggestionsOfUser(member.userId);
+        this.store.deleteSuggestionsOfDevice(deviceId);
+      }),
+    );
+
+    const seats = this.attempt("listing a closed device's seats", () => this.store.membersOfDevice(deviceId)) ?? [];
+    for (const member of seats) {
+      const removed = this.attempt("removing a closed device from a room", () =>
+        this.store.transaction(() => {
           const room = this.store.getRoom(member.roomCode);
-          if (!room || room.emptySince !== null) this.store.deleteMember(member.userId);
-          else result.push(...removeFromRoom(this.store, room, member, now));
-        }
-        return result;
-      });
-    } catch (error) {
-      console.error("sangat: removing a closed device from its rooms failed", errorName(error));
+          if (!room || room.emptySince !== null) {
+            this.store.deleteMember(member.userId);
+            return [];
+          }
+          return removeFromRoom(this.store, room, member, now);
+        }),
+      );
+      if (removed) outs.push(...removed);
     }
     this.announce(outs);
+  }
+
+  /** Runs one piece of storage work whose failure must not stop the rest: logs it and returns undefined. */
+  private attempt<T>(what: string, work: () => T): T | undefined {
+    try {
+      return work();
+    } catch (error) {
+      console.error(`sangat: ${what} failed`, errorName(error));
+      return undefined;
+    }
   }
 
   /** Closes every socket with `code` and deletes every room. The sockets go first, as in closeDevice. */

@@ -166,6 +166,8 @@ export function emptyRoom(store: Store, room: Room, now: number): Out[] {
 export function removeFromRoom(store: Store, room: Room, member: Member, now: number): Out[] {
   const wasHost = member.isHost || room.hostUserId === member.userId;
   store.deleteMember(member.userId);
+  // What they suggested goes with them: the host should not be asked to approve a pick from someone who is gone.
+  store.deleteSuggestionsOfUser(member.userId);
   room.state.users = room.state.users.filter((u) => u.userId !== member.userId);
 
   if (store.memberCount(room.code) === 0) return emptyRoom(store, room, now);

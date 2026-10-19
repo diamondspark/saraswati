@@ -10,6 +10,7 @@ import {
 import { listParivaarPlaylists, putParivaarPlaylist } from "./routes/parivaar";
 import { CLOSE_DEVICE_REVOKED, CLOSE_SANGAT_DISABLED } from "./sangat/limits";
 import { Sangat, type LiveRoom } from "./sangat/Sangat";
+import { normalizeRoomCode } from "./sangat/sanitize";
 import { createSangatTables } from "./sangat/schema";
 
 const PAIRING_TOKEN_TTL_MS = 15 * 60 * 1000;
@@ -1012,9 +1013,10 @@ export class FamilyHub extends DurableObject<Env> {
     }
 
     const body = await readStrictJsonObject(request);
-    const roomCode = body?.roomCode;
+    // The code is read as join_room reads it, so what opens a room opens its car switch.
+    const roomCode = typeof body?.roomCode === "string" ? normalizeRoomCode(body.roomCode) : "";
     const carMode = body?.carMode;
-    if (!isNonEmptyString(roomCode) || typeof carMode !== "boolean") {
+    if (roomCode === "" || typeof carMode !== "boolean") {
       return json({ error: "roomCode and a boolean carMode are required" }, 400);
     }
 

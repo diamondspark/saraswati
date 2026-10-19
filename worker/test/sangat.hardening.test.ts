@@ -65,6 +65,25 @@ const liveSangat = (hub: Hub) =>
 
 const getAlarm = (hub: Hub) => runInDurableObject(hub, (_instance, state) => state.storage.getAlarm());
 
+async function until(check: () => Promise<boolean>, what: string, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await check())) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await sleep(5);
+  }
+}
+
+// The bytes of messages the hub has received and not finished with (Sangat counts them from arrival).
+const heldBytes = (hub: Hub) =>
+  runInDurableObject(hub, (instance) => (instance as unknown as { sangat: { totalWaitingBytes: number } }).sangat.totalWaitingBytes);
+
+/** Waits until the hub holds at least `bytes` of received messages: the frame has arrived and is being handled. */
+const received = (hub: Hub, bytes: number) =>
+  until(async () => (await heldBytes(hub)) >= bytes, "the hub to receive the frame");
+
+/** Waits until every message the hub received has been handled or dropped. */
+const drained = (hub: Hub) => until(async () => (await heldBytes(hub)) === 0, "the queued messages to be dealt with");
+
 function varint(value: number): number[] {
   const out: number[] = [];
   let rest = value;
@@ -112,13 +131,14 @@ describe("a socket the server has closed", () => {
     await client.send("ping");
     await client.next("pong");
 
+    const queued = await slowFrame("create_room", toBinary(CreateRoomPayloadSchema, create(CreateRoomPayloadSchema, { username: "Asha" })), 1000);
     client.sendRaw(await slowPing());
-    client.sendRaw(await slowFrame("create_room", toBinary(CreateRoomPayloadSchema, create(CreateRoomPayloadSchema, { username: "Asha" })), 1000));
-    await sleep(30);
+    client.sendRaw(queued);
+    await received(hub, queued.byteLength);
     const sangat = await liveSangat(hub);
     await runInDurableObject(hub, () => sangat.closeDevice(device.deviceId, 4001, "revoked"));
     expect(await client.closed).toEqual({ code: 4001, reason: "revoked" });
-    await sleep(700);
+    await drained(hub);
 
     expect(await sql(hub, (db) => db.exec("SELECT COUNT(*) AS n FROM sangat_rooms").one().n)).toBe(0);
     expect(await sql(hub, (db) => db.exec("SELECT COUNT(*) AS n FROM sangat_members").one().n)).toBe(0);
@@ -132,18 +152,17 @@ describe("a socket the server has closed", () => {
     await client.send("ping");
     await client.next("pong");
 
-    client.sendRaw(await slowPing());
-    client.sendRaw(
-      await slowFrame(
-        "join_room",
-        toBinary(JoinRoomPayloadSchema, create(JoinRoomPayloadSchema, { roomCode: host.code, username: "Zed" })),
-        1000,
-      ),
+    const queued = await slowFrame(
+      "join_room",
+      toBinary(JoinRoomPayloadSchema, create(JoinRoomPayloadSchema, { roomCode: host.code, username: "Zed" })),
+      1000,
     );
-    await sleep(30);
+    client.sendRaw(await slowPing());
+    client.sendRaw(queued);
+    await received(hub, queued.byteLength);
     const sangat = await liveSangat(hub);
     await runInDurableObject(hub, () => sangat.closeDevice(intruder.deviceId, 4001, "revoked"));
-    await sleep(700);
+    await drained(hub);
 
     expect(await host.client.quiet(0)).toEqual([]);
     expect(await sql(hub, (db) => db.exec("SELECT COUNT(*) AS n FROM sangat_pending_joins").one().n)).toBe(0);
@@ -157,14 +176,13 @@ describe("a socket the server has closed", () => {
     await client.next("pong");
 
     // Its own decode takes a while; the revoke lands in the middle of it.
-    client.sendRaw(
-      await slowFrame("create_room", toBinary(CreateRoomPayloadSchema, create(CreateRoomPayloadSchema, { username: "Asha" })), 400_000),
-    );
-    await sleep(40);
+    const slow = await slowFrame("create_room", toBinary(CreateRoomPayloadSchema, create(CreateRoomPayloadSchema, { username: "Asha" })), 400_000);
+    client.sendRaw(slow);
+    await received(hub, slow.byteLength);
     const sangat = await liveSangat(hub);
     await runInDurableObject(hub, () => sangat.closeDevice(device.deviceId, 4001, "revoked"));
     expect(await client.closed).toEqual({ code: 4001, reason: "revoked" });
-    await sleep(1000);
+    await drained(hub);
 
     expect(await sql(hub, (db) => db.exec("SELECT COUNT(*) AS n FROM sangat_rooms").one().n)).toBe(0);
     expect(await sql(hub, (db) => db.exec("SELECT COUNT(*) AS n FROM sangat_members WHERE deviceId = ?", device.deviceId).one().n)).toBe(0);
@@ -177,10 +195,9 @@ describe("a socket the server has closed", () => {
     await client.send("ping");
     await client.next("pong");
 
-    client.sendRaw(
-      await slowFrame("create_room", toBinary(CreateRoomPayloadSchema, create(CreateRoomPayloadSchema, { username: "Asha" })), 400_000),
-    );
-    await sleep(40);
+    const slow = await slowFrame("create_room", toBinary(CreateRoomPayloadSchema, create(CreateRoomPayloadSchema, { username: "Asha" })), 400_000);
+    client.sendRaw(slow);
+    await received(hub, slow.byteLength);
     const revoked = await hub.fetch(`${HUB_ORIGIN}/roster/${device.deviceId}/revoke`, {
       method: "POST",
       headers: { Authorization: `Bearer ${TEST_ADMIN_KEY}` },
@@ -188,7 +205,7 @@ describe("a socket the server has closed", () => {
     expect(revoked.status).toBe(200);
     await revoked.text();
     expect(await client.closed).toEqual({ code: 4001, reason: "revoked" });
-    await sleep(1000);
+    await drained(hub);
 
     expect(await sql(hub, (db) => db.exec("SELECT COUNT(*) AS n FROM sangat_rooms").one().n)).toBe(0);
     expect(await sql(hub, (db) => db.exec("SELECT COUNT(*) AS n FROM sangat_members").one().n)).toBe(0);
@@ -514,6 +531,11 @@ describe("backpressure", () => {
       ws: ws as unknown as WebSocket,
       closes,
       resetRate: () => delete attachment.rateCount,
+      // What closeDevice and cutOff write on a socket they close, and its undoing.
+      tombstone: () => {
+        attachment.closed = true;
+      },
+      reopen: () => delete attachment.closed,
       // Makes the rate-limit window look over, the next one following straight on.
       endWindow: () => {
         attachment.rateStart = Date.now() - 1100;
@@ -598,6 +620,61 @@ describe("backpressure", () => {
     expect(result.afterCap.holders).toEqual([[], [], [], []]);
     expect(result.afterCap.latecomer).toEqual([[1008, "backpressure"]]);
     expect(result.nextCloses).toEqual([]);
+  });
+
+  const fiveBig = (sangat: Sangat, ws: WebSocket) => [0, 1, 2, 3, 4].map(() => sangat.onMessage(ws, junk(400_000)));
+
+  it("a message whose handler throws still gives its bytes back: the same socket has its whole budget afterwards", async () => {
+    const hub = hubStub();
+
+    const result = await runInDurableObject(hub, async (_instance, state) => {
+      const sangat = new Sangat(state);
+      const { ws, closes } = fakeSocket("sg-device-fake");
+      const first = fiveBig(sangat, ws);
+      // The last thing each handler does is read the deadlines; with the table gone it throws.
+      state.storage.sql.exec("DROP TABLE sangat_rooms");
+      const settled = await Promise.allSettled(first);
+      createSangatTables(state.storage.sql);
+      const again = fiveBig(sangat, ws);
+      const afterAgain = [...closes];
+      await Promise.all(again);
+      return { rejected: settled.filter((outcome) => outcome.status === "rejected").length, afterAgain };
+    });
+
+    expect(result.rejected).toBe(5);
+    expect(result.afterAgain).toEqual([]);
+  });
+
+  it("a socket whose close event is queued behind its messages has its whole budget once they are done", async () => {
+    const hub = hubStub();
+
+    const closes = await runInDurableObject(hub, async (_instance, state) => {
+      const sangat = new Sangat(state);
+      const { ws, closes } = fakeSocket("sg-device-fake");
+      await Promise.all([...fiveBig(sangat, ws), sangat.onClose(ws)]);
+      await Promise.all(fiveBig(sangat, ws));
+      return closes;
+    });
+
+    expect(closes).toEqual([]);
+  });
+
+  it("a socket the server closed while messages were waiting has its whole budget once they are dropped", async () => {
+    const hub = hubStub();
+
+    const backpressure = await runInDurableObject(hub, async (_instance, state) => {
+      const sangat = new Sangat(state);
+      const { ws, closes, tombstone, reopen } = fakeSocket("sg-device-fake");
+      const waiting = fiveBig(sangat, ws);
+      tombstone();
+      await Promise.all(waiting);
+      // Looked at again as if it were open: nothing of the dropped messages is still counted against it.
+      reopen();
+      await Promise.all(fiveBig(sangat, ws));
+      return closes.filter(([, reason]) => reason === "backpressure");
+    });
+
+    expect(backpressure).toEqual([]);
   });
 
   it("closes a socket with 1008 'rate limited' after 5 consecutive windows of refused messages", async () => {

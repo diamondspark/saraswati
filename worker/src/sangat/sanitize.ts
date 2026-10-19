@@ -7,6 +7,7 @@ import {
   DEFAULT_TRACK_DURATION_MS,
   MAX_QUEUE,
   MAX_TRACK_DURATION_MS,
+  ROOM_CODE_INPUT_MAX,
   TRACK_ALBUM_MAX,
   TRACK_ARTIST_MAX,
   TRACK_ID_MAX,
@@ -53,6 +54,11 @@ export function sanitizeString(input: string, maxBytes: number): string {
     if (isValidUtf8(head)) return lenientDecoder.decode(head);
   }
   return lenientDecoder.decode(bytes.subarray(0, maxBytes));
+}
+
+/** A room code as a person or app typed it: upper-cased, cleaned and cut to ROOM_CODE_INPUT_MAX bytes. Empty if nothing is left. */
+export function normalizeRoomCode(input: string): string {
+  return sanitizeString(input.toUpperCase(), ROOM_CODE_INPUT_MAX);
 }
 
 /** A cleaned copy of `track`, or null when it has no id or no title. */

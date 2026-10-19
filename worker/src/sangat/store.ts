@@ -500,6 +500,14 @@ export class Store {
     this.sql.exec("DELETE FROM sangat_suggestions WHERE fromUserId = ?", userId);
   }
 
+  /** The suggestions made by any seat this device holds, in any room. Run before the seats are removed. */
+  deleteSuggestionsOfDevice(deviceId: string): void {
+    this.sql.exec(
+      "DELETE FROM sangat_suggestions WHERE fromUserId IN (SELECT userId FROM sangat_members WHERE deviceId = ?)",
+      deviceId,
+    );
+  }
+
   deleteSuggestionsOfRoom(roomCode: string): void {
     this.sql.exec("DELETE FROM sangat_suggestions WHERE roomCode = ?", roomCode);
   }

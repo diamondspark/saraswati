@@ -26,7 +26,6 @@ import {
   MAX_PENDING_JOINS,
   MAX_ROOMS,
   MAX_ROOMS_PER_DEVICE,
-  ROOM_CODE_INPUT_MAX,
   USERNAME_MAX,
 } from "./limits";
 import {
@@ -45,7 +44,7 @@ import {
   setHost,
   toAll,
 } from "./roomOps";
-import { sanitizeString } from "./sanitize";
+import { normalizeRoomCode, sanitizeString } from "./sanitize";
 import type { Room } from "./store";
 import type { Handler } from "./types";
 
@@ -138,7 +137,7 @@ export const handleJoinRoom: Handler = (rt, conn, payload) => {
   const username = sanitizeString(p.username, USERNAME_MAX);
   if (username === "") return [fail(me, "invalid_username", "Username is invalid")];
   if (p.roomCode === "") return [fail(me, "missing_room_code", "Room code is required")];
-  const code = sanitizeString(p.roomCode.toUpperCase(), ROOM_CODE_INPUT_MAX);
+  const code = normalizeRoomCode(p.roomCode);
   if (code === "") return [fail(me, "invalid_room_code", "Room code is invalid")];
 
   const room = store.getOpenRoom(code);
