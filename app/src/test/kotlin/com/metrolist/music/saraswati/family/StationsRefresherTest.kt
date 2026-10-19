@@ -35,12 +35,15 @@ class StationsRefresherTest {
     private val old = Station("s1", "Old", "video000001", 0)
     private val fresh = Station("s2", "Fresh", "video000002", 1)
 
+    // The wall clock the 401 record is kept by (SessionVerdict).
+    private val wall = TestClock(nowMs = 1_000_000)
+
     @Before
     fun setUp() {
         hub = FakeHub()
         family = FakeStore().apply { session = FamilySession("device-1", "the-session-token") }
         cache = FakeStationsCache(listOf(old))
-        refresher = StationsRefresher(hub, family, cache, noThrottle())
+        refresher = StationsRefresher(hub, family, cache, noThrottle(), wall.reading)
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     }
 
@@ -165,10 +168,13 @@ class StationsRefresherTest {
 
     // SARASWATI: fix wave A (M3) — a revoked phone forgets its session so it can join again.
     @Test
-    fun `a 401 clears the session and device id and leaves the cache`() {
+    fun `the third counted 401 clears the session and device id and leaves the cache`() {
         hub.failWith("getStations", hubFailure(401))
 
-        refresh()
+        repeat(SessionVerdict.STRIKES_TO_CLEAR) {
+            refresh()
+            wall.advance(SessionVerdict.MIN_GAP_MS)
+        }
 
         assertEquals(listOf("device-1"), family.cleared.toList())
         assertEquals(null, family.session)

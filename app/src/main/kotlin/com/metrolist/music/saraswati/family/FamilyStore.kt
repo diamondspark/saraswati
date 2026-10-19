@@ -23,6 +23,8 @@ import com.metrolist.music.constants.FamilyDeviceIdKey
 import com.metrolist.music.constants.FamilyHubClaimSecretKey
 import com.metrolist.music.constants.FamilyHubSessionTokenKey
 import com.metrolist.music.constants.FamilyStationsSavedKey
+import com.metrolist.music.constants.FamilyUnauthorizedAtKey
+import com.metrolist.music.constants.FamilyUnauthorizedCountKey
 import com.metrolist.music.constants.IsFamilyOwnerKey
 import com.metrolist.music.saraswati.security.CookieVault
 import com.metrolist.music.saraswati.security.SealedPreferences
@@ -47,6 +49,19 @@ data class PendingClaim(
     override fun toString(): String = "PendingClaim(deviceId=$deviceId, claimSecret=<redacted>)"
 }
 
+/**
+ * SARASWATI: fix wave B2 — how many 401s in a row the hub has given this phone's session ([count]) and the
+ * wall-clock time of the last one that was counted ([lastCountedAtMs], epoch ms; 0 while [count] is 0).
+ */
+data class UnauthorizedStrikes(
+    val count: Int,
+    val lastCountedAtMs: Long,
+) {
+    companion object {
+        val NONE = UnauthorizedStrikes(0, 0L)
+    }
+}
+
 interface FamilyStore {
     suspend fun adminKey(): String?
 
@@ -54,6 +69,13 @@ interface FamilyStore {
     suspend fun saveOwner(adminKey: String)
 
     suspend fun session(): FamilySession?
+
+    /**
+     * True if a session token is stored, judged on the stored slot alone: nothing is decrypted, so a
+     * Keystore that is unavailable right now (which makes [session] read as absent) cannot hide a live
+     * session. Join asks this before it spends a one-time pairing link.
+     */
+    suspend fun hasStoredSession(): Boolean
 
     suspend fun pendingClaim(): PendingClaim?
 
@@ -66,9 +88,17 @@ interface FamilyStore {
     /**
      * The hub refused [deviceId]'s session (it was revoked): forgets the session and the device id so
      * Join works again. The admin key and the Saral role cache are not touched, and a newer pairing
-     * (a different device id) is left alone.
+     * (a different device id) is left alone. The strikes of the cleared session go with it.
      */
     suspend fun clearSession(deviceId: String)
+
+    /** The running count of 401s against the stored session (plain storage; see [UnauthorizedStrikes]). */
+    suspend fun unauthorizedStrikes(): UnauthorizedStrikes
+
+    suspend fun saveUnauthorizedStrikes(strikes: UnauthorizedStrikes)
+
+    /** Back to no strikes: any answer from the hub that was not a 401 for the session. */
+    suspend fun resetUnauthorizedStrikes()
 
     /** The owner approved: keep the session, drop the claim secret. */
     suspend fun completeClaim(
@@ -135,6 +165,9 @@ class DataStoreFamilyStore(
             FamilySession(deviceId, token)
         }
 
+    // SARASWATI: fix wave B2 — the raw slot, never unsealed: it answers even when the Keystore does not.
+    override suspend fun hasStoredSession(): Boolean = withContext(io) { prefs()[FamilyHubSessionTokenKey] != null }
+
     override suspend fun pendingClaim(): PendingClaim? =
         withContext(io) {
             val prefs = prefs()
@@ -167,6 +200,9 @@ class DataStoreFamilyStore(
             it[FamilyDeviceIdKey] = deviceId
             it.put(FamilyHubSessionTokenKey, sealed)
             it.remove(FamilyHubClaimSecretKey)
+            // A new session starts with a clean record.
+            it.remove(FamilyUnauthorizedCountKey)
+            it.remove(FamilyUnauthorizedAtKey)
         }
         Unit
     }
@@ -178,7 +214,34 @@ class DataStoreFamilyStore(
                     it.remove(FamilyHubSessionTokenKey)
                     it.remove(FamilyHubClaimSecretKey)
                     it.remove(FamilyDeviceIdKey)
+                    it.remove(FamilyUnauthorizedCountKey)
+                    it.remove(FamilyUnauthorizedAtKey)
                 }
+            }
+            Unit
+        }
+
+    override suspend fun unauthorizedStrikes(): UnauthorizedStrikes =
+        withContext(io) {
+            val prefs = prefs()
+            val count = prefs[FamilyUnauthorizedCountKey] ?: 0
+            if (count <= 0) UnauthorizedStrikes.NONE else UnauthorizedStrikes(count, prefs[FamilyUnauthorizedAtKey] ?: 0L)
+        }
+
+    override suspend fun saveUnauthorizedStrikes(strikes: UnauthorizedStrikes) =
+        withContext(io) {
+            dataStore.edit {
+                it[FamilyUnauthorizedCountKey] = strikes.count
+                it[FamilyUnauthorizedAtKey] = strikes.lastCountedAtMs
+            }
+            Unit
+        }
+
+    override suspend fun resetUnauthorizedStrikes() =
+        withContext(io) {
+            dataStore.edit {
+                it.remove(FamilyUnauthorizedCountKey)
+                it.remove(FamilyUnauthorizedAtKey)
             }
             Unit
         }
@@ -199,25 +262,4 @@ class DataStoreFamilyStore(
             dataStore.edit { it[FamilyStationsSavedKey] = true }
             Unit
         }
-}
-
-/**
- * SARASWATI: fix wave A (M3) — if [failure] is the hub's 401 for [session], the owner revoked this phone:
- * clears the stored session and device id (never the admin key or the Saral role cache). Any other failure,
- * or a storage error, changes nothing. Returns true when a revoked session was cleared.
- */
-internal suspend fun dropSessionIfRevoked(
-    family: FamilyStore,
-    session: FamilySession,
-    failure: Throwable,
-): Boolean {
-    if (failure !is HubException || failure.status != 401) return false
-    return try {
-        family.clearSession(session.deviceId)
-        true
-    } catch (e: kotlin.coroutines.cancellation.CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        false
-    }
 }

@@ -29,6 +29,7 @@ import com.metrolist.kugou.KuGou
 import com.metrolist.lastfm.LastFM
 import com.metrolist.music.BuildConfig
 import com.metrolist.music.saraswati.SaraswatiFeatures
+import com.metrolist.music.saraswati.saral.SaralActive
 import com.metrolist.music.saraswati.security.OpenResult
 import com.metrolist.music.saraswati.security.SaraswatiVault
 import com.metrolist.music.saraswati.security.SecretScrubber
@@ -80,6 +81,9 @@ class App :
 
         // Install crash handler first
         CrashHandler.install(this)
+        // SARASWATI: fix wave B2 — a crash from here on (the rest of this method, a service, a receiver)
+        // reaches the crash screen before MainActivity has run; it must already know if this is a Saral phone.
+        runBlocking { SaralActive.initFrom(dataStore) }
         ArtistNameAliases.initialize(this)
 
         // SARASWATI: plant logging before anything else below that might log,
@@ -307,9 +311,10 @@ class App :
                 .collect { stored ->
                     try {
                         // SARASWATI: stored is vault-sealed; open it before handing
-                        // it to YouTube.cookie. SecretScrubber already ran above, so
-                        // in the normal case this is just the hot-reload path for a
-                        // cookie this app itself sealed.
+                        // it to YouTube.cookie. The plaintext scrub finished before this
+                        // collector started, so no plaintext cookie can arrive here; the
+                        // sealed check (scrubSealed) runs on IO beside it, and open() never
+                        // returns a value the vault rejects, so this does not wait for it.
                         // SARASWATI (I1): an unavailable Keystore says nothing about the
                         // cookie, so it keeps the current one; only a missing or rejected
                         // value clears it. Nothing is deleted here either way.

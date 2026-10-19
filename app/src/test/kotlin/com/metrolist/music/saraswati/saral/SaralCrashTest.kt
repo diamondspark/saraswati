@@ -21,6 +21,7 @@ import com.metrolist.music.utils.CrashHandler
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -57,7 +58,25 @@ class CrashHandlerSaralExtraTest {
         val intent = CrashHandler.crashIntent(context, "the log")
 
         assertTrue(intent.getBooleanExtra(CrashHandler.EXTRA_SARAL, false))
-        assertEquals("the log", intent.getStringExtra(CrashHandler.EXTRA_CRASH_LOG))
+    }
+
+    // SARASWATI: fix wave B2 — the Saral crash screen shows no trace, so none travels in the intent.
+    @Test
+    fun `a crash in Saral mode carries no crash log`() {
+        SaralActive.on = true
+
+        val intent = CrashHandler.crashIntent(context, "java.lang.IllegalStateException at com.metrolist")
+
+        assertFalse(intent.hasExtra(CrashHandler.EXTRA_CRASH_LOG))
+        assertNull(intent.getStringExtra(CrashHandler.EXTRA_CRASH_LOG))
+        assertFalse(intent.extras!!.keySet().any { intent.extras!!.get(it)?.toString()?.contains("IllegalStateException") == true })
+    }
+
+    @Test
+    fun `a crash in the full app still carries the log`() {
+        SaralActive.on = false
+
+        assertEquals("the log", CrashHandler.crashIntent(context, "the log").getStringExtra(CrashHandler.EXTRA_CRASH_LOG))
     }
 
     @Test
@@ -116,6 +135,22 @@ class SaralCrashSourceTest {
             assignments.all { it in setter..setterEnd },
         )
         assertEquals("both the cached read and the live follow go through the setter", 2, Regex("""applyGrandparentRole\(""").findAll(activity).count() - 1)
+    }
+
+    @Test
+    fun `the application class sets the flag from the cached role right after the crash handler is installed`() {
+        val app = source("src/main/kotlin/com/metrolist/music/App.kt")
+
+        val install = app.indexOf("CrashHandler.install(this)")
+        val init = app.indexOf("SaralActive.initFrom(dataStore)")
+        assertTrue(install >= 0)
+        assertTrue("App.onCreate initialises the flag", init >= 0)
+        assertTrue("and does it after the handler exists", init > install)
+        assertTrue(
+            "with nothing but the install and a comment in between",
+            app.substring(install, init).lines().drop(1).dropLast(1).all { it.isBlank() || it.trim().startsWith("//") },
+        )
+        assertTrue("before the scrub, the service and every other startup step", init < app.indexOf("SecretScrubber.scrubPlaintext"))
     }
 
     @Test

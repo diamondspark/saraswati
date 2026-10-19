@@ -492,11 +492,59 @@ class JoinFamilyViewModelTest {
         assertTrue(hub.callsTo("claimPairing").isEmpty())
     }
 
+    // SARASWATI: fix wave B2 — a session whose token cannot be opened right now (Keystore unavailable) reads
+    // as absent from session(); the raw slot probe still sees it, so the link is not spent.
+    @Test
+    fun `a stored session that cannot be opened right now still keeps the link unspent`() {
+        vm.submitInput(link)
+        store.sessionSlotUnreadable = true
+        assertNull("session() reads it as absent", store.session)
+
+        vm.claim("Mummy's Pixel", DeviceRole.ADULT)
+
+        assertEquals(JoinUiState.AlreadyPaired, vm.state.value)
+        assertTrue("the link was not spent", hub.callsTo("claimPairing").isEmpty())
+        assertNull(store.claim)
+    }
+
+    @Test
+    fun `a probe of the session slot that fails keeps the link unspent`() {
+        vm.submitInput(link)
+        store.failProbe = java.io.IOException("datastore unreadable")
+
+        vm.claim("Mummy's Pixel", DeviceRole.ADULT)
+
+        assertEquals(JoinUiState.Failed(FamilyError.UNKNOWN), vm.state.value)
+        assertTrue(hub.callsTo("claimPairing").isEmpty())
+
+        // The link is still held: once the slot can be read the same claim goes through.
+        store.failProbe = null
+        vm.claim("Mummy's Pixel", DeviceRole.ADULT)
+
+        assertEquals(1, hub.callsTo("claimPairing").size)
+        assertEquals(PendingClaim("device-1", "claim-secret-device-1"), store.claim)
+    }
+
+    @Test
+    fun `a stored session that cannot be opened right now sends start to AlreadyPaired, not to a claim`() {
+        store.sessionSlotUnreadable = true
+        inbox.offer(TEST_TOKEN)
+
+        vm.start()
+
+        assertEquals(JoinUiState.AlreadyPaired, vm.state.value)
+    }
+
     @Test
     fun `a revoked phone whose session was cleared can claim a new link`() {
         store.session = FamilySession("device-1", "revoked-token")
         hub.failWith("getMe", hubFailure(401))
-        runBlocking { GrandparentRoleSync(hub, store, roles, noThrottle()).refresh() }
+        val wall = TestClock(nowMs = 1_000_000)
+        val sync = GrandparentRoleSync(hub, store, roles, noThrottle(), wall.reading)
+        repeat(SessionVerdict.STRIKES_TO_CLEAR) {
+            runBlocking { sync.refresh() }
+            wall.advance(SessionVerdict.MIN_GAP_MS)
+        }
         assertNull(store.session)
         inbox.offer(TEST_TOKEN)
 

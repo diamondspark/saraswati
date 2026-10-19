@@ -26,7 +26,7 @@
 // Two exceptions to "nothing changes the flag but the hub's answer" (fix wave A):
 // a phone that holds the admin key is the owner's and is never Saral (it is
 // released if a stale flag has it), and a 401 clears the stored session but not
-// the flag.
+// the flag. Fix wave B2: not the first 401 but the third counted one (SessionVerdict).
 package com.metrolist.music.saraswati.saral
 
 import android.os.SystemClock
@@ -38,7 +38,7 @@ import com.metrolist.music.saraswati.family.DeviceRole
 import com.metrolist.music.saraswati.family.FamilyStore
 import com.metrolist.music.saraswati.family.HubApi
 import com.metrolist.music.saraswati.family.ResumeThrottle
-import com.metrolist.music.saraswati.family.dropSessionIfRevoked
+import com.metrolist.music.saraswati.family.judgeSessionAnswer
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -67,6 +67,7 @@ class GrandparentRoleSync
         private val family: FamilyStore,
         private val roles: GrandparentRoleStore,
         private val throttle: ResumeThrottle,
+        private val wallClockMs: () -> Long = System::currentTimeMillis,
     ) {
         @Inject
         constructor(hub: HubApi, family: FamilyStore, roles: GrandparentRoleStore) :
@@ -88,10 +89,11 @@ class GrandparentRoleSync
             val session = guarded { family.session() } ?: return null
             if (!force && !throttle.tryAcquire()) return null
             val answer = hub.getMe(session.sessionToken)
-            // SARASWATI: fix wave A (M3) — a 401 means the owner revoked this phone: forget the session and
-            // device id so Join works again. The role cache stays as it is (a revoked grandparent phone
-            // stays in Saral rather than being dropped into the full app).
-            answer.exceptionOrNull()?.let { dropSessionIfRevoked(family, session, it) }
+            // SARASWATI: fix wave A (M3) — a revoked phone forgets its session and device id so Join works
+            // again. The role cache stays as it is (a revoked grandparent phone stays in Saral rather than
+            // being dropped into the full app). Fix wave B2: the hub's 401 is generic, so this takes
+            // three counted 401s, and a success resets the count (SessionVerdict).
+            judgeSessionAnswer(family, session, answer, wallClockMs)
             val me = answer.getOrNull() ?: return null
             // A role the hub left out, or one this build does not know, reads as adult elsewhere;
             // here it must be no answer at all, or it would switch Saral off.

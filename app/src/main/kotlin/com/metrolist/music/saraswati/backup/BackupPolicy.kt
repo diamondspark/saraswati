@@ -45,6 +45,8 @@ import com.metrolist.music.constants.DiscordUsernameKey
 import com.metrolist.music.constants.FamilyDeviceIdKey
 import com.metrolist.music.constants.FamilyStationsCacheKey
 import com.metrolist.music.constants.FamilyStationsSavedKey
+import com.metrolist.music.constants.FamilyUnauthorizedAtKey
+import com.metrolist.music.constants.FamilyUnauthorizedCountKey
 import com.metrolist.music.constants.GrandparentRoleKey
 import com.metrolist.music.constants.IsFamilyOwnerKey
 import com.metrolist.music.constants.ListenTogetherServerUrlKey
@@ -149,6 +151,11 @@ object BackupPolicy {
                 IsFamilyOwnerKey,
                 FamilyDeviceIdKey,
                 FamilyStationsSavedKey,
+                // SARASWATI: fix wave B2 — the running count of 401s against this phone's
+                // session belongs to the live session only; a restored count could unpair
+                // a phone early, a restored absence would hand a failing one a fresh start.
+                FamilyUnauthorizedCountKey,
+                FamilyUnauthorizedAtKey,
             )
 
     // Preference keys the coverage test's wider regex flags as

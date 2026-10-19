@@ -222,6 +222,11 @@ class FakeStore(
     var failWrites: Throwable? = null
     var failReads: Throwable? = null
 
+    /** A session whose token sits in storage but cannot be opened now (Keystore unavailable): session() reads null. */
+    var sessionSlotUnreadable = false
+    var strikes = UnauthorizedStrikes.NONE
+    var failProbe: Throwable? = null
+
     private fun checkWrite() {
         failWrites?.let { throw it }
     }
@@ -237,6 +242,11 @@ class FakeStore(
     override suspend fun session(): FamilySession? {
         failReads?.let { throw it }
         return session
+    }
+
+    override suspend fun hasStoredSession(): Boolean {
+        failProbe?.let { throw it }
+        return session != null || sessionSlotUnreadable
     }
 
     override suspend fun pendingClaim(): PendingClaim? {
@@ -256,7 +266,25 @@ class FakeStore(
     override suspend fun clearSession(deviceId: String) {
         checkWrite()
         cleared.add(deviceId)
-        if (session?.deviceId == deviceId) session = null
+        if (session?.deviceId == deviceId) {
+            session = null
+            strikes = UnauthorizedStrikes.NONE
+        }
+    }
+
+    override suspend fun unauthorizedStrikes(): UnauthorizedStrikes {
+        failReads?.let { throw it }
+        return strikes
+    }
+
+    override suspend fun saveUnauthorizedStrikes(strikes: UnauthorizedStrikes) {
+        checkWrite()
+        this.strikes = strikes
+    }
+
+    override suspend fun resetUnauthorizedStrikes() {
+        checkWrite()
+        strikes = UnauthorizedStrikes.NONE
     }
 
     override suspend fun completeClaim(
@@ -266,6 +294,7 @@ class FakeStore(
         checkWrite()
         session = FamilySession(deviceId, sessionToken)
         claim = null
+        strikes = UnauthorizedStrikes.NONE
     }
 
     override suspend fun clearPendingClaim() {

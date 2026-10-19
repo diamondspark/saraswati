@@ -196,6 +196,13 @@ class JoinFamilyViewModel
             }
             viewModelScope.launch {
                 _state.value = JoinUiState.Claiming
+                // SARASWATI: fix wave B2 — if the stored session slot cannot even be probed, nothing is known
+                // about this phone, so the link is kept for a retry rather than spent on a claim that might
+                // then be refused because a session turns out to be there.
+                if (guarded { store.hasStoredSession() } == null) {
+                    _state.value = JoinUiState.Failed(FamilyError.UNKNOWN)
+                    return@launch
+                }
                 // SARASWATI: fix wave A (M3) — checked again right before the one-time link is spent: a phone
                 // that is paired by now (or is the owner's) must neither burn the link nor lose its session.
                 if (alreadyPaired()) {
@@ -281,7 +288,13 @@ class JoinFamilyViewModel
             _state.value = JoinUiState.Approved(role)
         }
 
-        private suspend fun alreadyPaired(): Boolean = guarded { store.session() } != null || guarded { store.adminKey() } != null
+        // SARASWATI: fix wave B2 — the raw session slot is asked first. session() decrypts, and a Keystore that
+        // is unavailable right now (or a hub-side hiccup that shows up as a read error) makes a live session
+        // read as absent: the claim would then spend the one-time link and savePendingClaim would refuse it.
+        private suspend fun alreadyPaired(): Boolean =
+            guarded { store.hasStoredSession() } == true ||
+                guarded { store.session() } != null ||
+                guarded { store.adminKey() } != null
 
         private suspend fun <T> guarded(block: suspend () -> T): T? =
             try {

@@ -11,8 +11,9 @@
 // Quiet on purpose. No session (unpaired, pending, or the owner's own phone,
 // which is kept fresh by its station edits) means no request. A hub that fails,
 // a revoked phone, an empty list or a storage error all leave the cache as it
-// was; a revoked phone (401) also forgets its session so it can join again. A second call while one is running returns at once, so a launch, a
-// resume and Saral's own start never queue three requests.
+// was; a revoked phone (three counted 401s, see SessionVerdict) also forgets its
+// session so it can join again. A second call while one is running returns at
+// once, so a launch, a resume and Saral's own start never queue three requests.
 //
 // Fix wave B1: a call inside the minute after the last request is skipped too (the
 // cache is only as old as that minute), so ten resumes in a minute send one request.
@@ -32,6 +33,7 @@ class StationsRefresher
         private val family: FamilyStore,
         private val cache: StationsCache,
         private val throttle: ResumeThrottle,
+        private val wallClockMs: () -> Long = System::currentTimeMillis,
     ) {
         @Inject
         constructor(hub: HubApi, family: FamilyStore, cache: StationsCache) :
@@ -45,8 +47,9 @@ class StationsRefresher
                 val session = guarded { family.session() } ?: return
                 if (!throttle.tryAcquire()) return
                 val answer = hub.getStations(session.sessionToken)
-                // SARASWATI: fix wave A (M3) — a 401 means this phone was revoked; forget the session so Join works.
-                answer.exceptionOrNull()?.let { dropSessionIfRevoked(family, session, it) }
+                // SARASWATI: fix wave A (M3) — a revoked phone forgets its session so Join works. Fix wave B2:
+                // after three counted 401s, not one (SessionVerdict); a success resets the count.
+                judgeSessionAnswer(family, session, answer, wallClockMs)
                 val fresh = answer.getOrNull() ?: return
                 guarded { cache.replace(fresh) }
             } finally {

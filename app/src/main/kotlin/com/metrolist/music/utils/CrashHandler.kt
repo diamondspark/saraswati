@@ -78,7 +78,8 @@ class CrashHandler private constructor(
             saral: Boolean = SaralActive.on,
         ): Intent =
             Intent(context, CrashActivity::class.java).apply {
-                putExtra(EXTRA_CRASH_LOG, crashLog)
+                // SARASWATI: fix wave B2 — no trace in the intent in Saral mode: the Saral crash screen shows none.
+                if (!saral) putExtra(EXTRA_CRASH_LOG, crashLog)
                 putExtra(EXTRA_SARAL, saral)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
             }

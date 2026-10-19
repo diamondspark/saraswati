@@ -19,6 +19,7 @@ import com.metrolist.music.saraswati.family.OFFLINE
 import com.metrolist.music.saraswati.family.PendingClaim
 import com.metrolist.music.saraswati.family.TEST_ADMIN_KEY
 import com.metrolist.music.saraswati.family.ResumeThrottle
+import com.metrolist.music.saraswati.family.SessionVerdict
 import com.metrolist.music.saraswati.family.TestClock
 import com.metrolist.music.saraswati.family.noThrottle
 import com.metrolist.music.saraswati.family.hubFailure
@@ -36,15 +37,26 @@ class GrandparentRoleSyncTest {
     private lateinit var roles: FakeRoleStore
     private lateinit var sync: GrandparentRoleSync
 
+    // The wall clock the 401 record is kept by (SessionVerdict); the resume throttle has its own clock below.
+    private val wall = TestClock(nowMs = 1_000_000)
+
     @Before
     fun setUp() {
         hub = FakeHub()
         family = FakeStore().apply { session = FamilySession("device-1", "the-session-token") }
         roles = FakeRoleStore()
-        sync = GrandparentRoleSync(hub, family, roles, noThrottle())
+        sync = GrandparentRoleSync(hub, family, roles, noThrottle(), wall.reading)
     }
 
     private fun refresh() = runBlocking { sync.refresh() }
+
+    /** The hub's 401 as it counts: three of them, each [SessionVerdict.MIN_GAP_MS] after the one before. */
+    private fun refreshThreeCountedTimes() {
+        repeat(SessionVerdict.STRIKES_TO_CLEAR) {
+            refresh()
+            wall.advance(SessionVerdict.MIN_GAP_MS)
+        }
+    }
 
     @Test
     fun `the hub saying grandparent turns Saral on`() {
@@ -97,11 +109,11 @@ class GrandparentRoleSyncTest {
 
     // SARASWATI: fix wave A (M3) — a revoked phone can join again.
     @Test
-    fun `a 401 clears the session and the device id so Join works again, and leaves Saral as it was`() {
+    fun `the third counted 401 clears the session and the device id so Join works again, and leaves Saral as it was`() {
         roles.grandparent = true
         hub.failWith("getMe", hubFailure(401))
 
-        assertNull(refresh())
+        refreshThreeCountedTimes()
 
         assertEquals(listOf("device-1"), family.cleared.toList())
         assertNull(family.session)
@@ -110,11 +122,11 @@ class GrandparentRoleSyncTest {
     }
 
     @Test
-    fun `a 401 on an adult phone also leaves the role cache alone`() {
+    fun `a revoked adult phone also leaves the role cache alone`() {
         roles.grandparent = false
         hub.failWith("getMe", hubFailure(401))
 
-        refresh()
+        refreshThreeCountedTimes()
 
         assertNull(family.session)
         assertFalse(roles.grandparent)
@@ -138,7 +150,7 @@ class GrandparentRoleSyncTest {
         hub.failWith("getMe", hubFailure(401))
         family.failWrites = java.io.IOException("disk full")
 
-        assertNull(refresh())
+        refreshThreeCountedTimes()
 
         assertEquals(FamilySession("device-1", "the-session-token"), family.session)
     }

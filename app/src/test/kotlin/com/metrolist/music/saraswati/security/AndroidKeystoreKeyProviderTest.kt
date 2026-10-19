@@ -3,9 +3,12 @@
  * Licensed under GPL-3.0 | See git history for contributors
  */
 
-// SARASWATI: fix wave A (I1) — the key provider generates a key only when the
-// alias is genuinely absent. Regenerating over an alias that exists but could
-// not be loaded just now would make every sealed value permanently unreadable.
+// SARASWATI: fix wave A (I1), wave B2 — the key provider generates a key only when
+// the Keystore reports, without an error, that nothing is stored under the alias
+// (KeyStore.getKey returns null). Generating over a key that exists but could not
+// be loaded just now would make every sealed value permanently unreadable, and
+// containsAlias is not trusted for this: it can swallow a transient error and
+// answer false for a key that is there.
 package com.metrolist.music.saraswati.security
 
 import org.junit.Assert.assertEquals
@@ -14,91 +17,77 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 import java.security.KeyStoreException
+import java.security.UnrecoverableKeyException
+import java.util.concurrent.CyclicBarrier
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import javax.crypto.SecretKey
 import javax.crypto.spec.SecretKeySpec
 
 class AndroidKeystoreKeyProviderTest {
     private val aKey: SecretKey = SecretKeySpec(ByteArray(32), "AES")
 
+    /** A Keystore with one slot: [load] reads it, [generate] fills it, as the real one does. */
     private class FakeKeyStore(
-        var contains: () -> Boolean,
-        var load: () -> SecretKey?,
-        var generated: SecretKey,
+        var stored: SecretKey? = null,
+        var load: (SecretKey?) -> SecretKey? = { it },
+        var generated: SecretKey = SecretKeySpec(ByteArray(32) { 9 }, "AES"),
+        var generateDelayMs: Long = 0,
     ) : KeyStoreAccess {
-        var generateCalls = 0
+        @Volatile var generateCalls = 0
 
-        override fun containsAlias(): Boolean = contains()
-
-        override fun load(): SecretKey? = load.invoke()
+        override fun load(): SecretKey? = load.invoke(stored)
 
         override fun generate(): SecretKey {
             generateCalls++
+            if (generateDelayMs > 0) Thread.sleep(generateDelayMs)
+            stored = generated
             return generated
         }
     }
 
-    private fun provider(store: KeyStoreAccess) = AndroidKeystoreKeyProvider("alias", store)
+    private fun provider(store: KeyStoreAccess) = AndroidKeystoreKeyProvider(store)
 
     @Test
     fun `an existing key is loaded and nothing is generated`() {
-        val store = FakeKeyStore({ true }, { aKey }, SecretKeySpec(ByteArray(32) { 1 }, "AES"))
+        val store = FakeKeyStore(stored = aKey)
 
         assertSame(aKey, provider(store).key())
         assertEquals(0, store.generateCalls)
     }
 
     @Test
-    fun `a missing alias generates exactly one key`() {
+    fun `an alias with no key generates exactly one key, and the next call loads it`() {
         val fresh = SecretKeySpec(ByteArray(32) { 2 }, "AES")
-        val store = FakeKeyStore({ false }, { error("must not load an absent alias") }, fresh)
+        val store = FakeKeyStore(generated = fresh)
+        val provider = provider(store)
 
-        assertSame(fresh, provider(store).key())
+        assertSame(fresh, provider.key())
+        assertSame(fresh, provider.key())
+
         assertEquals(1, store.generateCalls)
     }
 
     @Test
-    fun `an alias that exists but cannot be loaded is an error, never a new key`() {
-        val store = FakeKeyStore({ true }, { null }, aKey)
+    fun `a Keystore that throws while loading never generates, whatever it throws`() {
+        for (failure in listOf<Exception>(KeyStoreException("not ready"), UnrecoverableKeyException("busy"), java.security.ProviderException("died"), IllegalStateException("odd"))) {
+            val store = FakeKeyStore(stored = aKey, load = { throw failure })
 
-        try {
-            provider(store).key()
-            fail("expected the provider to refuse")
-        } catch (e: KeyStoreException) {
-            assertTrue(e.message!!.contains("could not be loaded"))
+            try {
+                provider(store).key()
+                fail("expected the failure to propagate: $failure")
+            } catch (e: Exception) {
+                assertSame(failure, e)
+            }
+            assertEquals("regenerating would orphan every sealed value: $failure", 0, store.generateCalls)
+            assertSame("the stored key is untouched: $failure", aKey, store.stored)
         }
-        assertEquals("regenerating would orphan every sealed value", 0, store.generateCalls)
-    }
-
-    @Test
-    fun `a Keystore that throws while looking for the alias never generates`() {
-        val store = FakeKeyStore({ throw KeyStoreException("not ready") }, { aKey }, aKey)
-
-        try {
-            provider(store).key()
-            fail("expected the failure to propagate")
-        } catch (e: KeyStoreException) {
-            assertEquals("not ready", e.message)
-        }
-        assertEquals(0, store.generateCalls)
-    }
-
-    @Test
-    fun `a Keystore that throws while loading never generates`() {
-        val store = FakeKeyStore({ true }, { throw java.security.UnrecoverableKeyException("busy") }, aKey)
-
-        try {
-            provider(store).key()
-            fail("expected the failure to propagate")
-        } catch (e: java.security.UnrecoverableKeyException) {
-            // expected
-        }
-        assertEquals(0, store.generateCalls)
     }
 
     @Test
     fun `a transient failure heals on the next call without having generated`() {
         var failing = true
-        val store = FakeKeyStore({ if (failing) throw KeyStoreException("hiccup") else true }, { aKey }, aKey)
+        val store = FakeKeyStore(stored = aKey, load = { if (failing) throw KeyStoreException("hiccup") else it })
         val provider = provider(store)
 
         runCatching { provider.key() }
@@ -106,5 +95,52 @@ class AndroidKeystoreKeyProviderTest {
 
         assertSame(aKey, provider.key())
         assertEquals(0, store.generateCalls)
+    }
+
+    @Test
+    fun `a failure in generating is the caller's, and the next call generates again`() {
+        var failures = 1
+        val store = FakeKeyStore()
+        val failingOnce =
+            object : KeyStoreAccess {
+                override fun load() = store.load()
+
+                override fun generate(): SecretKey {
+                    if (failures-- > 0) throw KeyStoreException("no space")
+                    return store.generate()
+                }
+            }
+        val provider = provider(failingOnce)
+
+        try {
+            provider.key()
+            fail("expected the failure")
+        } catch (e: KeyStoreException) {
+            assertTrue(e.message!!.contains("no space"))
+        }
+
+        assertSame(store.generated, provider.key())
+        assertEquals(1, store.generateCalls)
+    }
+
+    @Test
+    fun `two threads on a fresh Keystore generate one key between them`() {
+        val store = FakeKeyStore(generateDelayMs = 150)
+        val provider = provider(store)
+        val barrier = CyclicBarrier(2)
+        val pool = Executors.newFixedThreadPool(2)
+        try {
+            val keys = List(2) { pool.submit<SecretKey> { barrier.await(); provider.key() } }.map { it.get(10, TimeUnit.SECONDS) }
+
+            assertEquals("a second generate would overwrite the first key", 1, store.generateCalls)
+            assertSame(keys[0], keys[1])
+        } finally {
+            pool.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `key is synchronized`() {
+        assertTrue(java.lang.reflect.Modifier.isSynchronized(AndroidKeystoreKeyProvider::class.java.getDeclaredMethod("key").modifiers))
     }
 }

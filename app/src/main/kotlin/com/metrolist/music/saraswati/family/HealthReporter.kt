@@ -57,7 +57,10 @@ class HealthReporter
                 try {
                     val session = family.session() ?: return@withContext
                     if (!throttle.tryAcquire()) return@withContext
-                    hub.reportHealth(session.sessionToken, session.deviceId, versionCode, versionName, timezone())
+                    val answer = hub.reportHealth(session.sessionToken, session.deviceId, versionCode, versionName, timezone())
+                    // SARASWATI: fix wave B2 — an accepted report proves the session works, so it resets the run of
+                    // 401s. A failed one (a 401 included) is not counted: the heartbeat never ends a pairing.
+                    if (answer.isSuccess) family.resetUnauthorizedStrikes()
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
