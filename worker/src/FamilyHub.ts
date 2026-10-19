@@ -8,18 +8,31 @@ type AuthResult =
   | { role: "device"; deviceId: string }
   | null;
 
-interface PairingTokenRow {
+// Row shapes extend Record<string, SqlStorageValue> (rather than being
+// plain interfaces) because SqlStorage.exec<T>()'s generic constraint
+// requires an explicit index signature, not just structurally-compatible
+// named properties.
+interface PairingTokenRow extends Record<string, SqlStorageValue> {
   token: string;
   expiresAt: number;
   usedAt: number | null;
 }
 
-interface RosterRow {
+interface RosterRow extends Record<string, SqlStorageValue> {
   deviceId: string;
   deviceName: string | null;
   status: string;
   sessionToken: string | null;
   approvedAt: number | null;
+}
+
+interface RosterStatusRow extends Record<string, SqlStorageValue> {
+  deviceId: string;
+  status: string;
+}
+
+interface RosterIdRow extends Record<string, SqlStorageValue> {
+  deviceId: string;
 }
 
 function randomHex(byteLength: number): string {
@@ -204,7 +217,7 @@ export class FamilyHub extends DurableObject<Env> {
     }
 
     const rows = this.ctx.storage.sql
-      .exec<Pick<RosterRow, "deviceId" | "status">>(
+      .exec<RosterStatusRow>(
         "SELECT deviceId, status FROM roster WHERE deviceId = ?",
         deviceId,
       )
@@ -236,7 +249,7 @@ export class FamilyHub extends DurableObject<Env> {
     }
 
     const rows = this.ctx.storage.sql
-      .exec<Pick<RosterRow, "deviceId">>(
+      .exec<RosterIdRow>(
         "SELECT deviceId FROM roster WHERE deviceId = ?",
         deviceId,
       )
