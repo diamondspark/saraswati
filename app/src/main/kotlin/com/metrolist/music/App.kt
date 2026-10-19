@@ -29,6 +29,7 @@ import com.metrolist.kugou.KuGou
 import com.metrolist.lastfm.LastFM
 import com.metrolist.music.BuildConfig
 import com.metrolist.music.saraswati.SaraswatiFeatures
+import com.metrolist.music.saraswati.car.FileCarHomeStore
 import com.metrolist.music.saraswati.saral.SaralActive
 import com.metrolist.music.saraswati.security.OpenResult
 import com.metrolist.music.saraswati.security.SaraswatiVault
@@ -427,6 +428,10 @@ class App :
             } else {
                 Timber.d("forgetAccount: DataStore preferences cleared")
             }
+
+            // SARASWATI: fix wave B2 — the car's Home tab keeps the last suggestions YouTube gave this
+            // account in a file; they go with the account.
+            FileCarHomeStore.forget(context)
 
             // Immediately clear YouTube object's auth state
             Timber.d("forgetAccount: Clearing YouTube object auth state")

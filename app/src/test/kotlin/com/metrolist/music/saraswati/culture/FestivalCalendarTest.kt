@@ -252,4 +252,103 @@ class FestivalCalendarTest {
         assertNotNull(FestivalCalendar.current(LocalDate.parse("2026-10-19")))
         assertEquals("Navratri", FestivalCalendar.current(LocalDate.parse("2026-10-19"))?.name)
     }
+
+    // --- SARASWATI: fix wave B2 (M6) — the last day of Navratri is Dussehra ---------------------------------
+
+    @Test
+    fun `the last day of Navratri greets with Vijayadashami, every year, and no other day does`() {
+        for (window in pinned.filter { it.name == "Navratri" }) {
+            val last = FestivalCalendar.current(window.end)!!
+            assertEquals("Happy Dussehra!", last.greetingEn)
+            assertEquals("विजयादशमी की शुभकामनाएं!", last.greetingHi)
+            assertEquals("the banner title carries both", "Happy Dussehra! · विजयादशमी की शुभकामनाएं", last.bannerTitle())
+            assertEquals("still the Navratri festival, with its own radio", "Navratri songs", last.radioQuery)
+
+            val eve = FestivalCalendar.current(window.end.minusDays(1))!!
+            assertEquals("Happy Navratri!", eve.greetingEn)
+            assertEquals("नवरात्रि की शुभकामनाएं!", eve.greetingHi)
+            assertEquals("Happy Navratri!", FestivalCalendar.current(window.start)!!.greetingEn)
+        }
+    }
+
+    @Test
+    fun `no other festival has a different greeting on its last day`() {
+        for (window in pinned.filter { it.name != "Navratri" }) {
+            val last = FestivalCalendar.current(window.end)!!
+            val first = FestivalCalendar.current(window.start)!!
+            assertEquals(window.name, first.greetingHi, last.greetingHi)
+            assertEquals(window.name, first.greetingEn, last.greetingEn)
+        }
+    }
+
+    // --- SARASWATI: fix wave B2 (M5) — the zone is read when the day is worked out, not once -----------------
+
+    @Test
+    fun `the clock is asked again each time, so a phone that changed time zone gets the new zone's day`() {
+        val instant = Instant.parse("2026-11-06T02:00:00Z")
+        var zone = ZoneId.of("Asia/Kolkata")
+        val clock = FestivalClock({ Clock.fixed(instant, zone) })
+
+        assertEquals("07:30 on 6 November in India: the first day of Diwali", "Diwali", clock.current()?.name)
+
+        zone = ZoneId.of("America/Los_Angeles")
+
+        assertNull("18:00 on 5 November in California: not yet", clock.current())
+    }
+
+    @Test
+    fun `the flow asks the clock each time round too`() {
+        val instant = Instant.parse("2026-11-06T02:00:00Z")
+        var zone = ZoneId.of("America/Los_Angeles")
+
+        assertNull(runBlocking { currentFestivalFlow { Clock.fixed(instant, zone) }.first() })
+        zone = ZoneId.of("Asia/Kolkata")
+        assertEquals("Diwali", runBlocking { currentFestivalFlow { Clock.fixed(instant, zone) }.first() }?.name)
+    }
+
+    @Test
+    fun `the default clock is built per call, not once`() {
+        val source = java.io.File("src/main/kotlin/com/metrolist/music/saraswati/culture/FestivalCalendar.kt")
+            .takeIf { it.isFile }
+            ?: java.io.File("app/src/main/kotlin/com/metrolist/music/saraswati/culture/FestivalCalendar.kt")
+        val text = source.readText()
+
+        assertTrue(text.contains("clock: () -> Clock = { Clock.systemDefaultZone() }"))
+        assertTrue("no field holds a zone for good", !Regex("""val\s+\w+\s*=\s*Clock\.systemDefaultZone\(\)""").containsMatchIn(text))
+    }
+
+    // --- SARASWATI: fix wave B2 (M2) — the table is hand-sourced and runs out -----------------------------------
+
+    /** True once [today] is within six months of the day the table ends. */
+    private fun tableNearlyOut(
+        today: LocalDate,
+        tableEnds: LocalDate,
+    ) = !today.isBefore(tableEnds.minusMonths(6))
+
+    @Test
+    fun `the reminder fires six months before the table ends, not before`() {
+        val ends = LocalDate.parse("2028-10-19")
+
+        assertTrue(!tableNearlyOut(LocalDate.parse("2028-04-18"), ends))
+        assertTrue(tableNearlyOut(LocalDate.parse("2028-04-19"), ends))
+        assertTrue(tableNearlyOut(LocalDate.parse("2028-10-19"), ends))
+        assertTrue(tableNearlyOut(LocalDate.parse("2029-01-01"), ends))
+    }
+
+    @Test
+    fun `the table ends on 2028-10-19`() {
+        assertEquals(LocalDate.parse("2028-10-19"), festivals.maxOf { it.endDate })
+    }
+
+    @Test
+    fun `the festival table is not within six months of running out`() {
+        val ends = festivals.maxOf { it.endDate }
+
+        assertTrue(
+            "The festival table ends on $ends and today is ${LocalDate.now()}: extend FestivalCalendar.all (and the pinned " +
+                "copy in this test) with the next years from Drik Panchang before the next release. " +
+                "See docs/release-runbook.md, \"Before every release\".",
+            !tableNearlyOut(LocalDate.now(), ends),
+        )
+    }
 }

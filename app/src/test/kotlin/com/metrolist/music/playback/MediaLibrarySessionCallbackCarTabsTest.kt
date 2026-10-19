@@ -111,4 +111,55 @@ class MediaLibrarySessionCallbackCarTabsTest {
         assertTrue("the seed is read through seedFrom", check >= 0)
         assertTrue("and only then is a radio built", radio > check)
     }
+
+    // --- SARASWATI: fix wave B2 -------------------------------------------------------------------------
+
+    private val homeSnapshot get() = source("src/main/kotlin/com/metrolist/music/saraswati/car/CarHomeSnapshot.kt")
+    private val androidAutoSettings get() = source("src/main/kotlin/com/metrolist/music/ui/screens/settings/AndroidAutoSettings.kt")
+
+    @Test
+    fun `the Home tab is answered from the snapshot, never from the fetch itself`() {
+        assertTrue(callback.contains("homeShelves = { homeSnapshot.current() }"))
+        assertFalse("the tree is not handed the fetch", callback.contains("homeShelves = ::loadHomeShelves"))
+        val fetchSite = Regex("""fetch\s*=\s*::loadHomeShelves""").findAll(callback).count()
+        assertEquals("the fetch is only the snapshot's background refresh", 1, fetchSite)
+    }
+
+    @Test
+    fun `the snapshot's refresh is limited to eight seconds and runs in the background`() {
+        assertTrue(homeSnapshot.contains("withTimeoutOrNull(timeoutMs) { fetch() }"))
+        assertTrue(homeSnapshot.contains("FETCH_TIMEOUT_MS = 8_000L"))
+        assertTrue(homeSnapshot.contains("scope.launch(io) { refresh() }"))
+        val current = bodyOf(homeSnapshot, "fun current()")
+        assertFalse("current() cannot wait", current.contains("runBlocking") || current.contains("await") || current.contains("suspend"))
+    }
+
+    @Test
+    fun `the service tells the car to ask again when Home has a new snapshot`() {
+        assertTrue(service.contains("mediaLibrarySessionCallback.homeChanges.collect"))
+        assertTrue(service.contains("notifyChildrenChanged(MusicService.CAR_HOME"))
+    }
+
+    @Test
+    fun `signing out deletes the kept Home`() {
+        assertTrue(source("src/main/kotlin/com/metrolist/music/App.kt").contains("FileCarHomeStore.forget(context)"))
+    }
+
+    @Test
+    fun `the Android Auto settings no longer offer the dead YouTube-playlists switch, and the key is kept for old backups`() {
+        assertFalse(androidAutoSettings.contains("AndroidAutoYouTubePlaylistsKey"))
+        assertFalse(androidAutoSettings.contains("android_auto_youtube_playlists"))
+        assertTrue(source("src/main/kotlin/com/metrolist/music/constants/PreferenceKeys.kt").contains("val AndroidAutoYouTubePlaylistsKey = booleanPreferencesKey(\"androidAutoYoutubePlaylists\")"))
+    }
+
+    @Test
+    fun `every edit this fork makes to the callback's helpers and imports carries a marker`() {
+        val text = callback
+
+        val drawable = text.indexOf("private fun drawableUri(")
+        assertTrue("drawableUri is marked", text.substring(0, drawable).takeLast(400).contains("SARASWATI"))
+        assertTrue("so is the removed-import note at the top", text.substringBefore("package com.metrolist").contains("SARASWATI"))
+        assertTrue(text.substringBefore("package com.metrolist").contains("ContentResolver"))
+        assertTrue(text.substringBefore("package com.metrolist").contains("YouTube-playlists preference"))
+    }
 }

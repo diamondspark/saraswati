@@ -119,4 +119,41 @@ class FestivalSurfacesTest {
         assertTrue(home["festival_banner_subtitle"]?.second?.contains("%1\$s") == true)
         assertTrue(home.containsKey("festival_radio_failed"))
     }
+
+    // --- SARASWATI: fix wave B2 -------------------------------------------------------------------------------
+
+    private val banner get() = source("src/main/kotlin/com/metrolist/music/saraswati/culture/FestivalBanner.kt")
+
+    @Test
+    fun `the banner title may take three lines, so a long greeting is not cut`() {
+        val title = banner.substringAfter("festival.bannerTitle()").substringBefore("\n")
+
+        assertTrue(title.contains("maxLines = 3"))
+    }
+
+    @Test
+    fun `the banner's Play button is spoken from a string resource, as Play festival music`() {
+        assertTrue(banner.contains("stringResource(R.string.festival_banner_play_desc)"))
+        assertTrue(banner.contains("contentDescription = playLabel"))
+        assertEquals("Play festival music", strings("festival_banner_play_desc")["festival_banner_play_desc"]?.second)
+    }
+
+    @Test
+    fun `Home turns the banner's Play button off for a Listen Together guest, and does nothing if it is pressed anyway`() {
+        val call = home.substring(home.indexOf("FestivalBanner("))
+        val head = call.substringBefore("scope.launch")
+
+        assertTrue(head.contains("enabled = !festivalStarting && !isListenTogetherGuest"))
+        assertTrue(head.contains("if (isListenTogetherGuest) return@FestivalBanner"))
+    }
+
+    @Test
+    fun `Home lists the update classes after the culture and saral ones, in import order`() {
+        val imports = home.lines().filter { it.startsWith("import com.metrolist.music.saraswati.") }
+        val update = imports.indexOfFirst { it.endsWith("update.SaraswatiUpdateHttpFetcher") }
+        val culture = imports.indexOfLast { it.contains(".culture.") }
+        val saral = imports.indexOfLast { it.contains(".saral.") }
+
+        assertTrue("update comes after culture and saral", update > culture && update > saral)
+    }
 }

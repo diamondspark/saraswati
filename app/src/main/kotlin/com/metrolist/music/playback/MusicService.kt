@@ -729,6 +729,13 @@ class MusicService :
                 mediaSession?.notifyChildrenChanged(MusicService.CAR_STATIONS, count, null)
             }
         }
+        // SARASWATI: fix wave B2 — the same for Home, which answers from its last snapshot at once and tells
+        // the car to ask again when a background refresh brought a different one.
+        scope.launch {
+            mediaLibrarySessionCallback.homeChanges.collect { count ->
+                mediaSession?.notifyChildrenChanged(MusicService.CAR_HOME, count, null)
+            }
+        }
         player.repeatMode = startupPrefs!![RepeatModeKey] ?: REPEAT_MODE_OFF
 
         if (startupPrefs!![RememberShuffleAndRepeatKey] ?: true) {

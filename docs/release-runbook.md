@@ -270,6 +270,19 @@ entirely in the owner's hands.
    directory: `shred -u ~/saraswati-keys/*; rmdir ~/saraswati-keys`.
 5. Commit `security/release-cert.sha256`.
 
+### Before every release
+
+- **The festival table.** The Home banner and Saral's ribbon read their dates
+  from `FestivalCalendar.all` (`app/src/main/kotlin/com/metrolist/music/saraswati/culture/FestivalCalendar.kt`).
+  Lunar-calendar dates cannot be computed, so they are typed in from Drik
+  Panchang, and the table currently ends on **2028-10-19** (Diwali 2028). Extend it
+  (and the second, independently typed copy in `FestivalCalendarTest`) with the
+  next years **before 2028-10-19**: after the last entry no festival shows and
+  nothing else says why. The unit test `the festival table is not within six months of running out`
+  starts failing on 2028-04-19 as the reminder: extend the table, do not skip the test.
+- Put "festival table extended through <year>" in the release notes the first time
+  this is done, so the next person can see when it was last looked at.
+
 ### How to release
 
 1. In GitHub: **Actions → saraswati-release → Run workflow**, on

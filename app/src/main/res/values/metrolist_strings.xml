@@ -1157,6 +1157,7 @@
          native-speaker read. -->
     <string name="festival_banner_subtitle">A radio of %1$s favourites, one tap away</string>
     <string name="festival_radio_failed">Couldn\'t start the festival radio</string>
+    <string name="festival_banner_play_desc">Play festival music</string>
     <string name="saral_festival_listen" translatable="false">सुनें</string>
     <string name="saral_festival_ready" translatable="false">त्योहार के गीत तैयार हैं</string>
     <string name="saral_festival_listen_desc" translatable="false">%1$s के गीत सुनें</string>

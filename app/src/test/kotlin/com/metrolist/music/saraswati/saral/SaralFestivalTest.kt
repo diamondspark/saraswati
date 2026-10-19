@@ -253,6 +253,107 @@ class SaralFestivalTest {
         assertEquals(SaralStatus.Starting(festivalSubject()), vm.status.value)
     }
 
+    // --- SARASWATI: fix wave B2 (M1) — the search must not borrow the status of what is already playing ---
+
+    private fun startBollywoodPlaying(vm: SaralViewModel) {
+        vm.onTile(bollywood.id)
+        playback.playingOurs("Kabhi Kabhie")
+        assertEquals(SaralStatus.Playing(SaralSubject.Station(vm.tile(bollywood))), vm.status.value)
+    }
+
+    private fun SaralViewModel.tile(station: Station) = tiles.value.first { it.station.id == station.id }
+
+    @Test
+    fun `while the festival search runs, a station that is playing is not reported as the festival`() {
+        search.gate = CompletableDeferred()
+        search.answers["Diwali songs"] = Result.success(song("seedDiwali01"))
+        val vm = newVm().ready()
+        startBollywoodPlaying(vm)
+
+        vm.onFestivalTapped()
+
+        assertEquals("looking for the songs is starting, not playing", SaralStatus.Starting(festivalSubject()), vm.status.value)
+        assertNull("and the station that is still playing is not ringed as if it were the festival", vm.status.value.stationId())
+        assertEquals("nothing was asked of the player yet", listOf("radio(seedBollyw01)"), playback.calls.toList())
+    }
+
+    @Test
+    fun `the festival radio starts when the song is found, and only then does it become the request`() {
+        val gate = CompletableDeferred<Unit>()
+        search.gate = gate
+        search.answers["Diwali songs"] = Result.success(song("seedDiwali01"))
+        val vm = newVm().ready()
+        startBollywoodPlaying(vm)
+        vm.onFestivalTapped()
+
+        gate.complete(Unit)
+
+        assertEquals(listOf("radio(seedBollyw01)", "radio(seedDiwali01)"), playback.calls.toList())
+        // The player has moved to the festival's queue: its track is ours, the station's is not.
+        playback.playingOurs("Aayi Diwali")
+        assertEquals(SaralStatus.Playing(festivalSubject()), vm.status.value)
+    }
+
+    @Test
+    fun `a festival search that finds nothing says so and does not claim the station that was playing`() {
+        search.answers["Diwali songs"] = Result.success(null)
+        val vm = newVm().ready()
+        startBollywoodPlaying(vm)
+
+        vm.onFestivalTapped()
+
+        assertEquals(SaralStatus.Problem(PlaybackProblem.COULD_NOT_PLAY), vm.status.value)
+        assertEquals(listOf("radio(seedBollyw01)"), playback.calls.toList())
+    }
+
+    @Test
+    fun `a festival search with no signal says so while a station plays`() {
+        search.answers["Diwali songs"] = Result.failure(UnknownHostException("music.youtube.com"))
+        val vm = newVm().ready()
+        startBollywoodPlaying(vm)
+
+        vm.onFestivalTapped()
+
+        assertEquals(SaralStatus.Problem(PlaybackProblem.OFFLINE), vm.status.value)
+    }
+
+    @Test
+    fun `a tile tapped during the search ends the searching status`() {
+        search.gate = CompletableDeferred()
+        val vm = newVm().ready()
+        vm.onFestivalTapped()
+        assertEquals(SaralStatus.Starting(festivalSubject()), vm.status.value)
+
+        vm.onTile(bollywood.id)
+
+        assertEquals(bollywood.id, vm.status.value.stationId())
+        assertTrue(vm.status.value is SaralStatus.Starting)
+        assertEquals(SaralSubject.Station(vm.tile(bollywood)), (vm.status.value as SaralStatus.Starting).subject)
+    }
+
+    @Test
+    fun `the rules put searching ahead of a request the player is already running, and behind a failure`() {
+        val running = SaralPlayerState(mediaId = "m1", title = "Kabhi Kabhie", playing = true, ours = true)
+        val tile = SaralTile(bollywood, null)
+
+        assertEquals(
+            SaralStatus.Starting(festivalSubject()),
+            SaralStatusRules.derive(SaralRequest.Station(tile), running, notice = null, problem = null, searching = diwali),
+        )
+        assertEquals(
+            SaralStatus.Problem(PlaybackProblem.OFFLINE),
+            SaralStatusRules.derive(SaralRequest.Station(tile), running, notice = null, problem = PlaybackProblem.OFFLINE, searching = diwali),
+        )
+        assertEquals(
+            SaralStatus.Voice(VoiceNotice.NOT_HEARD),
+            SaralStatusRules.derive(null, running, notice = VoiceNotice.NOT_HEARD, problem = null, searching = diwali),
+        )
+        assertEquals(
+            SaralStatus.Playing(SaralSubject.Station(tile)),
+            SaralStatusRules.derive(SaralRequest.Station(tile), running, notice = null, problem = null, searching = null),
+        )
+    }
+
     // --- against the other things Saral does ---------------------------------------------
 
     @Test

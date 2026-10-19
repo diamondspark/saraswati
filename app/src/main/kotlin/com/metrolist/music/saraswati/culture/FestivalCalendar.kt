@@ -21,6 +21,11 @@
 //  - Raksha Bandhan and Krishna Janmashtami: the day itself and the day after
 //    (Dahi Handi), which also covers the families that keep Janmashtami a day apart.
 // No two windows overlap in any of the three years.
+//
+// Fix wave B2: the last day of Navratri is Vijayadashami (Dussehra), and that day's
+// greeting says so; the phone's time zone is read each time the day is worked out, not
+// once when the screen was built; and FestivalCalendarTest fails once today is within
+// six months of the end of this table, so the next years get added in time.
 package com.metrolist.music.saraswati.culture
 
 import kotlinx.coroutines.delay
@@ -39,7 +44,18 @@ data class Festival(
     val greetingEn: String,
     val greetingHi: String,
     val radioQuery: String,
-)
+    // The greeting for the festival's last day, when that day is a festival of its own.
+    val lastDayGreetingEn: String? = null,
+    val lastDayGreetingHi: String? = null,
+) {
+    /** This festival as it greets on [day]: the last day may carry its own greeting. */
+    fun onDay(day: LocalDate): Festival =
+        if (day == endDate && lastDayGreetingEn != null && lastDayGreetingHi != null) {
+            copy(greetingEn = lastDayGreetingEn, greetingHi = lastDayGreetingHi)
+        } else {
+            this
+        }
+}
 
 object FestivalCalendar {
     private fun diwali(
@@ -55,7 +71,16 @@ object FestivalCalendar {
     private fun navratri(
         start: String,
         end: String,
-    ) = Festival("Navratri", LocalDate.parse(start), LocalDate.parse(end), "Happy Navratri!", "नवरात्रि की शुभकामनाएं!", "Navratri songs")
+    ) = Festival(
+        "Navratri",
+        LocalDate.parse(start),
+        LocalDate.parse(end),
+        "Happy Navratri!",
+        "नवरात्रि की शुभकामनाएं!",
+        "Navratri songs",
+        lastDayGreetingEn = "Happy Dussehra!",
+        lastDayGreetingHi = "विजयादशमी की शुभकामनाएं!",
+    )
 
     private fun rakshaBandhan(
         start: String,
@@ -107,7 +132,8 @@ object FestivalCalendar {
         )
 
     /** The festival whose window holds [today] (both ends included), or null. */
-    fun current(today: LocalDate = LocalDate.now()): Festival? = all.firstOrNull { !today.isBefore(it.startDate) && !today.isAfter(it.endDate) }
+    fun current(today: LocalDate = LocalDate.now()): Festival? =
+        all.firstOrNull { !today.isBefore(it.startDate) && !today.isAfter(it.endDate) }?.onDay(today)
 }
 
 /** The Home banner's title, as mocked: the English greeting, then the Hindi one without its mark. */
@@ -122,22 +148,31 @@ internal fun millisUntilNextDay(now: ZonedDateTime): Long =
  * collects this only while it is showing starts it afresh on every return, so a phone that
  * slept through midnight shows the right day the moment it wakes.
  */
-internal fun currentFestivalFlow(clock: Clock = Clock.systemDefaultZone()): Flow<Festival?> =
+internal fun currentFestivalFlow(clock: () -> Clock = { Clock.systemDefaultZone() }): Flow<Festival?> =
     flow {
         while (true) {
-            val now = ZonedDateTime.now(clock)
+            // The clock is asked each time round, so a phone whose time zone changed while the screen
+            // was away works out its day in the new zone.
+            val now = ZonedDateTime.now(clock())
             emit(FestivalCalendar.current(now.toLocalDate()))
             delay(millisUntilNextDay(now) + MIDNIGHT_SLACK_MS)
         }
     }.distinctUntilChanged()
 
+internal fun currentFestivalFlow(clock: Clock): Flow<Festival?> = currentFestivalFlow { clock }
+
 private const val MIDNIGHT_SLACK_MS = 1_000L
 
-/** Reads the day from a clock, so a test can pick it. */
+/**
+ * Reads the day from a clock, so a test can pick it. [clock] is asked on every read: the default is the system
+ * clock in whatever zone the phone is in at that moment, not the zone it was in when this was built.
+ */
 class FestivalClock(
-    private val clock: Clock = Clock.systemDefaultZone(),
+    private val clock: () -> Clock = { Clock.systemDefaultZone() },
 ) {
-    fun current(): Festival? = FestivalCalendar.current(LocalDate.now(clock))
+    constructor(clock: Clock) : this({ clock })
+
+    fun current(): Festival? = FestivalCalendar.current(LocalDate.now(clock()))
 
     fun changes(): Flow<Festival?> = currentFestivalFlow(clock)
 }
