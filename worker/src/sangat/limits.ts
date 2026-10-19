@@ -40,16 +40,25 @@ export const ENVELOPE_TYPE_MAX = 64;
 
 // Rates (metroserver)
 export const RATE_LIMIT_MESSAGES_PER_SECOND = 60;
+export const RATE_LIMIT_WINDOW_MS = 1000;
 export const RATE_LIMITED_ERROR_CODE = "rate_limited";
+export const RATE_LIMITED_MESSAGE = "Too many messages";
 export const REQUEST_SYNC_MIN_INTERVAL_MS = 1000;
 
 // Gzip a payload only when it is over this many bytes and gzip makes it
 // smaller (metroserver).
 export const COMPRESSION_THRESHOLD_BYTES = 100;
 
+// A socket that sends nothing for this long is dropped. The Android client pings
+// every 25 s, so this is three missed pings (Saraswati; metroserver's own read
+// deadline is 60 s).
+export const IDLE_TIMEOUT_MS = 75_000;
+
 // WebSocket close codes (Saraswati)
 export const CLOSE_DEVICE_REVOKED = 4001;
 export const CLOSE_SANGAT_DISABLED = 4003;
+export const CLOSE_GOING_AWAY = 1001;
+export const CLOSE_REASON_IDLE = "idle";
 
 // Phase 4 hub routes (Saraswati)
 export const PLAYLIST_ID_PATTERN = /^[A-Za-z0-9_-]{10,64}$/;

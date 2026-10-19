@@ -185,3 +185,9 @@ export function removeFromRoom(store: Store, room: Room, member: Member, now: nu
   }
   return outs;
 }
+
+/** A member of this room who is connected, or null (a seat inside its reconnect grace is not one). */
+export function connectedMemberOf(store: Store, roomCode: string, userId: string): Member | null {
+  const member = store.member(userId);
+  return member && member.connected && member.roomCode === roomCode ? member : null;
+}

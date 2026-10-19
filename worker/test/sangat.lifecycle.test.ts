@@ -7,7 +7,9 @@ import {
 } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { EnvelopeSchema, PingPayloadSchema, RoomStateSchema, type RoomState } from "../src/gen/listentogether_pb";
+import { IDLE_TIMEOUT_MS } from "../src/sangat/limits";
 import { createSangatTables } from "../src/sangat/schema";
+import { Store } from "../src/sangat/store";
 import {
   closeAllClients,
   createRoom,
@@ -50,6 +52,27 @@ async function age(hub: Hub, table: "sangat_members" | "sangat_rooms", column: s
 
 const getAlarm = (hub: Hub) => runInDurableObject(hub, (_instance, state) => state.storage.getAlarm());
 
+/**
+ * The stored deadline (a member's grace or a room's cleanup) is `stored`, and the
+ * alarm is the earlier of that and the moment the quietest open socket would
+ * count as idle.
+ */
+async function expectAlarm(hub: Hub, stored: number | null) {
+  const { actual, idle } = await runInDurableObject(hub, (_instance, state) => {
+    let earliest: number | null = null;
+    for (const ws of state.getWebSockets()) {
+      const att = ws.deserializeAttachment() as { lastSeen?: number; closed?: boolean };
+      if (ws.readyState !== 1 || att.closed || att.lastSeen === undefined) continue;
+      const at = att.lastSeen + IDLE_TIMEOUT_MS;
+      if (earliest === null || at < earliest) earliest = at;
+    }
+    return { actual: new Store(state.storage).nextDeadline(), idle: earliest };
+  });
+  expect(actual).toBe(stored);
+  const wanted = stored === null ? idle : idle === null ? stored : Math.min(stored, idle);
+  expect(await getAlarm(hub)).toBe(wanted);
+}
+
 const track = (n: number) => ({
   id: `trk-${n}`,
   title: `Raag Number ${n}`,
@@ -90,7 +113,7 @@ describe("disconnects", () => {
       ["Asha", true],
       ["Bharat", false],
     ]);
-    expect(await getAlarm(hub)).toBe((row?.disconnectedAt as number) + GRACE);
+    await expectAlarm(hub, (row?.disconnectedAt as number) + GRACE);
   });
 
   it("a host's close is recorded on the room, and join requests wait for the host", async () => {
@@ -149,7 +172,7 @@ describe("reconnect", () => {
     });
     expect(await member(hub, bharat.userId)).toMatchObject({ connected: 1, disconnectedAt: null });
     // Nothing left to expire.
-    expect(await getAlarm(hub)).toBeNull();
+    await expectAlarm(hub, null);
   });
 
   it("reconnect after 15 minutes answers session_expired", async () => {
@@ -193,7 +216,7 @@ describe("reconnect", () => {
       code: "session_not_found",
       message: "Session not found or expired",
     });
-    expect(await getAlarm(hub)).toBeNull();
+    await expectAlarm(hub, null);
   });
 
   it("a token is bound to its device: another device cannot take the session over", async () => {
@@ -328,7 +351,7 @@ describe("expiry and the alarm", () => {
 
     const emptied = await readRoom(hub, host.code);
     expect(emptied?.emptySince).toBeGreaterThan(0);
-    expect(await getAlarm(hub)).toBe((emptied?.emptySince as number) + EMPTY_CLEANUP);
+    await expectAlarm(hub, (emptied?.emptySince as number) + EMPTY_CLEANUP);
     // Still there, but not a room anyone can reach.
     const stranger = await SangatClient.connect(hub, device.token);
     await stranger.send("join_room", { room_code: host.code, username: "Asha" });
@@ -338,7 +361,7 @@ describe("expiry and the alarm", () => {
     expect(await runDurableObjectAlarm(hub)).toBe(true);
 
     expect(await readRoom(hub, host.code)).toBeNull();
-    expect(await getAlarm(hub)).toBeNull();
+    await expectAlarm(hub, null);
   });
 
   it("a room whose last member expires is emptied the same way", async () => {
@@ -354,13 +377,13 @@ describe("expiry and the alarm", () => {
     const emptied = await readRoom(hub, host.code);
     expect(emptied?.emptySince).toBeGreaterThan(0);
     expect(await member(hub, host.userId)).toBeNull();
-    expect(await getAlarm(hub)).toBe((emptied?.emptySince as number) + EMPTY_CLEANUP);
+    await expectAlarm(hub, (emptied?.emptySince as number) + EMPTY_CLEANUP);
   });
 
   it("the alarm is always the earliest pending deadline", async () => {
     const hub = hubStub();
     const [a, b, d] = await Promise.all(["a", "b", "d"].map((n) => seedDevice(hub, n)));
-    expect(await getAlarm(hub)).toBeNull();
+    await expectAlarm(hub, null);
     const one = await createRoom(hub, a, "Asha");
     const bharat = await joinAndApprove(hub, one.client, one.code, b, "Bharat");
     await one.client.next("user_joined");
@@ -369,7 +392,7 @@ describe("expiry and the alarm", () => {
     bharat.client.close();
     await one.client.next("user_disconnected");
     const first = (await member(hub, bharat.userId))?.disconnectedAt as number;
-    expect(await getAlarm(hub)).toBe(first + GRACE);
+    await expectAlarm(hub, first + GRACE);
 
     // A later disconnect must not push the alarm back.
     await sleep(25);
@@ -377,32 +400,32 @@ describe("expiry and the alarm", () => {
     await sleep(100);
     const hostRow = (await member(hub, one.userId))?.disconnectedAt as number;
     expect(hostRow).toBeGreaterThan(first);
-    expect(await getAlarm(hub)).toBe(first + GRACE);
+    await expectAlarm(hub, first + GRACE);
 
     // When the earliest member is back, the next one becomes the deadline.
     const bharatAgain = await SangatClient.connect(hub, b.token);
     await bharatAgain.send("reconnect", { session_token: bharat.token });
     await bharatAgain.next("reconnected");
-    expect(await getAlarm(hub)).toBe(hostRow + GRACE);
+    await expectAlarm(hub, hostRow + GRACE);
 
     // A room that has just been emptied (5 minutes) comes before a 15 minute grace.
     const dev = await createRoom(hub, d, "Dev");
     await dev.client.send("leave_room");
     await sleep(50);
     const emptySince = (await readRoom(hub, dev.code))?.emptySince as number;
-    expect(await getAlarm(hub)).toBe(Math.min(emptySince + EMPTY_CLEANUP, hostRow + GRACE));
+    await expectAlarm(hub, Math.min(emptySince + EMPTY_CLEANUP, hostRow + GRACE));
     expect(emptySince + EMPTY_CLEANUP).toBeLessThan(hostRow + GRACE);
 
     // Once that room is gone, back to the member's grace.
     await age(hub, "sangat_rooms", "emptySince", dev.code, EMPTY_CLEANUP + MINUTE);
     await runDurableObjectAlarm(hub);
-    expect(await getAlarm(hub)).toBe(hostRow + GRACE);
+    await expectAlarm(hub, hostRow + GRACE);
 
     // And with no deadlines left there is no alarm at all.
     const hostAgain = await SangatClient.connect(hub, a.token);
     await hostAgain.send("reconnect", { session_token: one.token });
     await hostAgain.next("reconnected");
-    expect(await getAlarm(hub)).toBeNull();
+    await expectAlarm(hub, null);
   });
 
   it("when the host's 15-minute grace expires, the earliest-joined connected member becomes host and everyone gets host_changed", async () => {

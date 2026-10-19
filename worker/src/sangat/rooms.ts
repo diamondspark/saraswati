@@ -9,10 +9,14 @@ import {
   JoinApprovedPayloadSchema,
   JoinRejectedPayloadSchema,
   JoinRequestPayloadSchema,
+  HostChangedPayloadSchema,
   JoinRoomPayloadSchema,
+  KickedPayloadSchema,
+  KickUserPayloadSchema,
   RejectJoinPayloadSchema,
   RoomCreatedPayloadSchema,
   RoomStateSchema,
+  TransferHostPayloadSchema,
   UserJoinedPayloadSchema,
   UserInfoSchema,
 } from "../gen/listentogether_pb";
@@ -27,6 +31,7 @@ import {
 import {
   addUser,
   connectedIds,
+  connectedMemberOf,
   currentRoom,
   decode,
   fail,
@@ -36,6 +41,7 @@ import {
   message,
   removeFromRoom,
   send,
+  setHost,
   toAll,
 } from "./roomOps";
 import { sanitizeString } from "./sanitize";
@@ -43,6 +49,8 @@ import type { Room } from "./store";
 import type { Handler } from "./types";
 
 const ROOM_CODE_ATTEMPTS = 100;
+const KICK_REASON_MAX = 200;
+const DEFAULT_KICK_REASON = "You have been kicked from the room";
 
 export const handleCreateRoom: Handler = (rt, conn, payload) => {
   const { store } = rt;
@@ -218,4 +226,48 @@ export const handleLeaveRoom: Handler = (rt, conn) => {
     return [];
   }
   return removeFromRoom(store, current.room, current.member, rt.now());
+};
+
+// Only a connected member can be kicked: a seat inside its reconnect grace is
+// not among the room's clients, as in metroserver. The kicked member's seat and
+// token are deleted; everyone who remains (the host included) hears user_left.
+export const handleKickUser: Handler = (rt, conn, payload) => {
+  const { store } = rt;
+  const me = conn.att.userId;
+  const p = decode(KickUserPayloadSchema, payload);
+  if (!p) return [fail(me, "invalid_payload", "Invalid kick user payload")];
+  if (p.userId === "") return [fail(me, "missing_user_id", "User ID is required")];
+  const current = currentRoom(store, me);
+  if (!current) return [fail(me, "not_in_room", "You are not in a room")];
+  const { room } = current;
+  if (!isActiveHost(room, me)) return [fail(me, "not_host", "Only the host can kick users")];
+  if (p.userId === me) return [fail(me, "cannot_kick_self", "You cannot kick yourself")];
+  const target = connectedMemberOf(store, room.code, p.userId);
+  if (!target) return [fail(me, "user_not_found", "User not found in room")];
+
+  const reason = sanitizeString(p.reason, KICK_REASON_MAX) || DEFAULT_KICK_REASON;
+  return [
+    send(target.userId, "kicked", KickedPayloadSchema, { reason }),
+    ...removeFromRoom(store, room, target, rt.now()),
+  ];
+};
+
+export const handleTransferHost: Handler = (rt, conn, payload) => {
+  const { store } = rt;
+  const me = conn.att.userId;
+  const p = decode(TransferHostPayloadSchema, payload);
+  if (!p) return [fail(me, "invalid_payload", "Invalid transfer host payload")];
+  if (p.newHostId === "") return [fail(me, "missing_user_id", "New host user ID is required")];
+  const current = currentRoom(store, me);
+  if (!current) return [fail(me, "not_in_room", "You are not in a room")];
+  const { room } = current;
+  if (!isActiveHost(room, me)) return [fail(me, "not_host", "Only the host can transfer ownership")];
+  if (p.newHostId === me) return [fail(me, "cannot_transfer_to_self", "You are already the host")];
+  const target = connectedMemberOf(store, room.code, p.newHostId);
+  if (!target) return [fail(me, "user_not_found", "Target user not found in room")];
+
+  setHost(store, room, target);
+  store.saveRoom(room);
+  const changed = message(HostChangedPayloadSchema, { newHostId: target.userId, newHostName: target.username });
+  return toAll(connectedIds(store, room.code), "host_changed", changed);
 };

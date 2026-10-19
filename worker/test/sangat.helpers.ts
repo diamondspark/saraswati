@@ -225,3 +225,23 @@ export async function joinAndApprove(
   const approved = await client.next("join_approved");
   return { client, userId: approved.payload.user_id, token: approved.payload.session_token };
 }
+
+/**
+ * A host plus guests in join order, each on their own approved device. Frames
+ * announcing the joins (user_joined) are consumed, so the next frame any client
+ * reads is whatever the test provokes.
+ */
+export async function openFamily(hub: Hub, names = ["a", "b", "c"], hostName = "Asha") {
+  const guestNames = ["Bharat", "Charu", "Dev"];
+  const devices = await Promise.all(names.map((name) => seedDevice(hub, name)));
+  const host = await createRoom(hub, devices[0], hostName);
+  const guests: { client: SangatClient; userId: string; token: string; name: string }[] = [];
+  for (let i = 1; i < devices.length; i++) {
+    const name = guestNames[i - 1];
+    const guest = await joinAndApprove(hub, host.client, host.code, devices[i], name);
+    await host.client.next("user_joined");
+    for (const earlier of guests) await earlier.client.next("user_joined");
+    guests.push({ ...guest, name });
+  }
+  return { devices, host, guests };
+}

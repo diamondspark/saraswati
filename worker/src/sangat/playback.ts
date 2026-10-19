@@ -4,6 +4,8 @@
 
 import { clone, toBinary } from "@bufbuild/protobuf";
 import {
+  BufferCompletePayloadSchema,
+  BufferReadyPayloadSchema,
   PlaybackActionPayloadSchema,
   SyncStatePayloadSchema,
   TrackInfoSchema,
@@ -183,6 +185,39 @@ export const handlePlaybackAction: Handler = (rt, conn, payload) => {
   p.serverTime = nowMs;
   store.saveRoom(room);
   return toAll(connectedIds(store, room.code), "sync_playback", toBinary(PlaybackActionPayloadSchema, p));
+};
+
+// buffer_ready: the sender has buffered the current track and is told where to
+// start: a seek to the live position, the room's play or pause, then
+// buffer_complete, to the sender alone. metroserver has a path that holds
+// everyone until all members are ready (buffer_wait), but it never fills the set
+// of members to wait for, so it is never taken and is not ported.
+export const handleBufferReady: Handler = (rt, conn, payload) => {
+  const { store } = rt;
+  const me = conn.att.userId;
+  const p = decode(BufferReadyPayloadSchema, payload);
+  if (!p) return [fail(me, "invalid_payload", "Invalid buffer ready payload")];
+  if (p.trackId === "") return [fail(me, "missing_track_id", "Track ID is required")];
+  const current = currentRoom(store, me);
+  if (!current) return [fail(me, "not_in_room", "You are not in a room")];
+
+  const { state } = current.room;
+  if (!state.currentTrack || p.trackId !== state.currentTrack.id) {
+    return [fail(me, "stale_track", "Buffer readiness targets a stale track")];
+  }
+
+  const nowMs = BigInt(rt.now());
+  const at = {
+    trackId: state.currentTrack.id,
+    position: livePosition(state, nowMs),
+    serverTime: nowMs,
+    revision: state.revision,
+  };
+  return [
+    send(me, "sync_playback", PlaybackActionPayloadSchema, { action: "seek", ...at }),
+    send(me, "sync_playback", PlaybackActionPayloadSchema, { action: state.isPlaying ? "play" : "pause", ...at }),
+    send(me, "buffer_complete", BufferCompletePayloadSchema, { trackId: at.trackId }),
+  ];
 };
 
 export const handleRequestSync: Handler = (rt, conn) => {

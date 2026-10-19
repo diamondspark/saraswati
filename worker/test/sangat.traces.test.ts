@@ -7,9 +7,8 @@ import { SCENARIO_NAMES } from "./traces/scenarios.ts";
 // what the Go server sent three clients for one scenario, normalized. The
 // Worker must send the same messages, in the same order per client.
 //
-// Run with `npm run test:traces` (vitest.traces.config.ts). These are kept out of
-// the default `npx vitest run` while /ws is still being built (Tasks 4 and 5);
-// once all 19 pass, drop the exclude in vitest.config.ts.
+// They run with the rest of the suite (`npx vitest run`), so a change that breaks
+// parity fails the default gate.
 //
 // To re-record the goldens, run metroserver in Docker and point the recorder at it;
 // the instructions are in scripts/record-traces.ts.

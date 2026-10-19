@@ -6,7 +6,6 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "test:traces": "vitest run --config vitest.traces.config.ts",
     "traces:record": "node --experimental-strip-types scripts/record-traces.ts",
     "gen": "buf generate ../app/src/main/proto --template buf.gen.yaml",
     "gen:check": "d=$(mktemp -d) && trap 'rm -rf \"$d\"' EXIT && buf generate ../app/src/main/proto --template buf.gen.yaml --output \"$d\" && diff -r \"$d/src/gen\" src/gen",

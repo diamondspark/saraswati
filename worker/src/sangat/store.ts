@@ -112,6 +112,15 @@ const toMember = (row: MemberRow): Member => ({
   disconnectedAt: row.disconnectedAt,
 });
 
+const toSuggestion = (row: SuggestionRow): Suggestion => ({
+  id: row.id,
+  roomCode: row.roomCode,
+  fromUserId: row.fromUserId,
+  fromUsername: row.fromUsername,
+  track: fromBinary(TrackInfoSchema, new Uint8Array(row.track)),
+  createdAt: row.createdAt,
+});
+
 export class Store {
   constructor(private readonly storage: DurableObjectStorage) {}
 
@@ -406,14 +415,15 @@ export class Store {
         roomCode,
       )
       .toArray()
-      .map((row) => ({
-        id: row.id,
-        roomCode: row.roomCode,
-        fromUserId: row.fromUserId,
-        fromUsername: row.fromUsername,
-        track: fromBinary(TrackInfoSchema, new Uint8Array(row.track)),
-        createdAt: row.createdAt,
-      }));
+      .map(toSuggestion);
+  }
+
+  /** A pending suggestion of this room; one id from another room is not found. */
+  suggestion(roomCode: string, id: string): Suggestion | null {
+    const row = this.sql
+      .exec<SuggestionRow>("SELECT * FROM sangat_suggestions WHERE roomCode = ? AND id = ?", roomCode, id)
+      .toArray()[0];
+    return row ? toSuggestion(row) : null;
   }
 
   suggestionCount(roomCode: string): number {
@@ -436,6 +446,10 @@ export class Store {
       blob(toBinary(TrackInfoSchema, suggestion.track)),
       suggestion.createdAt,
     );
+  }
+
+  deleteSuggestion(id: string): void {
+    this.sql.exec("DELETE FROM sangat_suggestions WHERE id = ?", id);
   }
 
   deleteSuggestionsOfRoom(roomCode: string): void {

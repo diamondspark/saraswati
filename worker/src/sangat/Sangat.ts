@@ -1,10 +1,11 @@
 // Sangat (listen together) inside the FamilyHub Durable Object.
 //
 // Sockets use the WebSocket Hibernation API, so the object can be evicted
-// between messages: a socket's identity ({userId, deviceId, ...}) lives in its
-// serialized attachment and every room, member, pending join and suggestion
-// lives in SQLite. The only state kept in memory is a message queue, a
-// per-socket throttle and a cache of the alarm time, all rebuildable.
+// between messages: a socket's identity ({userId, deviceId, ...}), its rate-limit
+// window and the time it was last heard from live in its serialized attachment,
+// and every room, member, pending join and suggestion lives in SQLite. The only
+// state kept in memory is a message queue, a per-socket throttle and a cache of
+// the alarm time, all rebuildable.
 //
 // Every event that touches rooms (a message, a close, the alarm) runs through
 // one promise chain. Decoding a gzipped message awaits, which opens the Durable
@@ -14,23 +15,33 @@
 // writes storage inside one transaction and returns the messages to send.
 
 import { create, toBinary } from "@bufbuild/protobuf";
-import { EnvelopeSchema } from "../gen/listentogether_pb";
+import { EnvelopeSchema, ErrorPayloadSchema } from "../gen/listentogether_pb";
 import { CodecError, decodeEnvelope, encodeEnvelope } from "./codec";
 import { handleClientCapabilities, handlePing } from "./connection";
 import { newUserId } from "./ids";
 import { disconnectOrphans, disconnectUser, handleReconnect, sweep } from "./lifecycle";
-import { MAX_READ_MESSAGE_BYTES, REQUEST_SYNC_MIN_INTERVAL_MS } from "./limits";
-import { handlePlaybackAction, handleRequestSync } from "./playback";
-import { fail, hostIsConnected, removeFromRoom } from "./roomOps";
+import {
+  CLOSE_GOING_AWAY,
+  CLOSE_REASON_IDLE,
+  MAX_READ_MESSAGE_BYTES,
+  RATE_LIMITED_ERROR_CODE,
+  RATE_LIMITED_MESSAGE,
+  REQUEST_SYNC_MIN_INTERVAL_MS,
+} from "./limits";
+import { idleDeadline, recordMessage } from "./liveness";
+import { handleBufferReady, handlePlaybackAction, handleRequestSync } from "./playback";
+import { fail, hostIsConnected, message, removeFromRoom } from "./roomOps";
 import {
   handleApproveJoin,
   handleCreateRoom,
   handleJoinRoom,
+  handleKickUser,
   handleLeaveRoom,
   handleRejectJoin,
+  handleTransferHost,
 } from "./rooms";
 import { Store } from "./store";
-import { handleSuggestTrack } from "./suggestions";
+import { handleApproveSuggestion, handleRejectSuggestion, handleSuggestTrack } from "./suggestions";
 import type { Attachment, Conn, Handler, Out, Runtime } from "./types";
 
 export type LiveRoom = {
@@ -54,6 +65,11 @@ const HANDLERS = new Map<string, Handler>([
   ["request_sync", handleRequestSync],
   ["reconnect", handleReconnect],
   ["suggest_track", handleSuggestTrack],
+  ["approve_suggestion", handleApproveSuggestion],
+  ["reject_suggestion", handleRejectSuggestion],
+  ["buffer_ready", handleBufferReady],
+  ["kick_user", handleKickUser],
+  ["transfer_host", handleTransferHost],
   ["client_capabilities", handleClientCapabilities],
 ]);
 
@@ -63,6 +79,18 @@ const CLOSE_MESSAGE_TOO_BIG = 1009;
 const CLOSE_INTERNAL_ERROR = 1011;
 
 const encoder = new TextEncoder();
+const WEBSOCKET_OPEN = 1;
+
+// The answer to a message over the rate limit. It is small enough that it is never
+// gzipped, so it can be sent on the spot instead of waiting in the queue.
+const RATE_LIMITED_FRAME = toBinary(
+  EnvelopeSchema,
+  create(EnvelopeSchema, {
+    type: "error",
+    payload: message(ErrorPayloadSchema, { code: RATE_LIMITED_ERROR_CODE, message: RATE_LIMITED_MESSAGE }),
+    compressed: false,
+  }),
+);
 
 function safeClose(ws: WebSocket, code: number, reason: string): void {
   try {
@@ -97,8 +125,10 @@ export class Sangat {
   accept(deviceId: string): Response {
     const [client, server] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(server);
-    const attachment: Attachment = { userId: this.unusedUserId(), deviceId };
+    const attachment: Attachment = { userId: this.unusedUserId(), deviceId, lastSeen: Date.now() };
     server.serializeAttachment(attachment);
+    // The new socket's idle deadline may now be the earliest one.
+    this.announce([]);
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -110,6 +140,22 @@ export class Sangat {
       return Promise.resolve();
     }
     const receivedAt = Date.now();
+    // Before the queue, so a flood cannot pile up behind it holding 512 KB frames.
+    // This runs synchronously, in arrival order, and stores its count in the
+    // attachment, where a hibernated object finds it again.
+    const att = this.attachmentOf(ws);
+    if (att) {
+      const allowed = recordMessage(att, receivedAt);
+      ws.serializeAttachment(att);
+      if (!allowed) {
+        try {
+          ws.send(RATE_LIMITED_FRAME);
+        } catch {
+          // the socket closed under us
+        }
+        return Promise.resolve();
+      }
+    }
     return this.enqueue(() => this.handleMessage(ws, data, receivedAt));
   }
 
@@ -129,9 +175,13 @@ export class Sangat {
     return this.enqueue(async () => {
       this.alarmAt = null; // the alarm that just fired is spent
       this.reconciled = true;
+      const now = Date.now();
+      // Silent sockets are cut off first; the sweep below then finds their members
+      // without a socket and disconnects them like any other drop.
+      this.closeIdleSockets(now);
       const outs = this.store.transaction(() => [
         ...disconnectOrphans(this.runtime, this.liveUserIds()),
-        ...sweep(this.runtime, Date.now()),
+        ...sweep(this.runtime, now),
       ]);
       await this.flush(outs);
       await this.scheduleAlarm();
@@ -297,6 +347,16 @@ export class Sangat {
     }
   }
 
+  /** Writes a tombstone on the socket, so it stops counting as live and is not timed out again, and closes it. */
+  private closeSocket(ws: WebSocket, att: Attachment, code: number, reason: string, patch: Partial<Attachment> = {}): void {
+    try {
+      ws.serializeAttachment({ ...att, ...patch, closed: true } satisfies Attachment);
+    } catch {
+      // already closed
+    }
+    safeClose(ws, code, reason);
+  }
+
   private detachSocket(userId: string, code: number, reason: string): void {
     for (const ws of this.ctx.getWebSockets()) {
       const att = this.attachmentOf(ws);
@@ -305,6 +365,37 @@ export class Sangat {
       this.lastSyncAt.delete(userId);
       safeClose(ws, code, reason);
     }
+  }
+
+  /**
+   * Closes the sockets that have been silent for IDLE_TIMEOUT_MS. A phone that
+   * lost its connection without a close frame is otherwise never noticed, and
+   * its room would stay "live". Each gets a fresh id first, as in a takeover, so
+   * its member is found socketless and disconnected (grace and user_disconnected
+   * included) and the close event that may follow does nothing more.
+   */
+  private closeIdleSockets(now: number): void {
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws.readyState !== WEBSOCKET_OPEN) continue;
+      const att = this.attachmentOf(ws);
+      if (!att) continue;
+      const deadline = idleDeadline(att);
+      if (deadline === null || deadline > now) continue;
+      this.lastSyncAt.delete(att.userId);
+      this.closeSocket(ws, att, CLOSE_GOING_AWAY, CLOSE_REASON_IDLE, { userId: this.unusedUserId() });
+    }
+  }
+
+  /** The earliest moment an open socket will count as idle, or null with no sockets to watch. */
+  private nextIdleDeadline(): number | null {
+    let earliest: number | null = null;
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws.readyState !== WEBSOCKET_OPEN) continue;
+      const att = this.attachmentOf(ws);
+      const deadline = att ? idleDeadline(att) : null;
+      if (deadline !== null && (earliest === null || deadline < earliest)) earliest = deadline;
+    }
+    return earliest;
   }
 
   private allowSyncResponse(userId: string, now: number): boolean {
@@ -361,9 +452,14 @@ export class Sangat {
 
   // The alarm
 
-  /** Points the one alarm at the earliest deadline in storage, or clears it. */
+  /**
+   * Points the one alarm at the earliest deadline, or clears it. Deadlines are
+   * the expiries in storage and the moment the quietest socket counts as idle.
+   */
   private async scheduleAlarm(): Promise<void> {
-    const wanted = this.store.nextDeadline();
+    const stored = this.store.nextDeadline();
+    const idle = this.nextIdleDeadline();
+    const wanted = stored === null ? idle : idle === null ? stored : Math.min(stored, idle);
     if (this.alarmAt === undefined) this.alarmAt = await this.ctx.storage.getAlarm();
     if (wanted === this.alarmAt) return;
     if (wanted === null) await this.ctx.storage.deleteAlarm();

@@ -10,6 +10,13 @@ export interface Attachment {
   started?: boolean;
   /** The client declined compression: send it plain envelopes. */
   plain?: boolean;
+  /** When a frame last arrived on this socket (ms). Absent until the socket first speaks or is accepted. */
+  lastSeen?: number;
+  /** Start of the current rate-limit window (ms) and the messages counted in it. */
+  rateStart?: number;
+  rateCount?: number;
+  /** Tombstone: the server has closed this socket and it is waiting out the close handshake. It no longer counts as live. */
+  closed?: boolean;
 }
 
 /** The socket a message arrived on. Handlers edit `att` and set `dirty`; Sangat saves it. */

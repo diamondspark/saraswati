@@ -20,7 +20,6 @@
     "src/**/*.ts",
     "test/**/*.ts",
     "scripts/**/*.ts",
-    "vitest.config.ts",
-    "vitest.traces.config.ts"
+    "vitest.config.ts"
   ]
 }
