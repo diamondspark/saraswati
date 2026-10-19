@@ -4,6 +4,10 @@ export { FamilyHub };
 
 export interface Env {
   FAMILY_HUB: DurableObjectNamespace;
+  // Worker secret, set via `wrangler secret put ADMIN_KEY` (Task 2 Step 8,
+  // a human checkpoint not yet done at the time of writing). `authenticate()`
+  // in FamilyHub.ts checks bearer tokens against this value first.
+  ADMIN_KEY: string;
 }
 
 export default {
