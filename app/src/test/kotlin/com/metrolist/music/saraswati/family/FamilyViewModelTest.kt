@@ -25,6 +25,7 @@ class FamilyViewModelTest {
     private lateinit var hub: FakeHub
     private lateinit var store: FakeStore
     private lateinit var vm: FamilyViewModel
+    private var newIds = 0
 
     private val mummy = RosterEntry("d1", "Mummy's Pixel", "pending", null, DeviceRole.GRANDPARENT)
     private val papa = RosterEntry("d2", "Papa's Samsung", "approved", 5L, DeviceRole.ADULT)
@@ -34,7 +35,8 @@ class FamilyViewModelTest {
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         hub = FakeHub()
         store = FakeStore(admin = TEST_ADMIN_KEY)
-        vm = FamilyViewModel(hub, store, HubConfig(TEST_HUB_URL), scope)
+        newIds = 0
+        vm = FamilyViewModel(hub, store, HubConfig(TEST_HUB_URL), scope, newStationId = { "new-${++newIds}" })
     }
 
     @After
@@ -387,5 +389,390 @@ class FamilyViewModelTest {
         val everything = listOf(vm.pairingState.value, vm.roster.value, vm.health.value, vm.error.value, vm.setupState.value)
         assertFalse(everything.toString().contains(TEST_ADMIN_KEY))
         assertFalse(everything.toString().contains("session-d1"))
+    }
+    // --- Task 8: stations and kill-switches --------------------------------
+
+    private fun video(n: Int) = "video" + n.toString().padStart(6, '0')
+
+    private fun station(
+        n: Int,
+        icon: Int = 0,
+    ) = Station("s$n", "Station $n", video(n), icon)
+
+    private fun hubWith(count: Int) {
+        hub.stations = (1..count).map { station(it) }
+        vm.loadSettings()
+    }
+
+    private val stationCalls get() = hub.callsTo("setStations")
+
+    @Test
+    fun `an empty hub list starts the editor on the four defaults, which the hub has not been given`() {
+        hub.stations = emptyList()
+
+        vm.loadSettings()
+
+        assertEquals(
+            listOf("Bollywood Classics", "Bhajans & Devotional", "Ghazals & Old Melodies", "Peaceful & Meditation"),
+            vm.stations.value.map { it.title },
+        )
+        assertEquals(4, vm.stations.value.map { it.id }.toSet().size)
+        assertEquals(StationsState.DRAFT, vm.stationsState.value)
+        assertTrue(stationCalls.isEmpty())
+    }
+
+    @Test
+    fun `the defaults leave two of the six slots free and need a video each before they are saved`() {
+        vm.loadSettings()
+
+        assertEquals(4, vm.stations.value.size)
+        assertTrue(vm.stations.value.size < FamilyViewModel.MAX_STATIONS)
+        assertTrue(vm.stations.value.all { it.seedVideoId.isEmpty() })
+    }
+
+    @Test
+    fun `a list from the hub is shown as it is`() {
+        hubWith(3)
+
+        assertEquals((1..3).map { station(it) }, vm.stations.value)
+        assertEquals(StationsState.SYNCED, vm.stationsState.value)
+    }
+
+    @Test
+    fun `adding a station sends the whole resulting list`() {
+        hubWith(2)
+
+        vm.addStation("Ghazals", "https://youtu.be/dQw4w9WgXcQ", iconIndex = 3)
+
+        assertEquals(1, hub.callsTo("getStations").size)
+        assertEquals(listOf("setStations($TEST_ADMIN_KEY,s1|s2|new-1)"), stationCalls)
+        assertEquals(
+            listOf(station(1), station(2), Station("new-1", "Ghazals", "dQw4w9WgXcQ", 3)),
+            vm.stations.value,
+        )
+        assertEquals(StationsState.SYNCED, vm.stationsState.value)
+        assertEquals(hub.stations, vm.stations.value)
+    }
+
+    @Test
+    fun `editing a station replaces it in place and sends the whole list`() {
+        hubWith(3)
+
+        vm.updateStation("s2", "  Bhajans  ", "https://youtu.be/dQw4w9WgXcQ", iconIndex = 2)
+
+        assertEquals(listOf("setStations($TEST_ADMIN_KEY,s1|s2|s3)"), stationCalls)
+        assertEquals(Station("s2", "Bhajans", "dQw4w9WgXcQ", 2), vm.stations.value[1])
+        assertEquals(station(1), vm.stations.value[0])
+        assertEquals(station(3), vm.stations.value[2])
+    }
+
+    @Test
+    fun `a blank video field keeps the station's current video`() {
+        hubWith(2)
+
+        vm.updateStation("s1", "Renamed", "", iconIndex = 4)
+
+        assertEquals(Station("s1", "Renamed", video(1), 4), vm.stations.value[0])
+        assertEquals(listOf("setStations($TEST_ADMIN_KEY,s1|s2)"), stationCalls)
+    }
+
+    @Test
+    fun `a starting default can be renamed before it has a video and stays a draft`() {
+        vm.loadSettings()
+        val id = vm.stations.value.first().id
+
+        vm.updateStation(id, "Mummy's Songs", "", iconIndex = 2)
+
+        assertEquals(Station(id, "Mummy's Songs", "", 2), vm.stations.value.first())
+        assertEquals(StationsState.DRAFT, vm.stationsState.value)
+        assertTrue(stationCalls.isEmpty())
+        assertNull(vm.error.value)
+    }
+
+    @Test
+    fun `removing a station sends the list without it`() {
+        hubWith(3)
+
+        vm.removeStation("s2")
+
+        assertEquals(listOf("setStations($TEST_ADMIN_KEY,s1|s3)"), stationCalls)
+        assertEquals(listOf("s1", "s3"), vm.stations.value.map { it.id })
+    }
+
+    @Test
+    fun `moving a station up or down sends the reordered list`() {
+        hubWith(3)
+
+        vm.moveStation("s3", -1)
+        assertEquals("setStations($TEST_ADMIN_KEY,s1|s3|s2)", stationCalls.last())
+
+        vm.moveStation("s1", +1)
+        assertEquals("setStations($TEST_ADMIN_KEY,s3|s1|s2)", stationCalls.last())
+        assertEquals(listOf("s3", "s1", "s2"), vm.stations.value.map { it.id })
+    }
+
+    @Test
+    fun `moving past either end does nothing and calls nothing`() {
+        hubWith(3)
+
+        vm.moveStation("s1", -1)
+        vm.moveStation("s3", +1)
+        vm.moveStation("missing", +1)
+
+        assertTrue(stationCalls.isEmpty())
+        assertEquals((1..3).map { station(it) }, vm.stations.value)
+    }
+
+    @Test
+    fun `a seventh station is refused on the spot, without asking the hub`() {
+        hubWith(6)
+
+        vm.addStation("One too many", "dQw4w9WgXcQ", 0)
+
+        assertEquals(FamilyError.STATION_LIMIT, vm.error.value)
+        assertTrue(stationCalls.isEmpty())
+        assertEquals(6, vm.stations.value.size)
+    }
+
+    @Test
+    fun `the last station cannot be removed`() {
+        hubWith(1)
+
+        vm.removeStation("s1")
+
+        assertEquals(FamilyError.STATION_LIMIT, vm.error.value)
+        assertTrue(stationCalls.isEmpty())
+        assertEquals(1, vm.stations.value.size)
+    }
+
+    @Test
+    fun `setStations itself enforces one to six`() {
+        hubWith(2)
+
+        vm.setStations(emptyList())
+        assertEquals(FamilyError.STATION_LIMIT, vm.error.value)
+
+        vm.clearError()
+        vm.setStations((1..7).map { station(it) })
+        assertEquals(FamilyError.STATION_LIMIT, vm.error.value)
+
+        assertTrue(stationCalls.isEmpty())
+        assertEquals(2, vm.stations.value.size)
+    }
+
+    @Test
+    fun `setStations sends exactly the list it is given`() {
+        hubWith(1)
+
+        vm.setStations(listOf(station(5), station(4)))
+
+        assertEquals(listOf("setStations($TEST_ADMIN_KEY,s5|s4)"), stationCalls)
+        assertEquals(listOf("s5", "s4"), vm.stations.value.map { it.id })
+    }
+
+    @Test
+    fun `six stations is allowed`() {
+        hubWith(5)
+
+        vm.addStation("Sixth", "dQw4w9WgXcQ", 1)
+
+        assertEquals(6, vm.stations.value.size)
+        assertEquals(1, stationCalls.size)
+    }
+
+    @Test
+    fun `a station whose video cannot be resolved is refused before anything is sent`() {
+        hubWith(2)
+
+        vm.addStation("Bad", "https://example.com/not-youtube", 0)
+        assertEquals(FamilyError.INVALID_INPUT, vm.error.value)
+
+        vm.clearError()
+        vm.updateStation("s1", "Bad", "nonsense", 0)
+        assertEquals(FamilyError.INVALID_INPUT, vm.error.value)
+
+        vm.clearError()
+        vm.addStation("   ", "dQw4w9WgXcQ", 0)
+        assertEquals(FamilyError.INVALID_INPUT, vm.error.value)
+
+        assertTrue(stationCalls.isEmpty())
+        assertEquals(2, vm.stations.value.size)
+    }
+
+    @Test
+    fun `a hub failure on save is an error and the list stays as it was`() {
+        hubWith(2)
+        hub.failWith("setStations", hubFailure(400))
+
+        vm.addStation("New", "dQw4w9WgXcQ", 0)
+
+        assertEquals(FamilyError.INVALID_INPUT, vm.error.value)
+        assertEquals((1..2).map { station(it) }, vm.stations.value)
+        assertEquals(StationsState.SYNCED, vm.stationsState.value)
+    }
+
+    @Test
+    fun `defaults are filled in with videos and saved once every station has one`() {
+        vm.loadSettings()
+        val ids = vm.stations.value.map { it.id }
+
+        ids.dropLast(1).forEachIndexed { i, id ->
+            vm.updateStation(id, vm.stations.value[i].title, video(i), 0)
+            assertTrue("nothing is sent while a station still lacks its video", stationCalls.isEmpty())
+            assertEquals(StationsState.DRAFT, vm.stationsState.value)
+        }
+        assertEquals(1, vm.stations.value.count { it.seedVideoId.isEmpty() })
+
+        vm.updateStation(ids.last(), vm.stations.value.last().title, "dQw4w9WgXcQ", 0)
+
+        assertEquals(1, stationCalls.size)
+        assertEquals(ids, hub.stations.map { it.id })
+        assertEquals(StationsState.SYNCED, vm.stationsState.value)
+        assertEquals("Bollywood Classics", hub.stations.first().title)
+    }
+
+    @Test
+    fun `unsaved edits to the defaults survive a refresh`() {
+        vm.loadSettings()
+        val first = vm.stations.value.first().id
+        vm.updateStation(first, "Mummy's Favourites", video(1), 0)
+
+        vm.loadSettings()
+
+        assertEquals("Mummy's Favourites", vm.stations.value.first().title)
+    }
+
+    @Test
+    fun `once a list has been saved an empty list from the hub is shown as empty, not defaulted again`() {
+        hubWith(2)
+        vm.removeStation("s2")
+        assertTrue(store.stationsSaved)
+
+        hub.stations = emptyList()
+        vm.loadSettings()
+
+        assertTrue(vm.stations.value.isEmpty())
+        assertEquals(StationsState.SYNCED, vm.stationsState.value)
+    }
+
+    @Test
+    fun `the saved marker outlives the view model`() {
+        store.stationsSaved = true
+        hub.stations = emptyList()
+
+        vm.loadSettings()
+
+        assertTrue(vm.stations.value.isEmpty())
+    }
+
+    @Test
+    fun `station edits before the list has loaded are refused, never sent over the hub's list`() {
+        vm.addStation("Early", "dQw4w9WgXcQ", 0)
+
+        assertEquals(FamilyError.UNKNOWN, vm.error.value)
+        assertTrue(stationCalls.isEmpty())
+    }
+
+    @Test
+    fun `a failed station load reports the error and leaves the editor unloaded`() {
+        hub.failWith("getStations", OFFLINE)
+
+        vm.loadSettings()
+
+        assertEquals(FamilyError.OFFLINE, vm.error.value)
+        assertEquals(StationsState.NOT_LOADED, vm.stationsState.value)
+        assertTrue(vm.stations.value.isEmpty())
+    }
+
+    @Test
+    fun `a station edit without the admin key reports it and does not call the hub`() {
+        hubWith(2)
+        store.admin = null
+
+        vm.removeStation("s1")
+
+        assertEquals(FamilyError.NO_ADMIN_KEY, vm.error.value)
+        assertTrue(stationCalls.isEmpty())
+    }
+
+    @Test
+    fun `kill-switches start with every feature on`() {
+        assertEquals(
+            mapOf("sangat" to true, "parivaar_mix" to true, "family_playlists" to true, "cast_relay" to true),
+            vm.killSwitches.value,
+        )
+    }
+
+    @Test
+    fun `loading shows what the hub says`() {
+        hub.killSwitches = linkedMapOf("sangat" to false, "parivaar_mix" to true, "family_playlists" to true, "cast_relay" to false)
+
+        vm.loadSettings()
+
+        assertEquals(false, vm.killSwitches.value["sangat"])
+        assertEquals(false, vm.killSwitches.value["cast_relay"])
+        assertEquals(true, vm.killSwitches.value["parivaar_mix"])
+    }
+
+    @Test
+    fun `toggling a kill-switch sends just that key and shows the hub's answer`() {
+        vm.loadSettings()
+
+        vm.toggleKillSwitch("parivaar_mix", false)
+
+        assertEquals(listOf("setKillSwitches($TEST_ADMIN_KEY,parivaar_mix=false)"), hub.callsTo("setKillSwitches"))
+        assertEquals(false, vm.killSwitches.value["parivaar_mix"])
+        assertEquals(true, vm.killSwitches.value["sangat"])
+
+        vm.toggleKillSwitch("parivaar_mix", true)
+
+        assertEquals("setKillSwitches($TEST_ADMIN_KEY,parivaar_mix=true)", hub.callsTo("setKillSwitches").last())
+        assertEquals(true, vm.killSwitches.value["parivaar_mix"])
+    }
+
+    @Test
+    fun `a key that is not one of the four features is refused without asking the hub`() {
+        vm.toggleKillSwitch("not_a_feature", false)
+
+        assertEquals(FamilyError.INVALID_INPUT, vm.error.value)
+        assertTrue(hub.callsTo("setKillSwitches").isEmpty())
+    }
+
+    @Test
+    fun `a failed toggle is an error and the switch stays where it was`() {
+        hub.failWith("setKillSwitches", OFFLINE)
+
+        vm.toggleKillSwitch("sangat", false)
+
+        assertEquals(FamilyError.OFFLINE, vm.error.value)
+        assertEquals(true, vm.killSwitches.value["sangat"])
+    }
+
+    @Test
+    fun `a failed kill-switch load leaves every feature on`() {
+        hub.failWith("getKillSwitches", OFFLINE)
+
+        vm.loadSettings()
+
+        assertEquals(true, vm.killSwitches.value["sangat"])
+        assertEquals(FamilyError.OFFLINE, vm.error.value)
+    }
+
+    @Test
+    fun `the four features are exactly the hub's keys, on unless the hub says otherwise`() {
+        assertEquals(
+            listOf("sangat", "parivaar_mix", "family_playlists", "cast_relay"),
+            FamilyFeature.entries.map { it.key },
+        )
+        assertTrue(FamilyFeature.entries.all { FamilyFeature.isEnabled(emptyMap(), it) })
+        assertEquals(false, FamilyFeature.isEnabled(mapOf("sangat" to false), FamilyFeature.SANGAT))
+        assertEquals(true, FamilyFeature.isEnabled(mapOf("sangat" to false), FamilyFeature.CAST_RELAY))
+    }
+
+    @Test
+    fun `the icon set has six entries and any index maps onto one`() {
+        assertEquals(6, StationIcons.COUNT)
+        assertEquals(StationIcons.drawableFor(0), StationIcons.drawableFor(StationIcons.COUNT))
+        assertEquals(StationIcons.drawableFor(0), StationIcons.drawableFor(-6))
     }
 }

@@ -553,6 +553,11 @@ val FamilyHubClaimSecretKey = stringPreferencesKey("familyHubClaimSecret")
 // reports; kept next to the session token (or the claim) it belongs to.
 val IsFamilyOwnerKey = booleanPreferencesKey("isFamilyOwner")
 val FamilyDeviceIdKey = stringPreferencesKey("familyDeviceId")
+
+// SARASWATI: Task 8 — set the first time the owner saves a station list to the
+// hub. Until then an empty list from the hub means "nobody has set any yet" and
+// the editor starts on four defaults; after it, an empty list is shown as empty.
+val FamilyStationsSavedKey = booleanPreferencesKey("familyStationsSaved")
 val AccountNameKey = stringPreferencesKey("accountName")
 val AccountEmailKey = stringPreferencesKey("accountEmail")
 val AccountChannelHandleKey = stringPreferencesKey("accountChannelHandle")

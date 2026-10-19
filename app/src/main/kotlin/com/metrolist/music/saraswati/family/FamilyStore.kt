@@ -21,6 +21,7 @@ import com.metrolist.music.constants.FamilyAdminKeyKey
 import com.metrolist.music.constants.FamilyDeviceIdKey
 import com.metrolist.music.constants.FamilyHubClaimSecretKey
 import com.metrolist.music.constants.FamilyHubSessionTokenKey
+import com.metrolist.music.constants.FamilyStationsSavedKey
 import com.metrolist.music.constants.IsFamilyOwnerKey
 import com.metrolist.music.saraswati.security.CookieVault
 import com.metrolist.music.saraswati.security.SealedPreferences
@@ -61,6 +62,11 @@ interface FamilyStore {
     )
 
     suspend fun clearPendingClaim()
+
+    /** True once the owner has saved a station list to the hub from this phone. */
+    suspend fun stationsEverSaved(): Boolean
+
+    suspend fun markStationsSaved()
 }
 
 class DataStoreFamilyStore(
@@ -119,5 +125,11 @@ class DataStoreFamilyStore(
             it.remove(FamilyHubClaimSecretKey)
             if (it[FamilyHubSessionTokenKey] == null) it.remove(FamilyDeviceIdKey)
         }
+    }
+
+    override suspend fun stationsEverSaved(): Boolean = prefs()[FamilyStationsSavedKey] == true
+
+    override suspend fun markStationsSaved() {
+        dataStore.edit { it[FamilyStationsSavedKey] = true }
     }
 }

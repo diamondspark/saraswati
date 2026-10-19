@@ -160,6 +160,7 @@ class FakeStore(
     var owner = false
     var session: FamilySession? = null
     var claim: PendingClaim? = null
+    var stationsSaved = false
     var failWrites: Throwable? = null
 
     private fun checkWrite() {
@@ -195,6 +196,13 @@ class FakeStore(
     override suspend fun clearPendingClaim() {
         checkWrite()
         claim = null
+    }
+
+    override suspend fun stationsEverSaved() = stationsSaved
+
+    override suspend fun markStationsSaved() {
+        checkWrite()
+        stationsSaved = true
     }
 }
 

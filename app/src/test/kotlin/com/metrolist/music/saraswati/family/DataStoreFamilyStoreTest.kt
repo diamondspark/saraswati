@@ -149,4 +149,16 @@ class DataStoreFamilyStoreTest {
             assertNull(store.pendingClaim())
             assertTrue(raw()[FamilyHubSessionTokenKey] != null)
         }
+
+    @Test
+    fun `the saved-stations marker starts off, stays on, and is not a secret`() =
+        runBlocking {
+            assertFalse(store.stationsEverSaved())
+
+            store.markStationsSaved()
+
+            assertTrue(store.stationsEverSaved())
+            SecretScrubber.scrub(dataStore, vault)
+            assertTrue(store.stationsEverSaved())
+        }
 }

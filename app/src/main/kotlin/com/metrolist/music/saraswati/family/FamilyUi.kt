@@ -46,6 +46,7 @@ fun FamilyError.messageRes(): Int =
         FamilyError.OFFLINE -> R.string.family_error_offline
         FamilyError.NOT_CONFIGURED -> R.string.family_error_not_configured
         FamilyError.SERVER -> R.string.family_error_server
+        FamilyError.STATION_LIMIT -> R.string.family_error_station_limit
         FamilyError.UNKNOWN -> R.string.family_error_unknown
     }
 

@@ -1069,4 +1069,35 @@
     <string name="family_error_not_configured">This build of the app has no family hub.</string>
     <string name="family_error_server">The family hub had a problem. Try again in a moment.</string>
     <string name="family_error_unknown">Something went wrong. Try again.</string>
+    <string name="family_error_station_limit">A station list needs 1 to 6 stations.</string>
+    <!-- SARASWATI: Task 8 — station and kill-switch owner editor. -->
+    <string name="family_stations_title">Stations</string>
+    <string name="family_stations_desc">The big tiles on a grandparent\'s phone. Up to 6.</string>
+    <string name="family_stations_draft">Not saved yet. Give every station a video link and the list saves.</string>
+    <string name="family_station_add">Add a station</string>
+    <string name="family_station_add_title">New station</string>
+    <string name="family_station_edit_title">Edit station</string>
+    <string name="family_station_name_label">Name</string>
+    <string name="family_station_video_label">YouTube video link</string>
+    <string name="family_station_video_hint">A song that starts this station: paste its link or video ID.</string>
+    <string name="family_station_video_invalid">That is not a YouTube video link.</string>
+    <string name="family_station_needs_video">Needs a video link</string>
+    <string name="family_station_icon_label">Icon</string>
+    <string name="family_station_icon_option">Icon %1$d</string>
+    <string name="family_station_save">Save</string>
+    <string name="family_station_edit">Edit station</string>
+    <string name="family_station_move_up">Move up</string>
+    <string name="family_station_move_down">Move down</string>
+    <string name="family_station_remove">Remove station</string>
+    <string name="family_station_remove_confirm">Remove the station \"%1$s\"?</string>
+    <string name="family_features_title">Features</string>
+    <string name="family_features_desc">Switch a family feature off for everyone. If the hub cannot be reached, features stay on.</string>
+    <string name="family_feature_sangat">Sangat · Listen together</string>
+    <string name="family_feature_sangat_desc">Off hides listening together with family.</string>
+    <string name="family_feature_parivaar_mix">Parivaar Mix · Family mix</string>
+    <string name="family_feature_parivaar_mix_desc">Off hides the mix made from the whole family\'s taste.</string>
+    <string name="family_feature_family_playlists">Family playlists</string>
+    <string name="family_feature_family_playlists_desc">Off hides playlists the family shares.</string>
+    <string name="family_feature_cast_relay">Cast relay</string>
+    <string name="family_feature_cast_relay_desc">Off hides casting from one family phone to another.</string>
 </resources>

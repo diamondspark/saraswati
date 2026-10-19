@@ -39,6 +39,8 @@ enum class FamilyError {
     /** The hub answered with a server error or something unusable. */
     SERVER,
 
+    /** A station list outside 1 to 6 entries. */
+    STATION_LIMIT,
     UNKNOWN,
     ;
 
