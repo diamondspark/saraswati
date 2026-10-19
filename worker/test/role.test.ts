@@ -13,7 +13,6 @@ function getFamilyHubStub() {
 }
 
 type Stub = ReturnType<typeof getFamilyHubStub>;
-type Role = "adult" | "grandparent";
 
 const adminHeaders = { Authorization: `Bearer ${TEST_ADMIN_KEY}` };
 
