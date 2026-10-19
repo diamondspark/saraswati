@@ -17,6 +17,11 @@
 // It starts the phone's own speech recogniser (RecognizerIntent) for "बोलकर खोजें", and
 // hosts the existing sign-in (SaralSignIn) when the phone is signed out of YouTube.
 // Nothing else.
+//
+// Task 10: on a festival day a ribbon sits above the tile grid (the approved
+// "festival ribbon" of the Saral mockup): the festival's Hindi greeting and one
+// button, "सुनें", that starts that festival's radio the way a tile does. It is
+// not a seventh tile and it opens nothing: the tile grid and its cap are as before.
 package com.metrolist.music.saraswati.saral
 
 import android.content.ActivityNotFoundException
@@ -68,6 +73,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
@@ -93,12 +99,15 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.metrolist.music.R
 import com.metrolist.music.playback.PlayerConnection
+import com.metrolist.music.saraswati.culture.Festival
 import com.metrolist.music.saraswati.family.StationIcons
 
 // The approved palette (tokens.css of the mockup). Fixed, not taken from the
 // app theme: Saral must look the same on every phone whatever the wallpaper.
 private val Background = Color(0xFF141210)
 private val Surface2 = Color(0xFF262019)
+private val Surface3 = Color(0xFF332A1E)
+private val Border = Color(0xFF3A2F20)
 private val TextPrimary = Color(0xFFF3ECDF)
 private val TextDim = Color(0xFFB8AFA0)
 private val Accent = Color(0xFFF5B301)
@@ -120,6 +129,9 @@ private val IdentityStyle = TextStyle(fontFamily = NotoSansDevanagari, fontSize 
 private val MessageStyle = TextStyle(fontFamily = NotoSansDevanagari, fontWeight = FontWeight.Bold, fontSize = 24.sp, lineHeight = 32.sp)
 private val ListeningStyle = TextStyle(fontFamily = NotoSansDevanagari, fontWeight = FontWeight.Bold, fontSize = 26.sp, lineHeight = 34.sp)
 private val ListeningHintStyle = TextStyle(fontFamily = NotoSansDevanagari, fontSize = 16.sp, lineHeight = 22.sp)
+private val RibbonTitleStyle = TextStyle(fontFamily = NotoSansDevanagari, fontWeight = FontWeight.Bold, fontSize = 16.sp, lineHeight = 22.sp)
+private val RibbonSubtitleStyle = TextStyle(fontFamily = NotoSansDevanagari, fontSize = 13.sp, lineHeight = 18.sp)
+private val RibbonButtonStyle = TextStyle(fontFamily = NotoSansDevanagari, fontWeight = FontWeight.Bold, fontSize = 14.sp, lineHeight = 20.sp)
 
 @Composable
 fun SaralApp(playerConnection: PlayerConnection?) {
@@ -141,6 +153,7 @@ fun SaralScreen(
     val voice by viewModel.voice.collectAsStateWithLifecycle()
     val signedIn by viewModel.signedIn.collectAsStateWithLifecycle()
     val signingIn by viewModel.signingIn.collectAsStateWithLifecycle()
+    val festival by viewModel.festival.collectAsStateWithLifecycle()
 
     // Back does nothing here. It must not finish the screen or surface anything behind it.
     BackHandler {}
@@ -186,6 +199,7 @@ fun SaralScreen(
                 Row(Modifier.fillMaxSize()) {
                     Column(Modifier.weight(1f).fillMaxHeight().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         if (!signedIn) SignInTile(viewModel::onSignInTapped)
+                        festival?.let { FestivalRibbon(it, viewModel::onFestivalTapped) }
                         Tiles(tiles, ringedId, viewModel::onTile, Modifier.weight(1f).fillMaxWidth())
                     }
                     Column(
@@ -203,6 +217,7 @@ fun SaralScreen(
                     TopRow(onMic, Modifier.padding(top = 8.dp))
                     Column(Modifier.weight(1f).fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         if (!signedIn) SignInTile(viewModel::onSignInTapped)
+                        festival?.let { FestivalRibbon(it, viewModel::onFestivalTapped) }
                         Tiles(tiles, ringedId, viewModel::onTile, Modifier.weight(1f).fillMaxWidth())
                     }
                     StatusLine(statusText, isMessage, Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 10.dp))
@@ -246,6 +261,8 @@ private fun subjectLabel(subject: SaralSubject): String =
     when (subject) {
         is SaralSubject.Station -> tileLabel(subject.tile)
         is SaralSubject.Track -> subject.title
+        is SaralSubject.Festival ->
+            stringResource(R.string.saral_festival_music, stringResource(SaralFestivalNames.hindiNameFor(subject.festival)))
     }
 
 private fun voiceIntent(prompt: String): Intent =
@@ -347,6 +364,54 @@ private fun StationTile(
             modifier = Modifier.size(40.dp),
         )
         Text(label, style = TileLabelStyle, color = TextPrimary, textAlign = TextAlign.Center, maxLines = 3, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/**
+ * The festival ribbon of the approved mockup: a diya, the Hindi greeting, a line saying the songs are
+ * ready, and one button. The whole of it is for the grandparents, so the button is at least as tall as
+ * a normal touch target and is spoken as "<festival> के गीत सुनें".
+ */
+@Composable
+private fun FestivalRibbon(
+    festival: Festival,
+    onListen: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(16.dp)
+    val listenLabel = stringResource(R.string.saral_festival_listen_desc, stringResource(SaralFestivalNames.hindiNameFor(festival)))
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Brush.horizontalGradient(listOf(Surface2, Surface3)))
+            .border(1.dp, Border, shape)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).background(TileTints[0]),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(painter = painterResource(R.drawable.festival_diya), contentDescription = null, tint = Accent, modifier = Modifier.size(28.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(festival.greetingHi, style = RibbonTitleStyle, color = TextPrimary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(stringResource(R.string.saral_festival_ready), style = RibbonSubtitleStyle, color = TextDim, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        Box(
+            Modifier
+                .heightIn(min = 48.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Accent)
+                .semantics { contentDescription = listenLabel }
+                .clickable(role = Role.Button, onClick = onListen)
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(stringResource(R.string.saral_festival_listen), style = RibbonButtonStyle, color = AccentInk)
+        }
     }
 }
 

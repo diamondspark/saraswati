@@ -23,6 +23,7 @@ import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.WatchEndpoint
 import com.metrolist.music.models.toMediaMetadata
+import com.metrolist.music.saraswati.culture.radioEndpointFor
 import com.metrolist.music.playback.PlayerConnection
 import com.metrolist.music.playback.queues.Queue
 import com.metrolist.music.playback.queues.YouTubeQueue
@@ -73,7 +74,7 @@ internal class PlayerConnectionPlayback(
     override fun hasQueue(): Boolean = runCatching { connection.player.currentMediaItem != null }.getOrDefault(false)
 
     override fun playRadio(seedVideoId: String) {
-        start("playRadio", YouTubeQueue(WatchEndpoint(videoId = seedVideoId, playlistId = "RDAMVM$seedVideoId")))
+        start("playRadio", YouTubeQueue(radioEndpointFor(seedVideoId)))
     }
 
     override fun playSong(song: SongItem) {

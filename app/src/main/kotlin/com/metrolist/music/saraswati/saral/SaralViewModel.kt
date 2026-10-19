@@ -31,6 +31,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.metrolist.innertube.models.SongItem
 import com.metrolist.music.R
+import com.metrolist.music.saraswati.culture.Festival
+import com.metrolist.music.saraswati.culture.FestivalClock
+import com.metrolist.music.saraswati.culture.FestivalRadio
+import com.metrolist.music.saraswati.culture.FestivalSeed
 import com.metrolist.music.saraswati.family.FamilyViewModel
 import com.metrolist.music.saraswati.family.Station
 import com.metrolist.music.saraswati.family.StationsCache
@@ -98,6 +102,11 @@ sealed interface SaralSubject {
     data class Track(
         val title: String,
     ) : SaralSubject
+
+    /** The radio of today's festival, started from the ribbon. */
+    data class Festival(
+        val festival: com.metrolist.music.saraswati.culture.Festival,
+    ) : SaralSubject
 }
 
 enum class VoiceNotice { NOT_FOUND, NOT_HEARD, OFFLINE, FAILED, UNAVAILABLE }
@@ -158,17 +167,26 @@ internal sealed interface SaralRequest {
     data class Song(
         val title: String,
     ) : SaralRequest
+
+    data class Festival(
+        val festival: com.metrolist.music.saraswati.culture.Festival,
+    ) : SaralRequest
 }
 
 internal object SaralStatusRules {
-    /** A notice for the last thing the person did, if there is one, beats everything; then a failure; then the real player. */
+    /**
+     * A notice for the last thing the person did, if there is one, beats everything; then a failure
+     * ([problem] is the one Saral met itself, such as a festival radio it could not find a song for,
+     * and is newer than the player's); then the real player.
+     */
     fun derive(
         request: SaralRequest?,
         player: SaralPlayerState,
         notice: VoiceNotice?,
+        problem: PlaybackProblem? = null,
     ): SaralStatus {
         if (notice != null) return SaralStatus.Voice(notice)
-        player.problem?.let { return SaralStatus.Problem(it) }
+        (problem ?: player.problem)?.let { return SaralStatus.Problem(it) }
         if (request == null) {
             // Nothing was asked of Saral: report whatever the player holds, if anything.
             val title = player.title?.takeIf { player.mediaId != null } ?: return SaralStatus.Idle
@@ -177,6 +195,7 @@ internal object SaralStatusRules {
         val subject =
             when (request) {
                 is SaralRequest.Station -> SaralSubject.Station(request.tile)
+                is SaralRequest.Festival -> SaralSubject.Festival(request.festival)
                 // A song's radio moves on, so the name follows the track the player really has.
                 is SaralRequest.Song -> SaralSubject.Track(if (player.ours) player.title ?: request.title else request.title)
             }
@@ -219,6 +238,7 @@ class SaralViewModel
         private val search: SaralSearch,
         signIn: YouTubeSignIn,
         scope: CoroutineScope,
+        festivalClock: FestivalClock = FestivalClock(),
     ) : ViewModel(scope) {
         @Inject
         constructor(cache: StationsCache, refresher: StationsRefresher, search: SaralSearch, signIn: YouTubeSignIn) :
@@ -227,6 +247,8 @@ class SaralViewModel
         private val playback = MutableStateFlow<SaralPlayback?>(null)
         private var pending: ((SaralPlayback) -> Unit)? = null
         private var voiceJob: Job? = null
+        private var festivalJob: Job? = null
+        private val festivalRadio = FestivalRadio(search)
         private var recognizerInFlight = false
 
         private val request = MutableStateFlow<SaralRequest?>(null)
@@ -235,6 +257,16 @@ class SaralViewModel
         // something else took over.
         private var adopted = false
         private val notice = MutableStateFlow<VoiceNotice?>(null)
+
+        // A failure Saral met itself (as opposed to one the player reports); cleared by the next thing the person does.
+        private val problem = MutableStateFlow<PlaybackProblem?>(null)
+
+        /**
+         * Today's festival, if it is one. Counted from the phone's own day, and started afresh each time the screen comes
+         * back (collection stops a few seconds after it leaves), so a phone that slept through midnight is right on waking.
+         */
+        val festival: StateFlow<Festival?> =
+            festivalClock.changes().stateIn(viewModelScope, SharingStarted.WhileSubscribed(FESTIVAL_STOP_TIMEOUT_MS), festivalClock.current())
 
         val tiles: StateFlow<List<SaralTile>> =
             cache.stations
@@ -247,7 +279,7 @@ class SaralViewModel
                 .stateIn(viewModelScope, SharingStarted.Eagerly, SaralPlayerState())
 
         val status: StateFlow<SaralStatus> =
-            combine(request, playerState, notice) { asked, player, said -> SaralStatusRules.derive(asked, player, said) }
+            combine(request, playerState, notice, problem) { asked, player, said, failed -> SaralStatusRules.derive(asked, player, said, failed) }
                 .stateIn(viewModelScope, SharingStarted.Eagerly, SaralStatus.Idle)
 
         val isPlaying: StateFlow<Boolean> =
@@ -285,7 +317,7 @@ class SaralViewModel
         }
 
         fun onPlayPause() {
-            notice.value = null
+            clearMessages()
             val player = playback.value
             if (player != null && player.hasQueue()) {
                 player.togglePlayPause()
@@ -295,12 +327,12 @@ class SaralViewModel
         }
 
         fun onNext() {
-            notice.value = null
+            clearMessages()
             playback.value?.skipNext()
         }
 
         fun onPrevious() {
-            notice.value = null
+            clearMessages()
             playback.value?.skipPrevious()
         }
 
@@ -308,7 +340,7 @@ class SaralViewModel
         fun onMicTapped(): Boolean {
             if (_voice.value != VoicePhase.IDLE) return false
             voiceJob?.cancel()
-            notice.value = null
+            clearMessages()
             recognizerInFlight = true
             _voice.value = VoicePhase.LISTENING
             return true
@@ -339,6 +371,24 @@ class SaralViewModel
                 VoiceOutcome.Failed -> endVoice(VoiceNotice.FAILED)
                 is VoiceOutcome.Heard -> searchFor(outcome.guesses)
             }
+        }
+
+        /** The ribbon's button: today's festival radio. Nothing happens if there is no festival today. */
+        fun onFestivalTapped() {
+            val today = festival.value ?: return
+            clearMessages()
+            begin(SaralRequest.Festival(today))
+            festivalJob =
+                viewModelScope.launch {
+                    val seed = festivalRadio.seedFor(today)
+                    // A search that was replaced may still hand back a (wrapped) failure; it must not speak.
+                    coroutineContext.ensureActive()
+                    when (seed) {
+                        is FestivalSeed.Found -> whenPlayerReady { it.playRadio(seed.videoId) }
+                        FestivalSeed.NotFound -> problem.value = PlaybackProblem.COULD_NOT_PLAY
+                        is FestivalSeed.Failed -> problem.value = if (seed.offline) PlaybackProblem.OFFLINE else PlaybackProblem.COULD_NOT_PLAY
+                    }
+                }
         }
 
         fun onSignInTapped() {
@@ -393,20 +443,27 @@ class SaralViewModel
         private fun startStation(tile: SaralTile) {
             val seed = tile.station.seedVideoId
             if (seed.isBlank()) return
-            notice.value = null
+            clearMessages()
             begin(SaralRequest.Station(tile))
             whenPlayerReady { it.playRadio(seed) }
         }
 
         private fun startSong(song: SongItem) {
-            notice.value = null
+            clearMessages()
             begin(SaralRequest.Song(song.title))
             whenPlayerReady { it.playSong(song) }
         }
 
         private fun begin(next: SaralRequest) {
+            festivalJob?.cancel()
+            festivalJob = null
             adopted = false
             request.value = next
+        }
+
+        private fun clearMessages() {
+            notice.value = null
+            problem.value = null
         }
 
         // Once the player has shown a track of the request's queue, losing it means something else took over
@@ -436,5 +493,6 @@ class SaralViewModel
 
         private companion object {
             const val MAX_GUESSES = 3
+            const val FESTIVAL_STOP_TIMEOUT_MS = 5_000L
         }
     }

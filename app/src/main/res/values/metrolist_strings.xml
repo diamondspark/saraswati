@@ -1132,4 +1132,21 @@
     <string name="saral_voice_offline" translatable="false">इंटरनेट के बिना खोज नहीं हो सकती</string>
     <string name="saral_voice_failed" translatable="false">बोलकर खोजना अभी नहीं हो सका</string>
     <string name="saral_voice_unavailable" translatable="false">इस फ़ोन पर बोलकर खोजना उपलब्ध नहीं है</string>
+
+    <!-- SARASWATI: Task 10 — festival banner (Home, English like the rest of the app) and ribbon (Saral, Hindi,
+         never translated). The Hindi greetings are in FestivalCalendar (Diwali's is the approved copy). The Saral
+         words below are the mockup's, except the festival names and "का संगीत", which are NEW and need a
+         native-speaker read. -->
+    <string name="festival_banner_subtitle">A radio of %1$s favourites, one tap away</string>
+    <string name="festival_radio_failed">Couldn\'t start the festival radio</string>
+    <string name="saral_festival_listen" translatable="false">सुनें</string>
+    <string name="saral_festival_ready" translatable="false">त्योहार के गीत तैयार हैं</string>
+    <string name="saral_festival_listen_desc" translatable="false">%1$s के गीत सुनें</string>
+    <string name="saral_festival_music" translatable="false">%1$s का संगीत</string>
+    <string name="saral_festival_diwali" translatable="false">दीपावली</string>
+    <string name="saral_festival_holi" translatable="false">होली</string>
+    <string name="saral_festival_navratri" translatable="false">नवरात्रि</string>
+    <string name="saral_festival_raksha_bandhan" translatable="false">रक्षाबंधन</string>
+    <string name="saral_festival_janmashtami" translatable="false">जन्माष्टमी</string>
+    <string name="saral_festival_generic" translatable="false">त्योहार</string>
 </resources>
