@@ -1,11 +1,17 @@
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { describe, expect, it } from "vitest";
 import { EnvelopeSchema } from "../src/gen/listentogether_pb";
-import { CodecError, decodeEnvelope, encodeEnvelope } from "../src/sangat/codec";
+import {
+  CodecError,
+  decodeEnvelope,
+  encodeEnvelope,
+  gunzipCapped,
+} from "../src/sangat/codec";
 import {
   COMPRESSION_THRESHOLD_BYTES,
   ENVELOPE_TYPE_MAX,
   MAX_DECODED_PAYLOAD_BYTES,
+  MAX_READ_MESSAGE_BYTES,
 } from "../src/sangat/limits";
 
 async function gzip(bytes: Uint8Array): Promise<Uint8Array> {
@@ -15,6 +21,29 @@ async function gzip(bytes: Uint8Array): Promise<Uint8Array> {
       controller.close();
     },
   });
+  const stream = source.pipeThrough(new CompressionStream("gzip"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+// Gzips `totalBytes` of zeros without ever holding them: a pull-based source
+// feeds one reused 64 KiB chunk at a time into CompressionStream.
+async function gzipZeros(totalBytes: number): Promise<Uint8Array> {
+  const chunk = new Uint8Array(64 * 1024);
+  let remaining = totalBytes;
+  const source = new ReadableStream<Uint8Array>(
+    {
+      pull(controller) {
+        if (remaining <= 0) {
+          controller.close();
+          return;
+        }
+        const n = Math.min(chunk.byteLength, remaining);
+        remaining -= n;
+        controller.enqueue(chunk.subarray(0, n));
+      },
+    },
+    { highWaterMark: 0 },
+  );
   const stream = source.pipeThrough(new CompressionStream("gzip"));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
@@ -107,6 +136,15 @@ describe("sangat envelope codec", () => {
     expect(Array.from(decoded.payload)).toEqual(Array.from(original));
   });
 
+  it("decodes a compressed payload that spans many input slices", async () => {
+    const original = noise(100_000);
+    const compressed = await gzip(original);
+    expect(compressed.length).toBeGreaterThan(50_000);
+    const decoded = await decodeEnvelope(envelopeBytes("big_queue", compressed, true));
+    expect(decoded.payload.length).toBe(original.length);
+    expect(decoded.payload.every((b, i) => b === original[i])).toBe(true);
+  });
+
   it("decodes a payload that inflates to exactly 1048576 bytes", async () => {
     const original = new Uint8Array(MAX_DECODED_PAYLOAD_BYTES).fill(9);
     const wire = envelopeBytes("big", await gzip(original), true);
@@ -148,4 +186,39 @@ describe("sangat envelope codec", () => {
     await expectInvalid(decodeEnvelope(new Uint8Array([0xff, 0xff, 0xff, 0xff])));
     await expectInvalid(decodeEnvelope(new Uint8Array([0x0a, 0x7f, 0x61])));
   });
+
+  it("rejects a message longer than the 524288-byte read limit before decoding it", async () => {
+    await expectInvalid(decodeEnvelope(new Uint8Array(MAX_READ_MESSAGE_BYTES + 1)));
+
+    // 10 bytes of framing for type "ping" plus a 3-byte payload length.
+    const payload = new Uint8Array(MAX_READ_MESSAGE_BYTES - 10).fill(3);
+    const atLimit = envelopeBytes("ping", payload, false);
+    expect(atLimit.length).toBe(MAX_READ_MESSAGE_BYTES);
+    const decoded = await decodeEnvelope(atLimit);
+    expect(decoded.payload.length).toBe(payload.length);
+
+    const over = envelopeBytes("ping", new Uint8Array(payload.length + 1).fill(3), false);
+    expect(over.length).toBe(MAX_READ_MESSAGE_BYTES + 1);
+    await expectInvalid(decodeEnvelope(over));
+  });
+
+  it("rejects a 256 MiB gzip bomb after reading only a sliver of its input", async () => {
+    const bomb = await gzipZeros(256 * 1024 * 1024);
+    expect(bomb.length).toBeLessThan(MAX_READ_MESSAGE_BYTES);
+
+    let fed = 0;
+    const error = await gunzipCapped(bomb, MAX_DECODED_PAYLOAD_BYTES, (n) => {
+      fed += n;
+    }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(CodecError);
+    expect((error as CodecError).code).toBe("invalid_message");
+    // Whole bomb is ~256 KB; a bounded reader stops within a few slices.
+    expect(fed).toBeGreaterThan(0);
+    expect(fed).toBeLessThan(bomb.length / 8);
+
+    await expectInvalid(decodeEnvelope(envelopeBytes("bomb", bomb, true)));
+  }, 60_000);
 });

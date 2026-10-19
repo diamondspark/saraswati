@@ -4,6 +4,7 @@ import {
   COMPRESSION_THRESHOLD_BYTES,
   ENVELOPE_TYPE_MAX,
   MAX_DECODED_PAYLOAD_BYTES,
+  MAX_READ_MESSAGE_BYTES,
 } from "./limits";
 
 export class CodecError extends Error {
@@ -36,35 +37,107 @@ async function gzip(bytes: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await new Response(compressed).arrayBuffer());
 }
 
-// Counts inflated bytes as chunks arrive and stops reading the moment the cap
-// is crossed, so a gzip bomb never gets buffered whole.
-async function gunzipCapped(bytes: Uint8Array, cap: number): Promise<Uint8Array> {
-  const reader = streamOf(bytes)
-    .pipeThrough(new DecompressionStream("gzip"))
-    .getReader();
+// Inflating untrusted gzip inside workerd, found by measuring (a 260 KB bomb
+// that inflates to 256 MiB lifted worker RSS by ~280 MB when written as one
+// chunk, against the Durable Object's 128 MB cap):
+//
+// 1. DecompressionStream inflates a whole write before it yields anything, so
+//    the compressed bytes go in as small slices. One slice inflates to at most
+//    SLICE_BYTES * 1032 (deflate's best ratio).
+// 2. The reader drains output chunks only as the event loop turns, so the
+//    writer waits a turn after every slice. Otherwise it races far ahead of
+//    the byte count and the cap never gets a chance to stop it.
+// 3. A breach is not cancelled. abort()/cancel() left ~1-2 MB per bomb
+//    unreclaimed across a loop of bombs; closing the stream and reading it to
+//    its end (discarding the at most one slice of output in flight) did not.
+// 4. Held chunk arrays are emptied explicitly: after this function returned,
+//    an array kept in its scope still leaked ~1 MiB per call.
+const SLICE_BYTES = 4096;
+const POST_BREACH_DISCARD_MAX = 8 * 1024 * 1024;
+
+const nextTurn = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+// Exported for tests; `onSlice` reports each slice fed to the inflater.
+export async function gunzipCapped(
+  bytes: Uint8Array,
+  cap: number,
+  onSlice?: (sliceBytes: number) => void,
+): Promise<Uint8Array> {
+  const stream = new DecompressionStream("gzip");
+  const writer = stream.writable.getWriter();
+  const reader = stream.readable.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
-  try {
+  let overCap = false;
+  let abandoned = false;
+
+  const draining = (async () => {
     for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > cap) {
-        await reader.cancel().catch(() => undefined);
-        throw new CodecError(`payload inflates past ${cap} bytes`);
+      let result: ReadableStreamReadResult<Uint8Array>;
+      try {
+        result = await reader.read();
+      } catch (error) {
+        // Closing mid-stream after a breach ends in a truncation error; expected.
+        if (overCap) return;
+        throw error;
       }
-      chunks.push(value);
+      const { done, value } = result;
+      if (done) return;
+      total += value.byteLength;
+      if (overCap) {
+        if (total > cap + POST_BREACH_DISCARD_MAX) {
+          abandoned = true;
+          return;
+        }
+      } else if (total > cap) {
+        overCap = true;
+        chunks.length = 0;
+      } else {
+        chunks.push(value);
+      }
     }
+  })();
+
+  const feeding = (async () => {
+    try {
+      for (let offset = 0; offset < bytes.byteLength && !overCap; offset += SLICE_BYTES) {
+        const slice = bytes.subarray(offset, offset + SLICE_BYTES);
+        onSlice?.(slice.byteLength);
+        await writer.write(slice);
+        await nextTurn();
+      }
+      await writer.close();
+    } catch (error) {
+      // Closing mid-stream after a breach rejects as truncated; draining decides.
+      if (!overCap) throw error;
+    }
+  })();
+  // feeding only matters when it fails; the read side decides when we are done.
+  const feedFailed = new Promise<never>((_, reject) => {
+    feeding.catch(reject);
+  });
+  feedFailed.catch(() => undefined);
+
+  const release = () =>
+    Promise.allSettled([writer.abort(), reader.cancel()]).then(() => undefined);
+
+  try {
+    await Promise.race([draining, feedFailed]);
   } catch (error) {
-    if (error instanceof CodecError) throw error;
+    await release();
+    if (overCap) throw new CodecError(`payload inflates past ${cap} bytes`);
     throw new CodecError("payload is not valid gzip", { cause: error });
   }
+  if (abandoned) await release();
+  if (overCap) throw new CodecError(`payload inflates past ${cap} bytes`);
+
   const out = new Uint8Array(total);
-  let offset = 0;
+  let pos = 0;
   for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.byteLength;
+    out.set(chunk, pos);
+    pos += chunk.byteLength;
   }
+  chunks.length = 0;
   return out;
 }
 
@@ -88,6 +161,9 @@ export async function encodeEnvelope(
 export async function decodeEnvelope(
   bytes: Uint8Array,
 ): Promise<{ type: string; payload: Uint8Array }> {
+  if (bytes.byteLength > MAX_READ_MESSAGE_BYTES) {
+    throw new CodecError(`message longer than ${MAX_READ_MESSAGE_BYTES} bytes`);
+  }
   let envelope;
   try {
     envelope = fromBinary(EnvelopeSchema, bytes);
