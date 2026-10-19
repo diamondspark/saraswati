@@ -14,6 +14,7 @@ package com.metrolist.music.saraswati.security
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import java.security.KeyStore
+import java.security.KeyStoreException
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 
@@ -27,18 +28,47 @@ interface AesGcmKeyProvider {
  * TEE-backed hardware key otherwise. No user authentication is required:
  * the app must be able to read the cookie right after boot with no unlock
  * prompt, so requiring auth would just break playback after a restart.
+ *
+ * SARASWATI: fix wave A (I1) — a key is generated only when the alias is
+ * genuinely absent. A key that exists but cannot be loaded right now (a
+ * Keystore hiccup at startup) is an error for the caller, never a reason to
+ * generate a replacement: that would overwrite the alias and make every value
+ * sealed under the old key permanently unreadable. The Keystore itself is
+ * opened on first use, not at construction, so a failure to open it surfaces
+ * inside [key] (where [CookieVault.open] reports it as Unavailable) and the
+ * next call tries again.
  */
-class AndroidKeystoreKeyProvider(
-    private val alias: String = "saraswati_cookie_v1",
+class AndroidKeystoreKeyProvider internal constructor(
+    private val alias: String,
+    private val store: KeyStoreAccess,
 ) : AesGcmKeyProvider {
-    private val keyStore: KeyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+    constructor(alias: String = "saraswati_cookie_v1") : this(alias, RealKeyStoreAccess(alias))
 
     override fun key(): SecretKey {
-        (keyStore.getKey(alias, null) as? SecretKey)?.let { return it }
-        return generateKey()
+        if (!store.containsAlias()) return store.generate()
+        return store.load() ?: throw KeyStoreException("Keystore key '$alias' exists but could not be loaded")
     }
+}
 
-    private fun generateKey(): SecretKey {
+/** The three Keystore operations [AndroidKeystoreKeyProvider] decides between; a seam so a JVM test can fail each. */
+internal interface KeyStoreAccess {
+    fun containsAlias(): Boolean
+
+    fun load(): SecretKey?
+
+    fun generate(): SecretKey
+}
+
+private class RealKeyStoreAccess(
+    private val alias: String,
+) : KeyStoreAccess {
+    private val keyStore: KeyStore by lazy { KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) } }
+
+    override fun containsAlias(): Boolean = keyStore.containsAlias(alias)
+
+    override fun load(): SecretKey? = keyStore.getKey(alias, null) as? SecretKey
+
+    override fun generate(): SecretKey {
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
         return try {
             generator.init(buildSpec(strongBoxBacked = true))
@@ -61,8 +91,8 @@ class AndroidKeystoreKeyProvider(
             .setIsStrongBoxBacked(strongBoxBacked)
             .build()
 
-    companion object {
-        private const val ANDROID_KEYSTORE = "AndroidKeyStore"
+    private companion object {
+        const val ANDROID_KEYSTORE = "AndroidKeyStore"
     }
 }
 

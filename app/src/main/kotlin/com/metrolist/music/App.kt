@@ -29,6 +29,7 @@ import com.metrolist.kugou.KuGou
 import com.metrolist.lastfm.LastFM
 import com.metrolist.music.BuildConfig
 import com.metrolist.music.saraswati.SaraswatiFeatures
+import com.metrolist.music.saraswati.security.OpenResult
 import com.metrolist.music.saraswati.security.SaraswatiVault
 import com.metrolist.music.saraswati.security.SecretScrubber
 import com.metrolist.music.constants.*
@@ -60,6 +61,7 @@ import java.net.PasswordAuthentication
 import java.net.Proxy
 import java.util.Locale
 import javax.inject.Inject
+import kotlin.coroutines.cancellation.CancellationException
 
 @HiltAndroidApp
 class App :
@@ -110,32 +112,42 @@ class App :
         // sign-in cookie, or an AI/Last.fm/Listen-Together/proxy
         // credential) that a restored Metrolist backup, a phone-to-phone
         // transfer, or a hand-copied legacy datastore file could have left
-        // behind (audit NEW-3; Review Focus #4). This runs synchronously,
-        // not inside applicationScope.launch: Android does not create any
-        // Activity (and therefore cannot run any Compose code that reads
-        // InnerTubeCookieKey via rememberPreference) until
-        // Application.onCreate() returns, so blocking here guarantees the
-        // scrub finishes before observeSettingsChanges() below — or
-        // anything else in this process — ever reads the cookie.
+        // behind (audit NEW-3; Review Focus #4).
         //
-        // SARASWATI (fix round 1; updated for I5): a broken/custom-ROM
+        // SARASWATI (I4): the scrub is two phases (see SecretScrubber). Phase 1
+        // (plaintext) needs no Keystore and still runs to completion before
+        // this returns, so nothing in this process can read a plaintext secret:
+        // Android does not create any Activity (and therefore cannot run any
+        // Compose code that reads a secret via rememberPreference) until
+        // Application.onCreate() returns, and observeSettingsChanges() below
+        // starts after it. Phase 2 opens each vault-sealed value with the
+        // Keystore and so runs on IO, not awaited: every read of a sealed value
+        // opens it first and never returns one the vault rejects, so no reader
+        // depends on phase 2 having run. Only the DataStore file work of phase 1
+        // is still on Main, as it has always been; the Keystore is off Main.
+        //
+        // SARASWATI (fix round 1; updated for I1): a broken/custom-ROM
         // Keystore implementation (seen on some Samsung/Xiaomi phones) can
-        // make AndroidKeystoreKeyProvider.key() throw even after the
-        // StrongBox fallback — e.g. a java.security.ProviderException.
-        // CookieVault.open() (which scrub() calls) now also catches
-        // RuntimeException/ProviderException and returns null instead of
-        // propagating it (I5), so this specific failure is already covered
-        // one layer down; this outer try/catch is kept as defense-in-depth
-        // for anything else scrub() could still throw (e.g. a DataStore IO
-        // failure from the edit {} call). Uncaught, any such failure would
-        // crash the app on every single launch with no recovery short of an
-        // uninstall. Catching here instead skips this boot's scrub
-        // (SecretScrubber runs again next boot; the worst case is a secret
-        // preference surviving a little longer, not an unusable app).
+        // make AndroidKeystoreKeyProvider.key() throw. CookieVault.open()
+        // reports that as Unavailable and phase 2 keeps the value and retries
+        // next start, so a Keystore hiccup no longer deletes the hub
+        // credentials (I1). These try/catches stay as defense-in-depth for
+        // anything else the scrub could still throw (e.g. a DataStore IO
+        // failure from the edit {} call): uncaught, it would crash the app on
+        // every single launch with no recovery short of an uninstall.
         try {
-            runBlocking { SecretScrubber.scrub(dataStore, SaraswatiVault.cookieVault) }
+            runBlocking { SecretScrubber.scrubPlaintext(dataStore) }
         } catch (e: Exception) {
-            Timber.w(e, "SecretScrubber.scrub failed, skipping this boot's scrub")
+            Timber.w(e, "SecretScrubber.scrubPlaintext failed, skipping this boot's scrub")
+        }
+        applicationScope.launch(Dispatchers.IO) {
+            try {
+                SecretScrubber.scrubSealed(dataStore, SaraswatiVault.cookieVault)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Timber.w(e, "SecretScrubber.scrubSealed failed, skipping this boot's check")
+            }
         }
 
         InnerTubeXPlayer.initialize(this)
@@ -298,7 +310,14 @@ class App :
                         // it to YouTube.cookie. SecretScrubber already ran above, so
                         // in the normal case this is just the hot-reload path for a
                         // cookie this app itself sealed.
-                        YouTube.cookie = stored?.let { SaraswatiVault.cookieVault.open(it) }
+                        // SARASWATI (I1): an unavailable Keystore says nothing about the
+                        // cookie, so it keeps the current one; only a missing or rejected
+                        // value clears it. Nothing is deleted here either way.
+                        when (val opened = stored?.let { SaraswatiVault.cookieVault.open(it) }) {
+                            is OpenResult.Opened -> YouTube.cookie = opened.plaintext
+                            OpenResult.Unavailable -> Timber.w("Keystore unavailable; keeping the current YouTube cookie")
+                            OpenResult.Rejected, null -> YouTube.cookie = null
+                        }
                     } catch (e: Exception) {
                         Timber.e(e, "Could not parse cookie. Clearing existing cookie.")
                         forgetAccount(this@App)

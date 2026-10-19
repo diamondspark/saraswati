@@ -15,6 +15,7 @@
 package com.metrolist.music.saraswati.family
 
 import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import com.metrolist.music.constants.FamilyAdminKeyKey
@@ -25,7 +26,10 @@ import com.metrolist.music.constants.FamilyStationsSavedKey
 import com.metrolist.music.constants.IsFamilyOwnerKey
 import com.metrolist.music.saraswati.security.CookieVault
 import com.metrolist.music.saraswati.security.SealedPreferences
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 
 /** A paired phone's hub identity. [toString] never prints the token. */
 data class FamilySession(
@@ -69,67 +73,104 @@ interface FamilyStore {
     suspend fun markStationsSaved()
 }
 
+/**
+ * SARASWATI: fix wave A (I1, I4) — every read, unseal, seal and write runs on
+ * [io], so the Keystore is never touched on the caller's thread (Main, for the
+ * view models). A value the Keystore cannot open right now reads as absent but
+ * is never removed here: nothing in this class deletes a credential because
+ * it failed to open. Secrets are sealed before the DataStore edit, on [io]
+ * explicitly, rather than inside the edit's transform, which runs wherever the
+ * DataStore's own scope puts it.
+ */
 class DataStoreFamilyStore(
     private val dataStore: DataStore<Preferences>,
     private val vault: CookieVault,
+    private val io: CoroutineDispatcher = Dispatchers.IO,
 ) : FamilyStore {
     private suspend fun prefs() = dataStore.data.first()
 
     private fun Preferences.sealed(key: Preferences.Key<String>): String? = SealedPreferences.unseal(key, this[key], vault)
 
-    override suspend fun adminKey(): String? = prefs().sealed(FamilyAdminKeyKey)
+    // An empty secret means "no credential" (as in SealedPreferences.write), so it is removed, not sealed.
+    private fun sealedOrNull(
+        key: Preferences.Key<String>,
+        value: String,
+    ): String? = if (value.isEmpty()) null else SealedPreferences.seal(key, value, vault)
 
-    override suspend fun saveOwner(adminKey: String) {
-        dataStore.edit {
-            SealedPreferences.write(it, FamilyAdminKeyKey, adminKey, vault)
-            it[IsFamilyOwnerKey] = true
+    private fun MutablePreferences.put(
+        key: Preferences.Key<String>,
+        sealed: String?,
+    ) {
+        if (sealed == null) remove(key) else this[key] = sealed
+    }
+
+    override suspend fun adminKey(): String? = withContext(io) { prefs().sealed(FamilyAdminKeyKey) }
+
+    override suspend fun saveOwner(adminKey: String) =
+        withContext(io) {
+            val sealed = sealedOrNull(FamilyAdminKeyKey, adminKey)
+            dataStore.edit {
+                it.put(FamilyAdminKeyKey, sealed)
+                it[IsFamilyOwnerKey] = true
+            }
+            Unit
         }
-    }
 
-    override suspend fun session(): FamilySession? {
-        val prefs = prefs()
-        val deviceId = prefs[FamilyDeviceIdKey] ?: return null
-        val token = prefs.sealed(FamilyHubSessionTokenKey) ?: return null
-        return FamilySession(deviceId, token)
-    }
-
-    override suspend fun pendingClaim(): PendingClaim? {
-        val prefs = prefs()
-        if (prefs.sealed(FamilyHubSessionTokenKey) != null) return null
-        val deviceId = prefs[FamilyDeviceIdKey] ?: return null
-        val secret = prefs.sealed(FamilyHubClaimSecretKey) ?: return null
-        return PendingClaim(deviceId, secret)
-    }
-
-    override suspend fun savePendingClaim(claim: PendingClaim) {
-        dataStore.edit {
-            it.remove(FamilyHubSessionTokenKey)
-            it[FamilyDeviceIdKey] = claim.deviceId
-            SealedPreferences.write(it, FamilyHubClaimSecretKey, claim.claimSecret, vault)
+    override suspend fun session(): FamilySession? =
+        withContext(io) {
+            val prefs = prefs()
+            val deviceId = prefs[FamilyDeviceIdKey] ?: return@withContext null
+            val token = prefs.sealed(FamilyHubSessionTokenKey) ?: return@withContext null
+            FamilySession(deviceId, token)
         }
-    }
+
+    override suspend fun pendingClaim(): PendingClaim? =
+        withContext(io) {
+            val prefs = prefs()
+            if (prefs.sealed(FamilyHubSessionTokenKey) != null) return@withContext null
+            val deviceId = prefs[FamilyDeviceIdKey] ?: return@withContext null
+            val secret = prefs.sealed(FamilyHubClaimSecretKey) ?: return@withContext null
+            PendingClaim(deviceId, secret)
+        }
+
+    override suspend fun savePendingClaim(claim: PendingClaim) =
+        withContext(io) {
+            val sealed = sealedOrNull(FamilyHubClaimSecretKey, claim.claimSecret)
+            dataStore.edit {
+                it.remove(FamilyHubSessionTokenKey)
+                it[FamilyDeviceIdKey] = claim.deviceId
+                it.put(FamilyHubClaimSecretKey, sealed)
+            }
+            Unit
+        }
 
     override suspend fun completeClaim(
         deviceId: String,
         sessionToken: String,
-    ) {
+    ) = withContext(io) {
+        val sealed = sealedOrNull(FamilyHubSessionTokenKey, sessionToken)
         dataStore.edit {
             it[FamilyDeviceIdKey] = deviceId
-            SealedPreferences.write(it, FamilyHubSessionTokenKey, sessionToken, vault)
+            it.put(FamilyHubSessionTokenKey, sealed)
             it.remove(FamilyHubClaimSecretKey)
         }
+        Unit
     }
 
-    override suspend fun clearPendingClaim() {
-        dataStore.edit {
-            it.remove(FamilyHubClaimSecretKey)
-            if (it[FamilyHubSessionTokenKey] == null) it.remove(FamilyDeviceIdKey)
+    override suspend fun clearPendingClaim() =
+        withContext(io) {
+            dataStore.edit {
+                it.remove(FamilyHubClaimSecretKey)
+                if (it[FamilyHubSessionTokenKey] == null) it.remove(FamilyDeviceIdKey)
+            }
+            Unit
         }
-    }
 
-    override suspend fun stationsEverSaved(): Boolean = prefs()[FamilyStationsSavedKey] == true
+    override suspend fun stationsEverSaved(): Boolean = withContext(io) { prefs()[FamilyStationsSavedKey] == true }
 
-    override suspend fun markStationsSaved() {
-        dataStore.edit { it[FamilyStationsSavedKey] = true }
-    }
+    override suspend fun markStationsSaved() =
+        withContext(io) {
+            dataStore.edit { it[FamilyStationsSavedKey] = true }
+            Unit
+        }
 }

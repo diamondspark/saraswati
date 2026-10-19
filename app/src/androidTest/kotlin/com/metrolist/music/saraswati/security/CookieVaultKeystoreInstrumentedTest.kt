@@ -43,7 +43,7 @@ class CookieVaultKeystoreInstrumentedTest {
         val sealed = SaraswatiVault.cookieVault.seal(cookie)
         val opened = SaraswatiVault.cookieVault.open(sealed)
 
-        assertEquals("round trip through the real Keystore must return the original cookie", cookie, opened)
+        assertEquals("round trip through the real Keystore must return the original cookie", OpenResult.Opened(cookie), opened)
         assertFalse("sealed text must not contain the plaintext cookie", sealed.contains(cookie))
     }
 
@@ -61,7 +61,7 @@ class CookieVaultKeystoreInstrumentedTest {
         val second = SaraswatiVault.cookieVault.seal(cookie)
 
         assertNotEquals("two seals of the same plaintext must not be byte-identical", first, second)
-        assertEquals(cookie, SaraswatiVault.cookieVault.open(first))
-        assertEquals(cookie, SaraswatiVault.cookieVault.open(second))
+        assertEquals(OpenResult.Opened(cookie), SaraswatiVault.cookieVault.open(first))
+        assertEquals(OpenResult.Opened(cookie), SaraswatiVault.cookieVault.open(second))
     }
 }

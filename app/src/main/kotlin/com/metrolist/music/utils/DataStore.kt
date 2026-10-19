@@ -23,6 +23,7 @@ import com.metrolist.music.saraswati.security.SealedPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -130,9 +131,21 @@ fun <T> rememberPreference(
 
     val state =
         remember {
-            context.dataStore.data
-                .map { unsealIfCookie(key, it[key]) ?: defaultValue }
-                .distinctUntilChanged()
+            // SARASWATI (I4): a sealed key is decrypted with the Keystore, which must not run on
+            // Main (collectAsStateWithLifecycle collects there), and only when its own raw value
+            // changed, not on every unrelated preference write. Other keys are read as upstream does.
+            if (SealedPreferences.isSealed(key)) {
+                context.dataStore.data
+                    .map { it[key] }
+                    .distinctUntilChanged()
+                    .map { unsealIfCookie(key, it) ?: defaultValue }
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.IO)
+            } else {
+                context.dataStore.data
+                    .map { unsealIfCookie(key, it[key]) ?: defaultValue }
+                    .distinctUntilChanged()
+            }
         }.collectAsStateWithLifecycle(defaultValue)
 
     return remember {
