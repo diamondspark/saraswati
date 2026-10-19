@@ -25,6 +25,10 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.audiofx.AudioEffect
 import com.metrolist.music.playback.audio.VolumeNormalizationAudioProcessor
+import com.metrolist.music.constants.ListenTogetherUsernameKey
+import com.metrolist.music.saraswati.family.PlaybackStatsPlan
+import com.metrolist.music.saraswati.family.TastePolicy
+import com.metrolist.music.saraswati.family.parivaar.ParivaarMixQueue
 import com.metrolist.music.saraswati.security.StartActions
 import com.metrolist.music.utils.safeDataStoreEdit
 import android.net.ConnectivityManager
@@ -113,6 +117,7 @@ import com.metrolist.music.constants.AutoDownloadOnLikeKey
 import com.metrolist.music.constants.AutoLoadMoreKey
 import com.metrolist.music.constants.AutoSkipNextOnErrorKey
 import com.metrolist.music.constants.AutoplayKey
+import com.metrolist.music.constants.CountSharedPlaysKey
 import com.metrolist.music.constants.CrossfadeDurationKey
 import com.metrolist.music.constants.CrossfadeEnabledKey
 import com.metrolist.music.constants.CrossfadeGaplessKey
@@ -4070,9 +4075,25 @@ class MusicService :
         val mediaItem = eventTime.timeline.getWindow(eventTime.windowIndex, Timeline.Window()).mediaItem
         val historyDurationMs = dataStore[HistoryDuration]?.times(1000f) ?: 30000f
 
-        if (playbackStats.totalPlayTimeMs >= historyDurationMs &&
-            !dataStore.get(PauseListenHistoryKey, false)
-        ) {
+        // SARASWATI: Phase 4 Task 13 — a song someone else picked in a Sangat, and the Parivaar Mix, do not shape
+        // this person's taste unless CountSharedPlaysKey is on; the same verdict gates the local row and YouTube.
+        val playContext =
+            TastePolicy.resolve(
+                inRoom = listenTogetherManager.isInRoom,
+                isHost = listenTogetherManager.isHost,
+                myUsername = dataStore.get(ListenTogetherUsernameKey, ""),
+                suggestedBy = mediaItem.metadata?.suggestedBy,
+                queueIsParivaarMix = currentQueue is ParivaarMixQueue,
+            )
+        val plan =
+            PlaybackStatsPlan.of(
+                totalPlayTimeMs = playbackStats.totalPlayTimeMs,
+                historyDurationMs = historyDurationMs.toLong(),
+                historyPaused = dataStore.get(PauseListenHistoryKey, false),
+                counts = TastePolicy.counts(playContext, dataStore.get(CountSharedPlaysKey, false)),
+            )
+
+        if (plan.writeLocalEvent) {
             database.query {
                 incrementTotalPlayTime(mediaItem.mediaId, playbackStats.totalPlayTimeMs)
                 try {
@@ -4088,7 +4109,7 @@ class MusicService :
             }
         }
 
-        if (playbackStats.totalPlayTimeMs >= historyDurationMs) {
+        if (plan.registerWithYouTube) {
             scope.launch(Dispatchers.IO) {
                 val playbackUrl =
                     playbackUrlCache[cacheKey(mediaItem.mediaId)]

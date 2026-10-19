@@ -593,6 +593,10 @@ val ParivaarMixKey = stringPreferencesKey("parivaarMix")
 // registration, so a restored backup must not point a phone at another account's playlist (BackupPolicy).
 val ParivaarPlaylistIdKey = stringPreferencesKey("parivaarPlaylistId")
 val ParivaarTopSongsSyncedAtKey = longPreferencesKey("parivaarTopSongsSyncedAt")
+
+// SARASWATI: Phase 4 Task 13 — off by default: plays of a song someone else picked in a Sangat, and of the Parivaar
+// Mix, leave no listen history and no YouTube watch history (TastePolicy). On, they count like any other play.
+val CountSharedPlaysKey = booleanPreferencesKey("saraswatiCountSharedPlays")
 val AccountNameKey = stringPreferencesKey("accountName")
 val AccountEmailKey = stringPreferencesKey("accountEmail")
 val AccountChannelHandleKey = stringPreferencesKey("accountChannelHandle")

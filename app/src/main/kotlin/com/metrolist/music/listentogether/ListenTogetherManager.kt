@@ -11,8 +11,10 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import com.metrolist.innertube.YouTube
+import com.metrolist.innertube.models.YouTubeClient
 import com.metrolist.innertube.models.WatchEndpoint
 import com.metrolist.music.constants.ListenTogetherSyncVolumeKey
+import com.metrolist.music.constants.ListenTogetherUsernameKey
 import com.metrolist.music.extensions.currentMetadata
 import com.metrolist.music.extensions.metadata
 import com.metrolist.music.extensions.toMediaItem
@@ -22,6 +24,7 @@ import com.metrolist.music.models.MediaMetadata.Artist
 import com.metrolist.music.models.toMediaMetadata
 import com.metrolist.music.playback.PlayerConnection
 import com.metrolist.music.playback.queues.YouTubeQueue
+import com.metrolist.music.saraswati.family.sangat.PassengerPlayCredit
 import com.metrolist.music.saraswati.family.sangat.RemoteControllerMode
 import com.metrolist.music.saraswati.family.sangat.RemoteControllerPolicy
 import com.metrolist.music.saraswati.family.sangat.RemoteEventRouter
@@ -39,6 +42,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -89,6 +94,7 @@ class ListenTogetherManager
             private const val HARD_SYNC_THRESHOLD_MS = 750L
             private const val DRIFT_CORRECTION_SPEED = 0.02f
             private const val DRIFT_CHECK_INTERVAL_MS = 250L
+            private const val PASSENGER_CREDIT_TICK_MS = 5_000L // SARASWATI
         }
 
         private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -107,6 +113,46 @@ class ListenTogetherManager
         init {
             observePreferences()
             RemoteControllerStore.restore(context, scope, remoteMode)
+            observePassengerCredit()
+        }
+
+        // SARASWATI: Phase 4 Task 13 — this phone plays nothing as a remote controller, so a song it picked is
+        // credited to its own YouTube history from the room state once it has played long enough. The ticker
+        // lets a long song be credited without waiting for the next room update.
+        private fun observePassengerCredit() {
+            val credit = PassengerPlayCredit()
+            val ticker =
+                flow {
+                    while (true) {
+                        emit(Unit)
+                        delay(PASSENGER_CREDIT_TICK_MS)
+                    }
+                }
+            scope.launch {
+                combine(remoteNowPlaying, ticker) { now, _ -> now }.collect { now ->
+                    val username = context.dataStore.data.first()[ListenTogetherUsernameKey].orEmpty()
+                    val id =
+                        credit.onRoomState(
+                            videoId = now?.track?.id,
+                            suggestedBy = now?.track?.suggestedBy,
+                            isPlaying = now?.isPlaying == true,
+                            myUsername = username,
+                        )
+                    if (id != null) registerPassengerPlay(id)
+                }
+            }
+        }
+
+        private fun registerPassengerPlay(videoId: String) {
+            scope.launch(Dispatchers.IO) {
+                YouTube
+                    .player(videoId, client = YouTubeClient.WEB_REMIX)
+                    .mapCatching { response ->
+                        val url = response.playbackTracking?.videostatsPlaybackUrl?.baseUrl
+                        requireNotNull(url) { "no playback tracking URL for $videoId" }
+                        YouTube.registerPlayback(null, url).getOrThrow()
+                    }.onFailure { Timber.tag(TAG).w(it, "Could not register passenger play") }
+            }
         }
 
         private var playerConnection: PlayerConnection? = null
