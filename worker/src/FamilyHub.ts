@@ -1,9 +1,20 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "./index";
 import { migrate } from "./migrations";
+import { bearerToken, matchRoute } from "./routes";
 import { randomHex, secretsMatch, sha256Hex } from "./secrets";
 
 const PAIRING_TOKEN_TTL_MS = 15 * 60 * 1000;
+// A claimed phone waits for the owner's approval. Past this it can no longer be
+// approved, so a request nobody noticed cannot be waved through hours later.
+const PENDING_APPROVAL_TTL_MS = 60 * 60 * 1000;
+// A configured ADMIN_KEY shorter than this is treated as not set at all, so a
+// weak or truncated secret fails closed instead of being brute-forceable.
+const MIN_ADMIN_KEY_LENGTH = 32;
+// Names are shown to the owner when approving. Cap them, and strip anything
+// that can reorder, hide or forge what is displayed (control and format
+// characters, which include bidi overrides and zero-width characters).
+const MAX_DEVICE_NAME_LENGTH = 64;
 const MAX_STATIONS = 6;
 
 // /health: at most one accepted report per device per 5 minutes.
@@ -60,11 +71,16 @@ interface RosterRow extends Record<string, SqlStorageValue> {
   status: string;
   approvedAt: number | null;
   role: string;
+  claimedAt: number | null;
 }
 
 interface RosterStatusRow extends Record<string, SqlStorageValue> {
   deviceId: string;
   status: string;
+}
+
+interface RosterApprovalRow extends RosterStatusRow {
+  claimedAt: number | null;
 }
 
 interface DeviceAuthRow extends Record<string, SqlStorageValue> {
@@ -235,6 +251,20 @@ function parseHealthReport(
   return { deviceId, versionCode, versionName, timezone };
 }
 
+/**
+ * The name to store, or null when nothing is left of it. Control (Cc) and
+ * format (Cf) characters go first, then surrounding whitespace, then the cap,
+ * counted in characters rather than UTF-16 units so an emoji is never cut in
+ * half.
+ */
+function cleanDeviceName(raw: string): string | null {
+  const cleaned = raw.replace(/[\p{Cc}\p{Cf}]/gu, "").trim();
+  if (cleaned === "") {
+    return null;
+  }
+  return Array.from(cleaned).slice(0, MAX_DEVICE_NAME_LENGTH).join("").trim();
+}
+
 function isDeviceRole(value: unknown): value is DeviceRole {
   return (DEVICE_ROLES as readonly unknown[]).includes(value);
 }
@@ -279,24 +309,26 @@ export class FamilyHub extends DurableObject<Env> {
     request: Request,
     env: Env,
   ): Promise<AuthResult> {
-    const header = request.headers.get("Authorization");
-    if (!header?.startsWith("Bearer ")) {
+    const token = bearerToken(request);
+    if (token === null) {
       return null;
     }
 
-    const token = header.slice("Bearer ".length).trim();
-    if (!token) {
-      return null;
-    }
+    // Both sides are hashed first, so the comparison is over fixed-length
+    // digests and says nothing about the length of either secret.
+    const presented = await sha256Hex(token);
 
-    if (env.ADMIN_KEY && token === env.ADMIN_KEY) {
+    const adminKey: unknown = env.ADMIN_KEY;
+    if (
+      typeof adminKey === "string" &&
+      adminKey.length >= MIN_ADMIN_KEY_LENGTH &&
+      secretsMatch(presented, await sha256Hex(adminKey))
+    ) {
       return { role: "admin" };
     }
 
-    // Only the hash of a session token is stored, so the presented bearer is
-    // hashed and every approved device's hash is compared in constant time,
-    // none of them skipped once one matches.
-    const presented = await sha256Hex(token);
+    // Only the hash of a session token is stored, so every approved device's
+    // hash is compared in constant time, none of them skipped once one matches.
     const rows = this.ctx.storage.sql
       .exec<DeviceAuthRow>(
         "SELECT deviceId, sessionTokenHash, claimSecretHash, pendingSessionToken FROM roster WHERE status = 'approved' AND sessionTokenHash IS NOT NULL",
@@ -413,11 +445,19 @@ export class FamilyHub extends DurableObject<Env> {
   private async handlePairingClaim(request: Request): Promise<Response> {
     const body = await readJsonBody(request);
     const token = typeof body.token === "string" ? body.token : "";
-    const deviceName =
-      typeof body.deviceName === "string" ? body.deviceName : null;
 
     if (!token) {
       return json({ error: "not found" }, 404);
+    }
+
+    // Like the role below, checked before the pairing token is looked up or
+    // spent, so a bad name never burns the owner's link.
+    let deviceName: string | null = null;
+    if (typeof body.deviceName === "string") {
+      deviceName = cleanDeviceName(body.deviceName);
+      if (deviceName === null) {
+        return json({ error: "deviceName must not be empty" }, 400);
+      }
     }
 
     // Checked before the token is looked up or spent, so a malformed role
@@ -548,7 +588,7 @@ export class FamilyHub extends DurableObject<Env> {
 
     const devices = this.ctx.storage.sql
       .exec<RosterRow>(
-        "SELECT deviceId, deviceName, status, approvedAt, role FROM roster",
+        "SELECT deviceId, deviceName, status, approvedAt, role, claimedAt FROM roster",
       )
       .toArray()
       .map((row) => ({
@@ -557,6 +597,7 @@ export class FamilyHub extends DurableObject<Env> {
         status: row.status,
         approvedAt: row.approvedAt,
         role: row.role,
+        claimedAt: row.claimedAt,
       }));
 
     return json({ devices });
@@ -642,14 +683,20 @@ export class FamilyHub extends DurableObject<Env> {
     }
 
     const rows = this.ctx.storage.sql
-      .exec<RosterStatusRow>(
-        "SELECT deviceId, status FROM roster WHERE deviceId = ?",
+      .exec<RosterApprovalRow>(
+        "SELECT deviceId, status, claimedAt FROM roster WHERE deviceId = ?",
         deviceId,
       )
       .toArray();
 
     if (rows.length === 0 || rows[0].status !== "pending") {
       return json({ error: "not found" }, 404);
+    }
+
+    // A request with no recorded claim time is as untrustworthy as an old one.
+    const claimedAt = rows[0].claimedAt;
+    if (claimedAt === null || Date.now() - claimedAt > PENDING_APPROVAL_TTL_MS) {
+      return json({ error: "expired" }, 410);
     }
 
     // The owner is never shown the phone's credential. The plaintext waits in
@@ -902,80 +949,42 @@ export class FamilyHub extends DurableObject<Env> {
   }
 
   async fetch(request: Request): Promise<Response> {
-    const { pathname } = new URL(request.url);
-
-    if (request.method === "GET" && pathname === "/ping") {
-      return new Response("ok", { status: 200 });
+    const route = matchRoute(request.method, new URL(request.url).pathname);
+    if (!route) {
+      return new Response("not found", { status: 404 });
     }
 
-    if (request.method === "POST" && pathname === "/pairing/create") {
-      return this.handlePairingCreate(request);
-    }
-
-    if (request.method === "POST" && pathname === "/pairing/claim") {
-      return this.handlePairingClaim(request);
-    }
-
-    if (request.method === "POST" && pathname === "/pairing/status") {
-      return this.handlePairingStatus(request);
-    }
-
-    if (request.method === "GET" && pathname === "/roster") {
-      return this.handleRosterList(request);
-    }
-
-    const approveMatch = /^\/roster\/([^/]+)\/approve$/.exec(pathname);
-    if (request.method === "POST" && approveMatch) {
-      return this.handleRosterApprove(
-        request,
-        decodeURIComponent(approveMatch[1]),
-      );
-    }
-
-    const revokeMatch = /^\/roster\/([^/]+)\/revoke$/.exec(pathname);
-    if (request.method === "POST" && revokeMatch) {
-      return this.handleRosterRevoke(
-        request,
-        decodeURIComponent(revokeMatch[1]),
-      );
-    }
-
-    const roleMatch = /^\/roster\/([^/]+)\/role$/.exec(pathname);
-    if (request.method === "PUT" && roleMatch) {
-      return this.handleRosterRole(request, decodeURIComponent(roleMatch[1]));
-    }
-
-    if (request.method === "GET" && pathname === "/me") {
-      return this.handleMe(request);
-    }
-
-    if (pathname === "/stations") {
-      if (request.method === "GET") {
+    switch (route.name) {
+      case "ping":
+        return new Response("ok", { status: 200 });
+      case "pairingCreate":
+        return this.handlePairingCreate(request);
+      case "pairingClaim":
+        return this.handlePairingClaim(request);
+      case "pairingStatus":
+        return this.handlePairingStatus(request);
+      case "rosterList":
+        return this.handleRosterList(request);
+      case "rosterApprove":
+        return this.handleRosterApprove(request, route.deviceId as string);
+      case "rosterRevoke":
+        return this.handleRosterRevoke(request, route.deviceId as string);
+      case "rosterRole":
+        return this.handleRosterRole(request, route.deviceId as string);
+      case "me":
+        return this.handleMe(request);
+      case "stationsGet":
         return this.handleStationsGet(request);
-      }
-      if (request.method === "PUT") {
+      case "stationsPut":
         return this.handleStationsPut(request);
-      }
-    }
-
-    if (pathname === "/health") {
-      if (request.method === "POST") {
+      case "healthPost":
         return this.handleHealthPost(request);
-      }
-      if (request.method === "GET") {
+      case "healthGet":
         return this.handleHealthGet(request);
-      }
-    }
-
-    if (pathname === "/killswitches") {
-      if (request.method === "GET") {
+      case "killswitchesGet":
         return this.handleKillSwitchesGet(request);
-      }
-      if (request.method === "PUT") {
+      case "killswitchesPut":
         return this.handleKillSwitchesPut(request);
-      }
     }
-
-    return new Response("not found", { status: 404 });
   }
 }
