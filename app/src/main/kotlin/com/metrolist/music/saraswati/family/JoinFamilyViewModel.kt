@@ -46,8 +46,10 @@ sealed interface JoinUiState {
 
     data object Claiming : JoinUiState
 
-    /** Claimed; waiting for the owner to approve. */
-    data object Waiting : JoinUiState
+    /** Claimed; waiting for the owner to approve. [code] is the four characters the person says to the owner. */
+    data class Waiting(
+        val code: String,
+    ) : JoinUiState
 
     /** Approved and paired. [role] is what the owner set this phone up as. */
     data class Approved(
@@ -105,7 +107,7 @@ class JoinFamilyViewModel
                 val claim = guarded { store.pendingClaim() }
                 if (claim != null) {
                     inbox.take()
-                    _state.value = JoinUiState.Waiting
+                    _state.value = JoinUiState.Waiting(ClaimCode.of(claim.deviceId))
                     poll(claim)
                     return@launch
                 }
@@ -154,7 +156,7 @@ class JoinFamilyViewModel
                         chosenRole = role
                         val pending = PendingClaim(claimed.deviceId, claimed.claimSecret)
                         if (guardedWrite { store.savePendingClaim(pending) }) {
-                            _state.value = JoinUiState.Waiting
+                            _state.value = JoinUiState.Waiting(ClaimCode.of(pending.deviceId))
                             poll(pending)
                         }
                     }.onFailure { failure ->

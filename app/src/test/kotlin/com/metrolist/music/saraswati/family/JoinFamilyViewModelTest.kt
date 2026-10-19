@@ -48,6 +48,9 @@ class JoinFamilyViewModelTest {
         )
     }
 
+    /** The Waiting screen shows the last four characters of the device id the hub issued. */
+    private fun waitingFor(deviceId: String) = JoinUiState.Waiting(ClaimCode.of(deviceId))
+
     private fun awaitState(predicate: (JoinUiState) -> Boolean): JoinUiState =
         runBlocking { withTimeout(5_000) { vm.state.first(predicate) } }
 
@@ -109,8 +112,28 @@ class JoinFamilyViewModelTest {
         vm.claim("  Mummy's Pixel ", DeviceRole.GRANDPARENT)
 
         assertEquals(listOf("claimPairing($TEST_TOKEN,Mummy's Pixel,grandparent)"), hub.callsTo("claimPairing"))
-        assertEquals(JoinUiState.Waiting, vm.state.value)
+        assertEquals(waitingFor("device-1"), vm.state.value)
         assertEquals(PendingClaim("device-1", "claim-secret-device-1"), store.claim)
+    }
+
+    @Test
+    fun `the waiting state carries the four-character code for the person to say aloud`() {
+        hub.devices = listOf(RosterEntry("x", null, "approved", 1L, DeviceRole.ADULT))
+        vm.submitInput(link)
+
+        vm.claim("Mummy's Pixel", DeviceRole.ADULT)
+
+        // FakeHub names the new device "device-2": the last four characters, in capitals.
+        assertEquals(JoinUiState.Waiting("CE-2"), vm.state.value)
+    }
+
+    @Test
+    fun `a claim resumed from storage shows the code of the stored device id`() {
+        store.claim = PendingClaim("3f2b8c1e-9a4d-4f6b-8e2a-1c5d7e9f0a3b", "stored-secret")
+
+        vm.start()
+
+        assertEquals(JoinUiState.Waiting("0A3B"), vm.state.value)
     }
 
     @Test
@@ -162,7 +185,7 @@ class JoinFamilyViewModelTest {
 
         hub.heal("claimPairing")
         vm.claim("Mummy's Pixel", DeviceRole.ADULT)
-        assertEquals(JoinUiState.Waiting, vm.state.value)
+        assertEquals(waitingFor("device-1"), vm.state.value)
     }
 
     @Test
@@ -347,12 +370,12 @@ class JoinFamilyViewModelTest {
     fun `a link that arrives while waiting for approval is dropped, not left for later`() {
         store.claim = PendingClaim("device-9", "stored-secret")
         vm.start()
-        assertEquals(JoinUiState.Waiting, vm.state.value)
+        assertEquals(waitingFor("device-9"), vm.state.value)
 
         inbox.offer(TEST_TOKEN)
         vm.start()
 
-        assertEquals(JoinUiState.Waiting, vm.state.value)
+        assertEquals(waitingFor("device-9"), vm.state.value)
         assertNull(inbox.take())
     }
 
@@ -425,7 +448,7 @@ class JoinFamilyViewModelTest {
         assertEquals(1, hub.callsTo("claimPairing").size)
 
         inFlight.complete(Unit)
-        assertEquals(JoinUiState.Waiting, vm.state.value)
+        assertEquals(waitingFor("device-1"), vm.state.value)
     }
 
     @Test
@@ -481,7 +504,7 @@ class JoinFamilyViewModelTest {
         assertEquals(JoinUiState.Ready(TEST_TOKEN), vm.state.value)
         vm.claim("Mummy's Pixel", DeviceRole.ADULT)
 
-        assertEquals(JoinUiState.Waiting, vm.state.value)
+        assertEquals(waitingFor("device-1"), vm.state.value)
         assertEquals(1, hub.callsTo("claimPairing").size)
         assertEquals(PendingClaim("device-1", "claim-secret-device-1"), store.claim)
     }

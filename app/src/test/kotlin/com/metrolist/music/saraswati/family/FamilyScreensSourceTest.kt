@@ -190,4 +190,65 @@ class FamilyScreensSourceTest {
         )
         assertEquals("the hygiene helper is the only thing that clears the clipboard", 0, Regex("""clearPrimaryClip""").findAll(screen).count())
     }
+    // --- SARASWATI: fix wave B1 — the four-character code, the age and the expiry -----------------------
+
+    private fun string(name: String): String {
+        val strings = source("src/main/res/values/metrolist_strings.xml")
+        return requireNotNull(Regex("""<string name="$name"[^>]*>(.*?)</string>""").find(strings)) { "string $name is missing" }.groupValues[1]
+    }
+
+    @Test
+    fun `the code, age, expiry and hint strings say what the person expects`() {
+        assertEquals("Code: %1\$s", string("family_join_code"))
+        assertEquals("Code %1\$s", string("family_request_code"))
+        assertEquals("2 min ago", String.format(string("family_request_age_minutes"), 2))
+        assertEquals("3 h ago", String.format(string("family_request_age_hours"), 3))
+        assertEquals("just now", string("family_request_age_now"))
+        assertEquals("Expired", string("family_request_expired"))
+        assertEquals("Say the code aloud with the person before you approve.", string("family_requests_hint"))
+        assertEquals("This request has expired. Ask them to send a new request.", string("family_error_expired"))
+    }
+
+    @Test
+    fun `the expired error has its own message`() {
+        assertTrue("FamilyError.EXPIRED has a message", "FamilyError.EXPIRED -> R.string.family_error_expired" in source("$familyDir/FamilyUi.kt"))
+    }
+
+    @Test
+    fun `the join waiting screen shows the code large, in a monospace face`() {
+        val join = source("$familyDir/JoinFamilyScreen.kt")
+        val waiting = join.substringAfter("private fun Waiting(").substringBefore("@Composable")
+
+        assertTrue("Waiting takes the code", waiting.startsWith("code: String)"))
+        assertTrue("the code uses the Code: string", "R.string.family_join_code" in waiting)
+        assertTrue("monospace", "FontFamily.Monospace" in waiting)
+        assertTrue("large", "MaterialTheme.typography.displayMedium" in waiting)
+        assertTrue("the screen passes the state's code", "current is JoinUiState.Waiting -> Waiting(code = current.code" in join)
+    }
+
+    @Test
+    fun `a pending row shows the code and age, and approving is disabled once it expired`() {
+        val manage = source("$familyDir/ManageFamilyScreen.kt")
+        val row = manage.substringAfter("private fun PendingRow(").substringBefore("@Composable")
+
+        assertTrue("the row derives its state from the entry and the clock", "entry.pendingRequest(now)" in row)
+        assertTrue("code shown", "R.string.family_request_code" in row)
+        assertTrue("age shown", "R.string.family_request_age_minutes" in row && "R.string.family_request_age_hours" in row)
+        assertTrue("expiry shown", "R.string.family_request_expired" in row)
+        assertTrue(
+            "Approve is enabled only when the request can still be approved",
+            Regex("""Button\(onClick = onApprove,\s*enabled = request\.canApprove,""").containsMatchIn(row),
+        )
+        assertEquals("exactly one button is gated by the request", 1, Regex("""enabled\s*=""").findAll(row).count())
+        assertTrue("Deny stays", Regex("""OutlinedButton\(onClick = onDeny,\s*modifier""").containsMatchIn(row))
+    }
+
+    @Test
+    fun `the requests card tells the owner to say the code aloud`() {
+        val manage = source("$familyDir/ManageFamilyScreen.kt")
+
+        assertTrue("R.string.family_requests_hint" in manage)
+        assertEquals(1, Regex("""R\.string\.family_requests_hint""").findAll(manage).count())
+        assertTrue("each row gets the screen's clock", "PendingRow(" in manage && "now = now" in manage.substringAfter("pending.forEach"))
+    }
 }

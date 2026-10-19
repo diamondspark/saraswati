@@ -50,6 +50,9 @@ class FakeHub : HubApi {
     /** While set, claimPairing waits on it: a claim that is still in flight. */
     @Volatile var claimGate: CompletableDeferred<Unit>? = null
 
+    /** The time the hub stamps on a claim made through [claimPairing]. */
+    @Volatile var claimClockMs: Long = 1_000L
+
     @Volatile var meRole: DeviceRole = DeviceRole.ADULT
 
     /** false stands in for a /me answer with no role, or one this build does not know. */
@@ -102,7 +105,7 @@ class FakeHub : HubApi {
         claimGate?.await()
         failures["claimPairing"]?.let { return Result.failure(it) }
         val id = "device-${devices.size + 1}"
-        devices = devices + RosterEntry(id, deviceName, "pending", null, role ?: DeviceRole.ADULT)
+        devices = devices + RosterEntry(id, deviceName, "pending", null, role ?: DeviceRole.ADULT, claimedAt = claimClockMs)
         return Result.success(ClaimResult(id, "pending", "claim-secret-$id"))
     }
 
@@ -123,7 +126,8 @@ class FakeHub : HubApi {
         deviceId: String,
     ) = run("approveDevice", "$adminKey,$deviceId") {
         update(deviceId) { it.copy(status = "approved", approvedAt = 1_000L) }
-        ApprovedDevice(deviceId, "session-$deviceId", "approved")
+        // The hardened hub never returns the claiming phone's session token to the owner.
+        ApprovedDevice(deviceId, "approved")
     }
 
     override suspend fun revokeDevice(

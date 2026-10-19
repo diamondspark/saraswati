@@ -42,6 +42,7 @@ fun FamilyError.messageRes(): Int =
         FamilyError.UNAUTHORIZED -> R.string.family_error_unauthorized
         FamilyError.NOT_FOUND -> R.string.family_error_not_found
         FamilyError.GONE -> R.string.family_error_gone
+        FamilyError.EXPIRED -> R.string.family_error_expired
         FamilyError.RATE_LIMITED -> R.string.family_error_rate_limited
         FamilyError.OFFLINE -> R.string.family_error_offline
         FamilyError.NOT_CONFIGURED -> R.string.family_error_not_configured

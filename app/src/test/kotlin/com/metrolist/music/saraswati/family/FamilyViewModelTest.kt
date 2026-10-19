@@ -172,6 +172,43 @@ class FamilyViewModelTest {
         assertEquals(1, hub.callsTo("getRoster").size)
     }
 
+    // SARASWATI: fix wave B1 — the hub answers 410 for approving a request older than an hour.
+    @Test
+    fun `an approve the hub refuses as expired says so, and the roster is read again`() {
+        hub.devices = listOf(mummy)
+        vm.refreshRoster()
+        hub.failWith("approveDevice", hubFailure(410))
+
+        vm.approve("d1")
+
+        assertEquals(FamilyError.EXPIRED, vm.error.value)
+        assertEquals("pending", vm.roster.value.single().status)
+        assertEquals("the row is refreshed so the hub's view of its age shows", 2, hub.callsTo("getRoster").size)
+    }
+
+    @Test
+    fun `a request can still be denied after it expired`() {
+        hub.devices = listOf(mummy)
+        vm.refreshRoster()
+        hub.failWith("approveDevice", hubFailure(410))
+        vm.approve("d1")
+
+        vm.revoke("d1")
+
+        assertEquals(listOf("revokeDevice($TEST_ADMIN_KEY,d1)"), hub.callsTo("revokeDevice"))
+        assertEquals("revoked", vm.roster.value.single().status)
+        assertNull(vm.error.value)
+    }
+
+    @Test
+    fun `the roster keeps the time each request was made`() {
+        hub.devices = listOf(mummy.copy(claimedAt = 1_234L), papa)
+
+        vm.refreshRoster()
+
+        assertEquals(listOf<Long?>(1_234L, null), vm.roster.value.map { it.claimedAt })
+    }
+
     @Test
     fun `a failed revoke is an error`() {
         hub.devices = listOf(papa)
@@ -791,6 +828,26 @@ class FamilyViewModelTest {
         assertEquals(false, vm.killSwitches.value["sangat"])
         assertEquals(false, vm.killSwitches.value["cast_relay"])
         assertEquals(true, vm.killSwitches.value["parivaar_mix"])
+    }
+
+    @Test
+    fun `a kill-switch key the app does not know is ignored`() {
+        hub.killSwitches =
+            linkedMapOf(
+                "sangat" to false,
+                "parivaar_mix" to true,
+                "family_playlists" to true,
+                "cast_relay" to true,
+                "ask_saraswati" to false,
+            )
+
+        vm.loadSettings()
+
+        assertEquals(setOf("sangat", "parivaar_mix", "family_playlists", "cast_relay"), vm.killSwitches.value.keys)
+        assertEquals(false, vm.killSwitches.value["sangat"])
+
+        vm.toggleKillSwitch("sangat", true)
+        assertEquals(setOf("sangat", "parivaar_mix", "family_playlists", "cast_relay"), vm.killSwitches.value.keys)
     }
 
     @Test

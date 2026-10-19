@@ -60,6 +60,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -111,7 +115,7 @@ fun JoinFamilyScreen(
                         onSend = viewModel::claim,
                     )
                 current is JoinUiState.Failed -> PasteLink(error = current.error, onSubmit = viewModel::submitInput)
-                current is JoinUiState.Waiting -> Waiting()
+                current is JoinUiState.Waiting -> Waiting(code = current.code)
                 current is JoinUiState.Approved -> Approved(role = current.role, onDone = { navController.popBackStack() })
                 current is JoinUiState.AlreadyPaired ->
                     Message(
@@ -258,7 +262,7 @@ private fun RoleCard(
 }
 
 @Composable
-private fun Waiting() {
+private fun Waiting(code: String) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(top = 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -266,6 +270,17 @@ private fun Waiting() {
     ) {
         CircularProgressIndicator(modifier = Modifier.size(40.dp))
         Text(stringResource(R.string.family_join_waiting_title), style = MaterialTheme.typography.headlineSmall)
+        // The owner sees the same four characters next to this request; saying them aloud is the check.
+        // A screen reader gets them one at a time, so "0A3B" is not heard as a word.
+        val spoken = stringResource(R.string.family_join_code, code.toList().joinToString(" "))
+        Text(
+            text = stringResource(R.string.family_join_code, code),
+            style = MaterialTheme.typography.displayMedium,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.semantics { contentDescription = spoken },
+        )
         Text(
             stringResource(R.string.family_join_waiting_desc),
             style = MaterialTheme.typography.bodyMedium,

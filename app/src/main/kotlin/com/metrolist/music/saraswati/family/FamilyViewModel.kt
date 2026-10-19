@@ -200,7 +200,13 @@ class FamilyViewModel
                 hub
                     .approveDevice(key, deviceId)
                     .onSuccess { loadRoster(key) }
-                    .onFailure { fail(it) }
+                    .onFailure { failure ->
+                        val error = FamilyError.fromApproval(failure)
+                        _error.value = error
+                        // The hub's clock decided the request was too old: read the roster again so the
+                        // row shows as expired, without letting a failed read replace that message.
+                        if (error == FamilyError.EXPIRED) hub.getRoster(key).onSuccess { _roster.value = it }
+                    }
             }
 
         fun revoke(deviceId: String) =

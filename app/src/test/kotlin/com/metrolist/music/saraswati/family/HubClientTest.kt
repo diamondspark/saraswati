@@ -201,8 +201,8 @@ class HubClientTest {
                 200,
                 """
                 {"devices":[
-                  {"deviceId":"a","deviceName":"Dad's phone","status":"approved","approvedAt":1760000000000,"role":"adult"},
-                  {"deviceId":"b","deviceName":null,"status":"pending","approvedAt":null,"role":"grandparent"}
+                  {"deviceId":"a","deviceName":"Dad's phone","status":"approved","approvedAt":1760000000000,"role":"adult","claimedAt":1759999000000},
+                  {"deviceId":"b","deviceName":null,"status":"pending","approvedAt":null,"role":"grandparent","claimedAt":null}
                 ]}
                 """.trimIndent(),
             )
@@ -211,8 +211,8 @@ class HubClientTest {
 
             assertEquals(
                 listOf(
-                    RosterEntry("a", "Dad's phone", "approved", 1_760_000_000_000L, DeviceRole.ADULT),
-                    RosterEntry("b", null, "pending", null, DeviceRole.GRANDPARENT),
+                    RosterEntry("a", "Dad's phone", "approved", 1_760_000_000_000L, DeviceRole.ADULT, 1_759_999_000_000L),
+                    RosterEntry("b", null, "pending", null, DeviceRole.GRANDPARENT, null),
                 ),
                 result.getOrNull(),
             )
@@ -225,17 +225,41 @@ class HubClientTest {
     // --- approveDevice -------------------------------------------------
 
     @Test
-    fun `approveDevice posts to the device's approve path and parses the session token`() =
+    fun `approveDevice posts to the device's approve path and parses the id and status`() =
         runBlocking {
-            reply(200, """{"deviceId":"dev-1","sessionToken":"sess-1","status":"approved"}""")
+            // The hardened hub answers with no session token at all: it belongs to the claiming phone.
+            reply(200, """{"deviceId":"dev-1","status":"approved"}""")
 
             val result = hub.approveDevice("admin-key", "dev-1")
 
-            assertEquals(ApprovedDevice("dev-1", "sess-1", "approved"), result.getOrNull())
+            assertEquals(ApprovedDevice("dev-1", "approved"), result.getOrNull())
+            assertNull(result.getOrNull()?.sessionToken)
             val request = takeRequest()
             assertEquals("POST", request.method)
             assertEquals("/roster/dev-1/approve", request.url.encodedPath)
             assertEquals("Bearer admin-key", request.headers["Authorization"])
+        }
+
+    @Test
+    fun `an approve answer that still carries a session token is read but the token is dropped`() =
+        runBlocking {
+            reply(200, """{"deviceId":"dev-1","sessionToken":"sess-LEGACY","status":"approved"}""")
+
+            val approved = hub.approveDevice("admin-key", "dev-1").getOrNull()
+
+            assertEquals(ApprovedDevice("dev-1", "approved"), approved)
+            assertNull("the owner's phone never holds the claiming phone's credential", approved?.sessionToken)
+            assertFalse(approved.toString().contains("sess-LEGACY"))
+        }
+
+    @Test
+    fun `an approve the hub refuses after an hour is a 410 and an oversized body a 413, each kept as its status`() =
+        runBlocking {
+            reply(410, """{"error":"expired"}""")
+            assertEquals(410, hub.approveDevice("admin-key", "dev-1").hubException().status)
+
+            reply(413, """{"error":"payload too large"}""")
+            assertEquals(413, hub.claimPairing("tok", "Mummy's Pixel").hubException().status)
         }
 
     // --- revokeDevice --------------------------------------------------
@@ -318,6 +342,67 @@ class HubClientTest {
             )
         }
 
+    // --- tolerance: a hub that knows more than this build ----------------
+
+    @Test
+    fun `a roster claim time is read from a number, and from nothing else`() =
+        runBlocking {
+            reply(
+                200,
+                """
+                {"devices":[
+                  {"deviceId":"a","status":"pending","claimedAt":1760000000000},
+                  {"deviceId":"b","status":"pending"},
+                  {"deviceId":"c","status":"pending","claimedAt":null},
+                  {"deviceId":"d","status":"pending","claimedAt":"yesterday"},
+                  {"deviceId":"e","status":"pending","claimedAt":{"at":1}},
+                  {"deviceId":"f","status":"pending","claimedAt":1760000000000.0},
+                  {"deviceId":"g","status":"pending","claimedAt":true}
+                ]}
+                """.trimIndent(),
+            )
+
+            val devices = hub.getRoster("admin-key").getOrNull().orEmpty()
+
+            assertEquals(
+                listOf(1_760_000_000_000L, null, null, null, null, 1_760_000_000_000L, null),
+                devices.map { it.claimedAt },
+            )
+            assertEquals(listOf("a", "b", "c", "d", "e", "f", "g"), devices.map { it.deviceId })
+        }
+
+    @Test
+    fun `every response model ignores fields it does not know`() =
+        runBlocking {
+            val extra = """"futureField":{"nested":[1,2,3]},"anotherOne":"x""""
+            reply(200, """{"token":"t","expiresAt":"2026-10-19T18:27:00.000Z",$extra}""")
+            assertEquals(PairingToken("t", "2026-10-19T18:27:00.000Z"), hub.createPairing("admin").getOrNull())
+
+            reply(200, """{"deviceId":"d","status":"pending","claimSecret":"s",$extra}""")
+            assertEquals(ClaimResult("d", "pending", "s"), hub.claimPairing("tok", "Name").getOrNull())
+
+            reply(200, """{"status":"approved","sessionToken":"sess",$extra}""")
+            assertEquals(PairingStatus.Approved("sess"), hub.pairingStatus("d", "s").getOrNull())
+
+            reply(200, """{"devices":[{"deviceId":"a","status":"pending","extra":1,$extra}],$extra}""")
+            assertEquals(listOf("a"), hub.getRoster("admin").getOrNull()?.map { it.deviceId })
+
+            reply(200, """{"deviceId":"dev-1","status":"approved",$extra}""")
+            assertEquals(ApprovedDevice("dev-1", "approved"), hub.approveDevice("admin", "dev-1").getOrNull())
+
+            reply(200, """{"deviceId":"dev-1","role":"adult",$extra}""")
+            assertEquals(RoleUpdate("dev-1", DeviceRole.ADULT), hub.setRole("admin", "dev-1", DeviceRole.ADULT).getOrNull())
+
+            reply(200, """{"deviceId":"dev-1","role":"adult",$extra}""")
+            assertEquals(Me("dev-1", DeviceRole.ADULT, true), hub.getMe("sess").getOrNull())
+
+            reply(200, """{"stations":[{"id":"s1","title":"T","seedVideoId":"v","iconIndex":1,"colour":"red"}],$extra}""")
+            assertEquals(listOf(Station("s1", "T", "v", 1)), hub.getStations("admin").getOrNull())
+
+            reply(200, """{"devices":[{"deviceId":"a","versionCode":1,"versionName":"v","timezone":"UTC","lastSeenAt":2,"battery":9}],$extra}""")
+            assertEquals(1, hub.getHealth("admin").getOrNull()?.size)
+        }
+
     // --- getKillSwitches / setKillSwitches -----------------------------
 
     @Test
@@ -340,6 +425,36 @@ class HubClientTest {
             assertEquals("GET", request.method)
             assertEquals("/killswitches", request.url.encodedPath)
             assertEquals("Bearer a-session-token", request.headers["Authorization"])
+        }
+
+    @Test
+    fun `a kill-switch key this build does not know is read and left for the caller to ignore`() =
+        runBlocking {
+            reply(200, """{"sangat":true,"parivaar_mix":false,"family_playlists":true,"cast_relay":true,"ask_saraswati":false}""")
+
+            val result = hub.getKillSwitches("a-session-token").getOrNull().orEmpty()
+
+            assertEquals(false, result["ask_saraswati"])
+            assertEquals(false, result["parivaar_mix"])
+            assertEquals(5, result.size)
+        }
+
+    @Test
+    fun `a kill-switch entry that is not a boolean is skipped, not a failure for the known ones`() =
+        runBlocking {
+            reply(200, """{"sangat":false,"parivaar_mix":"yes","family_playlists":null,"cast_relay":true,"ask_saraswati":{"a":1}}""")
+
+            val result = hub.getKillSwitches("a-session-token")
+
+            assertEquals(mapOf("sangat" to false, "cast_relay" to true), result.getOrNull())
+        }
+
+    @Test
+    fun `a kill-switch answer that is not an object is a failure`() =
+        runBlocking {
+            reply(200, """[true,false]""")
+
+            assertEquals(200, hub.getKillSwitches("a-session-token").hubException().status)
         }
 
     @Test
@@ -586,7 +701,7 @@ class HubClientTest {
         val secret = "super-secret-value"
 
         assertFalse(ClaimResult("d", "pending", secret).toString().contains(secret))
-        assertFalse(ApprovedDevice("d", secret, "approved").toString().contains(secret))
+        assertFalse(ApprovedDevice("d", "approved", secret).toString().contains(secret))
         assertFalse(PairingStatus.Approved(secret).toString().contains(secret))
         assertFalse(PairingToken(secret, "2026-10-19T18:27:00.000Z").toString().contains(secret))
         assertFalse(ClaimRequest(secret, "Mummy's Pixel", DeviceRole.ADULT).toString().contains(secret))
