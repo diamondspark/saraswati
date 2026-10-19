@@ -187,3 +187,127 @@ describe("POST /roster/{id}/revoke", () => {
     expect(response.status).toBe(401);
   });
 });
+
+// Review Focus item 2: a non-owner must get 401 on owner-only routes, not
+// merely be hidden in the app's UI. Missing-header 401s are covered above;
+// these cover a present-but-wrong bearer, a real device session token, and a
+// revoked device's former token.
+describe("admin-only routes reject every non-admin bearer token", () => {
+  const WRONG_BEARER = "cd".repeat(32);
+
+  type Authenticator = {
+    authenticate(request: Request, env: unknown): Promise<unknown>;
+  };
+
+  function adminRoutes(targetDeviceId: string) {
+    return [
+      { method: "POST", path: "/pairing/create" },
+      { method: "GET", path: "/roster" },
+      { method: "POST", path: `/roster/${targetDeviceId}/approve` },
+      { method: "POST", path: `/roster/${targetDeviceId}/revoke` },
+    ];
+  }
+
+  async function expectAllUnauthorized(
+    stub: ReturnType<typeof getFamilyHubStub>,
+    token: string,
+    targetDeviceId: string,
+  ) {
+    for (const { method, path } of adminRoutes(targetDeviceId)) {
+      const response = await stub.fetch(`https://example.com${path}`, {
+        method,
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      expect(response.status, `${method} ${path}`).toBe(401);
+    }
+  }
+
+  async function approveAndGetSessionToken(
+    stub: ReturnType<typeof getFamilyHubStub>,
+    deviceId: string,
+  ) {
+    const response = await stub.fetch(
+      `https://example.com/roster/${deviceId}/approve`,
+      { method: "POST", headers: { Authorization: `Bearer ${TEST_ADMIN_KEY}` } },
+    );
+    expect(response.status).toBe(200);
+    return ((await response.json()) as { sessionToken: string }).sessionToken;
+  }
+
+  function authenticateAs(
+    stub: ReturnType<typeof getFamilyHubStub>,
+    token: string,
+  ) {
+    return runInDurableObject(stub, (instance) =>
+      (instance as unknown as Authenticator).authenticate(
+        new Request("https://example.com/anything", {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        env,
+      ),
+    );
+  }
+
+  it("returns 401 on every admin route for a bearer that is neither the admin key nor a session token", async () => {
+    const stub = getFamilyHubStub();
+    const targetId = "55555555-5555-5555-5555-555555555555";
+    await seedPendingDevice(stub, targetId, "Untouched target");
+
+    await expectAllUnauthorized(stub, WRONG_BEARER, targetId);
+
+    // Rejected requests must not have touched storage.
+    const rosterResponse = await stub.fetch("https://example.com/roster", {
+      headers: { Authorization: `Bearer ${TEST_ADMIN_KEY}` },
+    });
+    const { devices } = (await rosterResponse.json()) as {
+      devices: Array<{ deviceId: string; status: string }>;
+    };
+    expect(devices.find((d) => d.deviceId === targetId)?.status).toBe(
+      "pending",
+    );
+  });
+
+  it("returns 401 on every admin route for an approved device's real session token", async () => {
+    const stub = getFamilyHubStub();
+    const deviceId = "66666666-6666-6666-6666-666666666666";
+    const targetId = "99999999-9999-9999-9999-999999999999";
+    await seedPendingDevice(stub, deviceId, "Approved device");
+    await seedPendingDevice(stub, targetId, "Pending target");
+    const sessionToken = await approveAndGetSessionToken(stub, deviceId);
+
+    // The token is genuinely valid as a device credential...
+    expect(await authenticateAs(stub, sessionToken)).toEqual({
+      role: "device",
+      deviceId,
+    });
+
+    // ...but a device is never the owner.
+    await expectAllUnauthorized(stub, sessionToken, targetId);
+  });
+
+  it("returns 401 on every admin route for a revoked device's former session token", async () => {
+    const stub = getFamilyHubStub();
+    const deviceId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    const targetId = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+    await seedPendingDevice(stub, deviceId, "Soon revoked");
+    await seedPendingDevice(stub, targetId, "Pending target");
+    const sessionToken = await approveAndGetSessionToken(stub, deviceId);
+
+    const revokeResponse = await stub.fetch(
+      `https://example.com/roster/${deviceId}/revoke`,
+      { method: "POST", headers: { Authorization: `Bearer ${TEST_ADMIN_KEY}` } },
+    );
+    expect(revokeResponse.status).toBe(200);
+
+    expect(await authenticateAs(stub, sessionToken)).toBeNull();
+    await expectAllUnauthorized(stub, sessionToken, targetId);
+  });
+
+  it("authenticates the admin key as role admin", async () => {
+    const stub = getFamilyHubStub();
+
+    expect(await authenticateAs(stub, TEST_ADMIN_KEY)).toEqual({
+      role: "admin",
+    });
+  });
+});

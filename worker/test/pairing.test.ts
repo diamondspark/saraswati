@@ -21,6 +21,17 @@ describe("POST /pairing/create", () => {
     expect(response.status).toBe(401);
   });
 
+  it("returns 401 for a well-formed bearer token that is not the admin key", async () => {
+    const stub = getFamilyHubStub();
+
+    const response = await stub.fetch("https://example.com/pairing/create", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${"cd".repeat(32)}` },
+    });
+
+    expect(response.status).toBe(401);
+  });
+
   it("returns a 64-char hex token and an expiresAt ~15 minutes out, when admin-authed", async () => {
     const stub = getFamilyHubStub();
     const before = Date.now();
