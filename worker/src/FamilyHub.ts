@@ -11,6 +11,9 @@ const HEALTH_MAX_REPORTS = 1;
 // whose attempts are spent stays blocked until it would have expired anyway.
 const CLAIM_WINDOW_SECONDS = 15 * 60;
 const CLAIM_MAX_ATTEMPTS = 10;
+// /pairing/status: a phone polls this while it waits for the owner's approval.
+const STATUS_WINDOW_SECONDS = 60;
+const STATUS_MAX_POLLS = 12;
 // Every admin-authenticated request, across all routes, shares one budget.
 const ADMIN_RATE_KEY = "admin";
 const ADMIN_WINDOW_SECONDS = 60;
@@ -27,6 +30,13 @@ const FAMILY_FEATURE_KEYS = [
   "cast_relay",
 ] as const;
 type FamilyFeatureKey = (typeof FAMILY_FEATURE_KEYS)[number];
+
+// What the owner has set a phone up as. Not to be confused with AuthResult's
+// "admin" | "device" `role`, which says who is calling.
+const DEVICE_ROLES = ["adult", "grandparent"] as const;
+type DeviceRole = (typeof DEVICE_ROLES)[number];
+const DEFAULT_DEVICE_ROLE: DeviceRole = "adult";
+const ROLE_ERROR = `role must be one of: ${DEVICE_ROLES.join(", ")}`;
 
 type AuthResult =
   | { role: "admin" }
@@ -49,6 +59,7 @@ interface RosterRow extends Record<string, SqlStorageValue> {
   status: string;
   sessionToken: string | null;
   approvedAt: number | null;
+  role: string;
 }
 
 interface RosterStatusRow extends Record<string, SqlStorageValue> {
@@ -56,8 +67,23 @@ interface RosterStatusRow extends Record<string, SqlStorageValue> {
   status: string;
 }
 
+interface DeviceAuthRow extends Record<string, SqlStorageValue> {
+  deviceId: string;
+  claimSecret: string | null;
+}
+
+interface ClaimStatusRow extends Record<string, SqlStorageValue> {
+  status: string;
+  sessionToken: string | null;
+  claimSecret: string | null;
+}
+
 interface RosterIdRow extends Record<string, SqlStorageValue> {
   deviceId: string;
+}
+
+interface DeviceRoleRow extends Record<string, SqlStorageValue> {
+  role: string;
 }
 
 interface StationRow extends Record<string, SqlStorageValue> {
@@ -99,6 +125,18 @@ function randomHex(byteLength: number): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
     "",
   );
+}
+
+/**
+ * Compares two secrets without bailing out at the first differing byte. The
+ * length check is not constant-time, which is fine: the stored secret is
+ * always 64 hex chars, so a length mismatch reveals nothing.
+ */
+function secretsMatch(provided: string, stored: string): boolean {
+  const encoder = new TextEncoder();
+  const a = encoder.encode(provided);
+  const b = encoder.encode(stored);
+  return a.byteLength === b.byteLength && crypto.subtle.timingSafeEqual(a, b);
 }
 
 function json(body: unknown, status = 200): Response {
@@ -215,6 +253,10 @@ function parseHealthReport(
   return { deviceId, versionCode, versionName, timezone };
 }
 
+function isDeviceRole(value: unknown): value is DeviceRole {
+  return (DEVICE_ROLES as readonly unknown[]).includes(value);
+}
+
 function isFamilyFeatureKey(key: string): key is FamilyFeatureKey {
   return (FAMILY_FEATURE_KEYS as readonly string[]).includes(key);
 }
@@ -240,7 +282,9 @@ export class FamilyHub extends DurableObject<Env> {
       deviceName TEXT,
       status TEXT,
       sessionToken TEXT,
-      approvedAt INTEGER
+      approvedAt INTEGER,
+      claimSecret TEXT,
+      role TEXT NOT NULL DEFAULT 'adult'
     )`);
     ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS stations (
       id TEXT PRIMARY KEY,
@@ -300,13 +344,22 @@ export class FamilyHub extends DurableObject<Env> {
     }
 
     const rows = this.ctx.storage.sql
-      .exec<RosterRow>(
-        "SELECT deviceId, deviceName, status, sessionToken, approvedAt FROM roster WHERE sessionToken = ? AND status = 'approved'",
+      .exec<DeviceAuthRow>(
+        "SELECT deviceId, claimSecret FROM roster WHERE sessionToken = ? AND status = 'approved'",
         token,
       )
       .toArray();
 
     if (rows.length === 1) {
+      // The phone has now proven it holds its sessionToken, so the claimSecret
+      // that fetched it via /pairing/status has done its job. One write per
+      // device, ever: the guard skips every later authentication.
+      if (rows[0].claimSecret !== null) {
+        this.ctx.storage.sql.exec(
+          "UPDATE roster SET claimSecret = NULL WHERE deviceId = ?",
+          rows[0].deviceId,
+        );
+      }
       return { role: "device", deviceId: rows[0].deviceId };
     }
 
@@ -403,6 +456,13 @@ export class FamilyHub extends DurableObject<Env> {
       return json({ error: "not found" }, 404);
     }
 
+    // Checked before the token is looked up or spent, so a malformed role
+    // never burns the owner's pairing token and the phone can simply retry.
+    const role: unknown = "role" in body ? body.role : DEFAULT_DEVICE_ROLE;
+    if (!isDeviceRole(role)) {
+      return json({ error: ROLE_ERROR }, 400);
+    }
+
     const rows = this.ctx.storage.sql
       .exec<PairingTokenRow>(
         "SELECT token, expiresAt, usedAt FROM pairing_tokens WHERE token = ?",
@@ -434,10 +494,13 @@ export class FamilyHub extends DurableObject<Env> {
     }
 
     const deviceId = crypto.randomUUID();
+    const claimSecret = randomHex(32);
     this.ctx.storage.sql.exec(
-      "INSERT INTO roster (deviceId, deviceName, status, sessionToken, approvedAt) VALUES (?, ?, 'pending', NULL, NULL)",
+      "INSERT INTO roster (deviceId, deviceName, status, sessionToken, approvedAt, claimSecret, role) VALUES (?, ?, 'pending', NULL, NULL, ?, ?)",
       deviceId,
       deviceName,
+      claimSecret,
+      role,
     );
     this.ctx.storage.sql.exec(
       "UPDATE pairing_tokens SET usedAt = ? WHERE token = ?",
@@ -445,7 +508,61 @@ export class FamilyHub extends DurableObject<Env> {
       token,
     );
 
-    return json({ deviceId, status: "pending" });
+    return json({ deviceId, status: "pending", claimSecret });
+  }
+
+  /**
+   * How a remote phone learns it was approved and collects its own
+   * sessionToken. No bearer: the phone has none yet. The claimSecret handed
+   * out by /pairing/claim is the credential; the deviceId alone is not.
+   */
+  private async handlePairingStatus(request: Request): Promise<Response> {
+    const body = await readStrictJsonObject(request);
+    const deviceId = body?.deviceId;
+    const claimSecret = body?.claimSecret;
+    if (!isNonEmptyString(deviceId) || !isNonEmptyString(claimSecret)) {
+      return json({ error: "deviceId and claimSecret are required" }, 400);
+    }
+
+    const rows = this.ctx.storage.sql
+      .exec<ClaimStatusRow>(
+        "SELECT status, sessionToken, claimSecret FROM roster WHERE deviceId = ?",
+        deviceId,
+      )
+      .toArray();
+
+    // Unknown ids return before the limiter, so guessing ids cannot mint
+    // rate_limits rows (same reasoning as /pairing/claim).
+    if (rows.length === 0) {
+      return json({ error: "not found" }, 404);
+    }
+
+    if (
+      !this.rateLimit(
+        `status:${deviceId}`,
+        STATUS_WINDOW_SECONDS,
+        STATUS_MAX_POLLS,
+      )
+    ) {
+      return json({ error: "too many requests" }, 429);
+    }
+
+    // Every way of being refused answers the same 404, so a caller cannot
+    // tell a wrong secret from a revoked device or one that already
+    // collected its token.
+    const row = rows[0];
+    if (
+      row.claimSecret === null ||
+      !secretsMatch(claimSecret, row.claimSecret) ||
+      (row.status !== "pending" && row.status !== "approved")
+    ) {
+      return json({ error: "not found" }, 404);
+    }
+
+    if (row.status === "approved" && row.sessionToken !== null) {
+      return json({ status: "approved", sessionToken: row.sessionToken });
+    }
+    return json({ status: "pending" });
   }
 
   private async handleRosterList(request: Request): Promise<Response> {
@@ -461,7 +578,7 @@ export class FamilyHub extends DurableObject<Env> {
 
     const devices = this.ctx.storage.sql
       .exec<RosterRow>(
-        "SELECT deviceId, deviceName, status, sessionToken, approvedAt FROM roster",
+        "SELECT deviceId, deviceName, status, sessionToken, approvedAt, role FROM roster",
       )
       .toArray()
       .map((row) => ({
@@ -469,9 +586,75 @@ export class FamilyHub extends DurableObject<Env> {
         deviceName: row.deviceName,
         status: row.status,
         approvedAt: row.approvedAt,
+        role: row.role,
       }));
 
     return json({ devices });
+  }
+
+  /**
+   * The owner's remote control for a phone's role: how a grandparent-mode
+   * phone, which has no settings and no way out, is switched back. Admin
+   * only, so the phone itself can never change it.
+   */
+  private async handleRosterRole(
+    request: Request,
+    deviceId: string,
+  ): Promise<Response> {
+    const auth = await this.authenticate(request, this.env);
+    if (auth?.role !== "admin") {
+      return json({ error: "unauthorized" }, 401);
+    }
+
+    const throttled = this.throttleAdmin(auth);
+    if (throttled) {
+      return throttled;
+    }
+
+    const body = await readStrictJsonObject(request);
+    const role = body?.role;
+    if (!isDeviceRole(role)) {
+      return json({ error: ROLE_ERROR }, 400);
+    }
+
+    const rows = this.ctx.storage.sql
+      .exec<RosterStatusRow>(
+        "SELECT deviceId, status FROM roster WHERE deviceId = ?",
+        deviceId,
+      )
+      .toArray();
+
+    if (rows.length === 0 || rows[0].status === "revoked") {
+      return json({ error: "not found" }, 404);
+    }
+
+    this.ctx.storage.sql.exec(
+      "UPDATE roster SET role = ? WHERE deviceId = ?",
+      role,
+      deviceId,
+    );
+
+    return json({ deviceId, role });
+  }
+
+  /** A phone asking what the owner has set it up as. Devices only. */
+  private async handleMe(request: Request): Promise<Response> {
+    const auth = await this.authenticate(request, this.env);
+    if (auth?.role !== "device") {
+      return json({ error: "unauthorized" }, 401);
+    }
+
+    const rows = this.ctx.storage.sql
+      .exec<DeviceRoleRow>(
+        "SELECT role FROM roster WHERE deviceId = ?",
+        auth.deviceId,
+      )
+      .toArray();
+    if (rows.length === 0) {
+      return json({ error: "unauthorized" }, 401);
+    }
+
+    return json({ deviceId: auth.deviceId, role: rows[0].role });
   }
 
   private async handleRosterApprove(
@@ -537,7 +720,7 @@ export class FamilyHub extends DurableObject<Env> {
     }
 
     this.ctx.storage.sql.exec(
-      "UPDATE roster SET status = 'revoked', sessionToken = NULL WHERE deviceId = ?",
+      "UPDATE roster SET status = 'revoked', sessionToken = NULL, claimSecret = NULL WHERE deviceId = ?",
       deviceId,
     );
 
@@ -759,6 +942,10 @@ export class FamilyHub extends DurableObject<Env> {
       return this.handlePairingClaim(request);
     }
 
+    if (request.method === "POST" && pathname === "/pairing/status") {
+      return this.handlePairingStatus(request);
+    }
+
     if (request.method === "GET" && pathname === "/roster") {
       return this.handleRosterList(request);
     }
@@ -777,6 +964,15 @@ export class FamilyHub extends DurableObject<Env> {
         request,
         decodeURIComponent(revokeMatch[1]),
       );
+    }
+
+    const roleMatch = /^\/roster\/([^/]+)\/role$/.exec(pathname);
+    if (request.method === "PUT" && roleMatch) {
+      return this.handleRosterRole(request, decodeURIComponent(roleMatch[1]));
+    }
+
+    if (request.method === "GET" && pathname === "/me") {
+      return this.handleMe(request);
     }
 
     if (pathname === "/stations") {

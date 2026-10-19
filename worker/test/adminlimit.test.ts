@@ -47,6 +47,11 @@ function adminRoutes(targetDeviceId: string): Route[] {
     { method: "GET", path: "/roster" },
     { method: "POST", path: `/roster/${targetDeviceId}/approve` },
     { method: "POST", path: `/roster/${targetDeviceId}/revoke` },
+    {
+      method: "PUT",
+      path: `/roster/${targetDeviceId}/role`,
+      body: { role: "grandparent" },
+    },
     { method: "GET", path: "/stations" },
     { method: "PUT", path: "/stations", body: { stations: [station] } },
     { method: "GET", path: "/killswitches" },

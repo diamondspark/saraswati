@@ -100,6 +100,8 @@ authorization before Saraswati can be installed there under enforcement:
    in the design spec) — this step slots in alongside the existing
    "Unknown sources"/Auto Blocker/battery steps already in that flow, before
    the family member installs Saraswati Updates.
-5. Track how many of the 20 device slots are used in the family hub's health
-   view (Phase 3), so you know how much headroom is left before a phone
-   upgrade or replacement needs a slot freed up.
+5. Track how many of the 20 device slots are used in the rollout log in
+   [`rollout-checklist.md`](rollout-checklist.md), so you know how much
+   headroom is left before a phone upgrade or replacement needs a slot freed
+   up. The family hub can't see Google's device authorizations, so its health
+   view doesn't show this; the tally is kept by hand.

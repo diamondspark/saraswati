@@ -205,6 +205,7 @@ describe("admin-only routes reject every non-admin bearer token", () => {
       { method: "GET", path: "/roster" },
       { method: "POST", path: `/roster/${targetDeviceId}/approve` },
       { method: "POST", path: `/roster/${targetDeviceId}/revoke` },
+      { method: "PUT", path: `/roster/${targetDeviceId}/role` },
     ];
   }
 
