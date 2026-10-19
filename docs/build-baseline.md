@@ -91,6 +91,14 @@ Line-by-line justification for the entries in `security/manifest-allowlist.json`
 
 No Cast, Play Services or Google Sign-In permission or exported component appeared in this snapshot (the `gms` flavor only adds the Cast `OPTIONS_PROVIDER_CLASS_NAME` `<meta-data>`, which is not a permission or an exported component), so none needed a separate line here.
 
+### Intent filters, queries and resource references (fix wave A)
+
+Both allowlists also pin, exactly, every component's intent filters (actions, categories, `<data>` scheme/host/port/path/pathPrefix/pathPattern/mimeType and `autoVerify`), the `<queries>` block, and the `dataExtractionRules`, `fullBackupContent` and `networkSecurityConfig` references of `<application>`. A deep link that widens (`android:path="/pair"` to a `pathPrefix`), a re-added filter (the metrolist.cc Listen Together link), a new `<queries>` package or an exported component without `android:exported` all fail `apk_gate.py check`, as does a pinned filter that disappears. `<data>` elements are compared as one set of values per attribute, the way Android combines them, so how a manifest spreads them over elements does not matter.
+
+The allowlist for the app also carries a `hub_host_agreement` section. `check` then requires that the host of `HUB_BASE_URL` for the gms flavor in `app/build.gradle.kts`, the host of the pairing-link filter (`/pair`) in the merged manifest, an exact (`includeSubdomains="false"`) `<domain>` for it in the APK's own network security config, and an exact entry in `security/egress-allowlist.json` are all the same host.
+
+To change a pin on purpose, build the release APK, run `python3 -I security/apk_gate.py snapshot --apk <apk>`, copy `intent_filters`, `queries` and `references` into the allowlist and review the diff. `references` read from an APK are raw resource ids (`@ref/0x7f150006`), and an id shifts when an xml resource is added or removed; the gate says so when only a reference changed.
+
 ## Final Phase 1 test count (after the whole-branch review fix round)
 
 The "Baseline" section above is deliberately untouched: it is the pinned

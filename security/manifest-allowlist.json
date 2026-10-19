@@ -45,5 +45,257 @@
     "android.permission.BIND_ACCESSIBILITY_SERVICE",
     "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE",
     "android.permission.SYSTEM_ALERT_WINDOW"
-  ]
+  ],
+  "intent_filters": {
+    "activity-alias:com.metrolist.music.MainActivityAlias": [
+      {
+        "actions": [
+          "android.intent.action.MAIN"
+        ],
+        "autoVerify": false,
+        "categories": [
+          "android.intent.category.LAUNCHER"
+        ],
+        "data": {}
+      }
+    ],
+    "activity-alias:com.metrolist.music.MainActivityStatic": [
+      {
+        "actions": [
+          "android.intent.action.MAIN"
+        ],
+        "autoVerify": false,
+        "categories": [
+          "android.intent.category.LAUNCHER"
+        ],
+        "data": {}
+      }
+    ],
+    "activity:com.metrolist.music.MainActivity": [
+      {
+        "actions": [
+          "android.intent.action.MAIN",
+          "android.intent.action.MUSIC_PLAYER",
+          "android.intent.action.VIEW"
+        ],
+        "autoVerify": false,
+        "categories": [
+          "android.intent.category.APP_MUSIC",
+          "android.intent.category.DEFAULT",
+          "android.intent.category.LEANBACK_LAUNCHER"
+        ],
+        "data": {}
+      },
+      {
+        "actions": [
+          "android.intent.action.SEND"
+        ],
+        "autoVerify": false,
+        "categories": [
+          "android.intent.category.DEFAULT"
+        ],
+        "data": {
+          "mimeType": [
+            "text/plain"
+          ]
+        }
+      },
+      {
+        "actions": [
+          "android.intent.action.VIEW",
+          "android.media.action.MEDIA_PLAY_FROM_SEARCH",
+          "android.nfc.action.NDEF_DISCOVERED"
+        ],
+        "autoVerify": false,
+        "categories": [
+          "android.intent.category.BROWSABLE",
+          "android.intent.category.DEFAULT"
+        ],
+        "data": {
+          "scheme": [
+            "vnd.youtube",
+            "vnd.youtube.launch"
+          ]
+        }
+      },
+      {
+        "actions": [
+          "android.intent.action.VIEW",
+          "android.media.action.MEDIA_PLAY_FROM_SEARCH",
+          "android.nfc.action.NDEF_DISCOVERED"
+        ],
+        "autoVerify": true,
+        "categories": [
+          "android.intent.category.BROWSABLE",
+          "android.intent.category.DEFAULT"
+        ],
+        "data": {
+          "host": [
+            "m.youtube.com",
+            "music.youtube.com",
+            "www.youtube.com",
+            "youtube.com"
+          ],
+          "pathPrefix": [
+            "/browse/",
+            "/c/",
+            "/channel/",
+            "/embed/",
+            "/playlist",
+            "/search",
+            "/user/",
+            "/v/",
+            "/watch"
+          ],
+          "scheme": [
+            "http",
+            "https"
+          ]
+        }
+      },
+      {
+        "actions": [
+          "android.intent.action.VIEW",
+          "android.media.action.MEDIA_PLAY_FROM_SEARCH",
+          "android.nfc.action.NDEF_DISCOVERED"
+        ],
+        "autoVerify": true,
+        "categories": [
+          "android.intent.category.BROWSABLE",
+          "android.intent.category.DEFAULT"
+        ],
+        "data": {
+          "host": [
+            "youtu.be"
+          ],
+          "pathPrefix": [
+            "/"
+          ],
+          "scheme": [
+            "http",
+            "https"
+          ]
+        }
+      },
+      {
+        "actions": [
+          "android.intent.action.VIEW"
+        ],
+        "autoVerify": true,
+        "categories": [
+          "android.intent.category.BROWSABLE",
+          "android.intent.category.DEFAULT"
+        ],
+        "data": {
+          "host": [
+            "saraswati-sangat.pandey-mohitk.workers.dev"
+          ],
+          "path": [
+            "/pair"
+          ],
+          "scheme": [
+            "https"
+          ]
+        }
+      }
+    ],
+    "receiver:androidx.media3.session.MediaButtonReceiver": [
+      {
+        "actions": [
+          "android.intent.action.MEDIA_BUTTON"
+        ],
+        "autoVerify": false,
+        "categories": [],
+        "data": {}
+      }
+    ],
+    "receiver:androidx.profileinstaller.ProfileInstallReceiver": [
+      {
+        "actions": [
+          "androidx.profileinstaller.action.BENCHMARK_OPERATION"
+        ],
+        "autoVerify": false,
+        "categories": [],
+        "data": {}
+      },
+      {
+        "actions": [
+          "androidx.profileinstaller.action.INSTALL_PROFILE"
+        ],
+        "autoVerify": false,
+        "categories": [],
+        "data": {}
+      },
+      {
+        "actions": [
+          "androidx.profileinstaller.action.SAVE_PROFILE"
+        ],
+        "autoVerify": false,
+        "categories": [],
+        "data": {}
+      },
+      {
+        "actions": [
+          "androidx.profileinstaller.action.SKIP_FILE"
+        ],
+        "autoVerify": false,
+        "categories": [],
+        "data": {}
+      }
+    ],
+    "service:com.metrolist.music.playback.ExoDownloadService": [
+      {
+        "actions": [
+          "androidx.media3.exoplayer.downloadService.action.RESTART"
+        ],
+        "autoVerify": false,
+        "categories": [
+          "android.intent.category.DEFAULT"
+        ],
+        "data": {}
+      }
+    ],
+    "service:com.metrolist.music.playback.MusicService": [
+      {
+        "actions": [
+          "android.media.browse.MediaBrowserService",
+          "androidx.media3.session.MediaLibraryService",
+          "androidx.media3.session.MediaSessionService"
+        ],
+        "autoVerify": false,
+        "categories": [],
+        "data": {}
+      }
+    ]
+  },
+  "queries": {
+    "intents": [
+      {
+        "actions": [
+          "android.media.action.DISPLAY_AUDIO_EFFECT_CONTROL_PANEL"
+        ],
+        "autoVerify": false,
+        "categories": [],
+        "data": {}
+      }
+    ],
+    "packages": [
+      "com.google.android.gms.policy_cast_dynamite",
+      "com.google.android.projection.gearhead",
+      "dev.diamondspark.saraswati.updater"
+    ],
+    "providers": []
+  },
+  "references": {
+    "dataExtractionRules": "@ref/0x7f150003",
+    "fullBackupContent": "@ref/0x7f150002",
+    "networkSecurityConfig": "@ref/0x7f150006"
+  },
+  "hub_host_agreement": {
+    "build_gradle": "app/build.gradle.kts",
+    "flavor": "gms",
+    "pairing_path": "/pair",
+    "egress_allowlist": "security/egress-allowlist.json",
+    "network_security_config": "app/src/main/res/xml/network_security_config.xml"
+  }
 }
