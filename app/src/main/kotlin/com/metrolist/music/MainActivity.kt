@@ -139,6 +139,7 @@ import com.metrolist.innertube.models.WatchEndpoint
 import com.metrolist.music.saraswati.SaraswatiDeepLinkPolicy
 import com.metrolist.music.saraswati.SaraswatiFeatures
 import com.metrolist.music.saraswati.family.FamilyRoutes
+import com.metrolist.music.saraswati.family.HealthReporter
 import com.metrolist.music.saraswati.family.PairingInbox
 import com.metrolist.music.saraswati.family.StationsCache
 import com.metrolist.music.saraswati.family.StationsRefresher
@@ -293,6 +294,10 @@ class MainActivity : FragmentActivity() {
     // SARASWATI: Task 9 fix round 1 — keeps that cache fresh on every launch and resume.
     @Inject
     lateinit var stationsRefresher: StationsRefresher
+
+    // SARASWATI: fix wave B1 (I2) — the paired phone's heartbeat for the owner's health view.
+    @Inject
+    lateinit var healthReporter: HealthReporter
 
     private lateinit var navController: NavHostController
     private var pendingIntent: Intent? = null
@@ -494,6 +499,8 @@ class MainActivity : FragmentActivity() {
                 launch { grandparentRoleSync.refresh() }
                 // Every paired phone, not only Saral's: it is what fills the car's Stations tab.
                 launch { stationsRefresher.refresh() }
+                // SARASWATI: fix wave B1 (I2) — its own job too, so a slow hub holds up neither of the others.
+                launch { healthReporter.report() }
             }
         }
 

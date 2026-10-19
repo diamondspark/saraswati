@@ -33,6 +33,14 @@ const val TEST_ADMIN_KEY = "test-admin-key"
 
 fun hubFailure(status: Int): Throwable = HubException(status, "hub answered HTTP $status")
 
+data class HealthCall(
+    val sessionToken: String,
+    val deviceId: String,
+    val versionCode: Int,
+    val versionName: String,
+    val timezone: String,
+)
+
 class FakeHub : HubApi {
     val calls = CopyOnWriteArrayList<String>()
 
@@ -187,13 +195,19 @@ class FakeHub : HubApi {
         killSwitches
     }
 
+    /** What each reportHealth call carried, in full: [calls] holds only the token and device id. */
+    val healthReports = CopyOnWriteArrayList<HealthCall>()
+
     override suspend fun reportHealth(
         sessionToken: String,
         deviceId: String,
         versionCode: Int,
         versionName: String,
         timezone: String,
-    ) = run("reportHealth", "$sessionToken,$deviceId") { }
+    ) = run("reportHealth", "$sessionToken,$deviceId") {
+        healthReports.add(HealthCall(sessionToken, deviceId, versionCode, versionName, timezone))
+        Unit
+    }
 
     override suspend fun getHealth(adminKey: String) = run("getHealth", adminKey) { health }
 }
