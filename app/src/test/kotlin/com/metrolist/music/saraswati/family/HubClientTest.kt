@@ -591,6 +591,8 @@ class HubClientTest {
         assertFalse(PairingToken(secret, "2026-10-19T18:27:00.000Z").toString().contains(secret))
         assertFalse(ClaimRequest(secret, "Mummy's Pixel", DeviceRole.ADULT).toString().contains(secret))
         assertFalse(PairingStatusRequest("d", secret).toString().contains(secret))
+        assertFalse(PairingStatusResponse("approved", secret).toString().contains(secret))
+        assertEquals("PairingStatusResponse(status=pending, sessionToken=null)", PairingStatusResponse("pending").toString())
     }
 
     @Test

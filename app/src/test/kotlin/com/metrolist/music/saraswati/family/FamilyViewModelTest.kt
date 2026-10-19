@@ -331,6 +331,44 @@ class FamilyViewModelTest {
         assertFalse(store.owner)
     }
 
+    // SARASWATI: fix wave A (M7) — the screen clears the clipboard once, and only after, the key was kept.
+    @Test
+    fun `onSaved runs once with the trimmed key after the key was kept`() {
+        store.admin = null
+        val saved = mutableListOf<String>()
+
+        vm.saveAdminKey("  new-admin-key \n") { saved.add(it) }
+
+        assertEquals(listOf("new-admin-key"), saved)
+        assertEquals("new-admin-key", store.admin)
+    }
+
+    @Test
+    fun `onSaved never runs when the hub refuses the key, the key is blank, or storing it fails`() {
+        store.admin = null
+        val saved = mutableListOf<String>()
+
+        vm.saveAdminKey("   ") { saved.add(it) }
+        hub.failWith("getRoster", hubFailure(401))
+        vm.saveAdminKey("wrong-key") { saved.add(it) }
+        hub.heal("getRoster")
+        store.failWrites = java.io.IOException("disk full")
+        vm.saveAdminKey("right-key") { saved.add(it) }
+
+        assertTrue(saved.toString(), saved.isEmpty())
+        assertEquals(OwnerSetupState.Failed(FamilyError.UNKNOWN), vm.setupState.value)
+    }
+
+    @Test
+    fun `a callback that throws cannot undo a saved key`() {
+        store.admin = null
+
+        vm.saveAdminKey("the-admin-key") { error("clipboard exploded") }
+
+        assertEquals(OwnerSetupState.Done, vm.setupState.value)
+        assertEquals("the-admin-key", store.admin)
+    }
+
     @Test
     fun `saveAdminKey with a blank key is rejected without calling the hub`() {
         store.admin = null

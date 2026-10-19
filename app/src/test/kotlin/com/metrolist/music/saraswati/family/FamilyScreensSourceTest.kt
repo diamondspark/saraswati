@@ -179,4 +179,15 @@ class FamilyScreensSourceTest {
         assertEquals("the owner setup link is offered in one place only", 1, Regex("""family_owner_setup_link""").findAll(screen).count())
         assertEquals("and so is the route to owner setup", 1, Regex("""FamilyRoutes\.MANAGE""").findAll(screen.substringAfter("else ->")).count())
     }
+
+    // SARASWATI: fix wave A (M7) — the admin key does not stay on the clipboard once it was saved.
+    @Test
+    fun `saving the admin key clears the clipboard through ClipboardHygiene`() {
+        val screen = source("$familyDir/ManageFamilyScreen.kt")
+
+        assertTrue(
+            Regex("""viewModel\.saveAdminKey\(key\)\s*\{\s*saved\s*->\s*ClipboardHygiene\.clearIfHolds\(clipboard,\s*saved\)\s*\}""").containsMatchIn(screen),
+        )
+        assertEquals("the hygiene helper is the only thing that clears the clipboard", 0, Regex("""clearPrimaryClip""").findAll(screen).count())
+    }
 }

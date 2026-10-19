@@ -5,7 +5,7 @@
 
 // SARASWATI: Task 11 — the two words the car's new tabs added. The unit-test
 // build has no resource table, so the strings file is read directly. The
-// Family row's title is the approved copy for "Sangat (coming soon)".
+// Family row's title is the approved copy for "Sangat · Listen together (coming soon)".
 package com.metrolist.music.saraswati.car
 
 import org.junit.Assert.assertEquals
@@ -26,7 +26,17 @@ class CarStringsTest {
 
     @Test
     fun `the Family row says Sangat is coming soon, in the approved words`() {
-        assertEquals("Sangat (coming soon)", valueOf("car_family_sangat_soon"))
+        assertEquals("Sangat · Listen together (coming soon)", valueOf("car_family_sangat_soon"))
+    }
+
+    // SARASWATI: fix wave A (M8) — the car names Sangat the way the app does ("Name · what it is"), so a
+    // driver who has seen the Features list recognises the row.
+    @Test
+    fun `the Family row follows the Sangat subtitle pattern the app uses`() {
+        val appName = valueOf("family_feature_sangat")
+
+        assertEquals("Sangat · Listen together", appName)
+        assertEquals("$appName (coming soon)", valueOf("car_family_sangat_soon"))
     }
 
     @Test

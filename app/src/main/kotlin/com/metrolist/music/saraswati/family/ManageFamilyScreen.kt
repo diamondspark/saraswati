@@ -186,6 +186,7 @@ private fun SectionCard(content: @Composable () -> Unit) {
 
 @Composable
 private fun OwnerSetupContent(viewModel: FamilyViewModel) {
+    val clipboard = LocalContext.current.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     val setup by viewModel.setupState.collectAsStateWithLifecycle()
     var key by remember { mutableStateOf("") }
     val checking = setup is OwnerSetupState.Checking
@@ -213,7 +214,9 @@ private fun OwnerSetupContent(viewModel: FamilyViewModel) {
             )
             (setup as? OwnerSetupState.Failed)?.let { FamilyErrorBanner(it.error) }
             Button(
-                onClick = { viewModel.saveAdminKey(key) },
+                // SARASWATI: fix wave A (M7) — the key was most likely pasted from the clipboard, which would
+                // otherwise keep it for any other app to read once it has been saved.
+                onClick = { viewModel.saveAdminKey(key) { saved -> ClipboardHygiene.clearIfHolds(clipboard, saved) } },
                 enabled = key.isNotBlank() && !checking,
                 modifier = Modifier.fillMaxWidth(),
             ) {

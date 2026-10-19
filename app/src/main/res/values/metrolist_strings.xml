@@ -1156,5 +1156,5 @@
 
     <!-- SARASWATI: Task 11 — the car's four tabs. Home, Library and Family reuse existing strings. -->
     <string name="car_tab_stations">Stations</string>
-    <string name="car_family_sangat_soon">Sangat (coming soon)</string>
+    <string name="car_family_sangat_soon">Sangat · Listen together (coming soon)</string>
 </resources>

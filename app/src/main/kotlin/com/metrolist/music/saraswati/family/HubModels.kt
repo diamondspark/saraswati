@@ -183,7 +183,10 @@ internal data class StationsEnvelope(
 internal data class PairingStatusResponse(
     val status: String,
     val sessionToken: String? = null,
-)
+) {
+    // SARASWATI: fix wave A (M6) — the session token is a credential; the default toString would print it.
+    override fun toString(): String = "PairingStatusResponse(status=$status, sessionToken=${if (sessionToken == null) "null" else "<redacted>"})"
+}
 
 @Serializable
 internal data class ClaimRequest(
