@@ -9,19 +9,32 @@ import {
   readJsonBody,
   readStrictJsonObject,
 } from "./http";
+import { migrate } from "./migrations";
+import { bearerToken, matchRoute } from "./routes";
+import { tooLarge } from "./routes/common";
 import {
   addFamilyPlaylist,
   deleteFamilyPlaylist,
   listFamilyPlaylists,
 } from "./routes/familyPlaylists";
-import { tooLarge } from "./routes/common";
 import { listParivaarPlaylists, putParivaarPlaylist } from "./routes/parivaar";
 import { CLOSE_DEVICE_REVOKED, CLOSE_SANGAT_DISABLED } from "./sangat/limits";
 import { Sangat, type LiveRoom } from "./sangat/Sangat";
 import { normalizeRoomCode } from "./sangat/sanitize";
-import { createSangatTables } from "./sangat/schema";
+import { randomHex, secretsMatch, sha256Hex } from "./secrets";
 
 const PAIRING_TOKEN_TTL_MS = 15 * 60 * 1000;
+// A claimed phone waits for the owner's approval. Past this it can no longer be
+// approved, so a request nobody noticed cannot be waved through hours later.
+const PENDING_APPROVAL_TTL_MS = 60 * 60 * 1000;
+// A configured ADMIN_KEY shorter than this is treated as not set at all, so a
+// weak or truncated secret fails closed instead of being brute-forceable.
+const MIN_ADMIN_KEY_LENGTH = 32;
+// Names are shown to the owner when approving. Cap them, and strip anything
+// that can reorder, hide or forge what is displayed (control and format
+// characters, which include bidi overrides and zero-width characters; see
+// STRIPPED_NAME_CHARACTERS for the two joiners that are kept).
+const MAX_DEVICE_NAME_LENGTH = 64;
 const MAX_STATIONS = 6;
 // PUT /sangat/car: a room code and a boolean. The code is checked at 32 characters before it
 // is normalized (which cuts it to 10 bytes), so a huge string is never cleaned.
@@ -72,7 +85,6 @@ export type AuthResult =
 // requires an explicit index signature, not just structurally-compatible
 // named properties.
 interface PairingTokenRow extends Record<string, SqlStorageValue> {
-  token: string;
   expiresAt: number;
   usedAt: number | null;
 }
@@ -81,9 +93,9 @@ interface RosterRow extends Record<string, SqlStorageValue> {
   deviceId: string;
   deviceName: string | null;
   status: string;
-  sessionToken: string | null;
   approvedAt: number | null;
   role: string;
+  claimedAt: number | null;
 }
 
 interface RosterStatusRow extends Record<string, SqlStorageValue> {
@@ -91,15 +103,21 @@ interface RosterStatusRow extends Record<string, SqlStorageValue> {
   status: string;
 }
 
+interface RosterApprovalRow extends RosterStatusRow {
+  claimedAt: number | null;
+}
+
 interface DeviceAuthRow extends Record<string, SqlStorageValue> {
   deviceId: string;
-  claimSecret: string | null;
+  sessionTokenHash: string;
+  claimSecretHash: string | null;
+  pendingSessionToken: string | null;
 }
 
 interface ClaimStatusRow extends Record<string, SqlStorageValue> {
   status: string;
-  sessionToken: string | null;
-  claimSecret: string | null;
+  pendingSessionToken: string | null;
+  claimSecretHash: string | null;
 }
 
 interface RosterIdRow extends Record<string, SqlStorageValue> {
@@ -141,26 +159,6 @@ interface Station {
   title: string;
   seedVideoId: string;
   iconIndex: number;
-}
-
-function randomHex(byteLength: number): string {
-  const bytes = new Uint8Array(byteLength);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
-    "",
-  );
-}
-
-/**
- * Compares two secrets without bailing out at the first differing byte. The
- * length check is not constant-time, which is fine: the stored secret is
- * always 64 hex chars, so a length mismatch reveals nothing.
- */
-function secretsMatch(provided: string, stored: string): boolean {
-  const encoder = new TextEncoder();
-  const a = encoder.encode(provided);
-  const b = encoder.encode(stored);
-  return a.byteLength === b.byteLength && crypto.subtle.timingSafeEqual(a, b);
 }
 
 /** Returns the cleaned station list, or null if any part of it is invalid. */
@@ -229,21 +227,36 @@ function parseHealthReport(
   return { deviceId, versionCode, versionName, timezone };
 }
 
+// Control (Cc) and format (Cf) characters, except the two joiners. Cf holds the
+// bidi controls (U+200E/F, U+202A-E, U+2066-9, U+061C) and zero-width
+// characters, which can reorder or hide what the owner reads. ZWJ (U+200D) and
+// ZWNJ (U+200C) are Cf too, but Devanagari conjuncts and emoji sequences are
+// spelled with them, so they stay.
+const STRIPPED_NAME_CHARACTERS = /(?![\u200C\u200D])[\p{Cc}\p{Cf}]/gu;
+
+/**
+ * The name to store, or null when nothing is left of it. Stripped characters
+ * go first, then surrounding whitespace, then the cap, counted in characters
+ * rather than UTF-16 units so an emoji is never cut in half. Emptiness is
+ * judged on the final capped name, so a run of joiners that pushes the visible
+ * letters past the cap cannot slip through as an invisible name: a name made
+ * only of joiners and whitespace counts as empty.
+ */
+function cleanDeviceName(raw: string): string | null {
+  const cleaned = raw.replace(STRIPPED_NAME_CHARACTERS, "").trim();
+  const capped = Array.from(cleaned)
+    .slice(0, MAX_DEVICE_NAME_LENGTH)
+    .join("")
+    .trim();
+  return capped.replace(/[\u200C\u200D\s]/g, "") === "" ? null : capped;
+}
+
 function isDeviceRole(value: unknown): value is DeviceRole {
   return (DEVICE_ROLES as readonly unknown[]).includes(value);
 }
 
 function isFamilyFeatureKey(key: string): key is FamilyFeatureKey {
   return (FAMILY_FEATURE_KEYS as readonly string[]).includes(key);
-}
-
-/** A path segment, decoded; one with a broken escape stays as it is and matches no stored id. */
-function decodeSegment(segment: string): string {
-  try {
-    return decodeURIComponent(segment);
-  } catch {
-    return segment;
-  }
 }
 
 /** A room as the hub's JSON routes show it: LiveRoom with startedAt as an ISO time. */
@@ -277,67 +290,19 @@ export class FamilyHub extends DurableObject<Env> {
       now: () => Date.now(),
     };
 
-    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS pairing_tokens (
-      token TEXT PRIMARY KEY,
-      expiresAt INTEGER,
-      usedAt INTEGER
-    )`);
-    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS roster (
-      deviceId TEXT PRIMARY KEY,
-      deviceName TEXT,
-      status TEXT,
-      sessionToken TEXT,
-      approvedAt INTEGER,
-      claimSecret TEXT,
-      role TEXT NOT NULL DEFAULT 'adult'
-    )`);
-    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS stations (
-      id TEXT PRIMARY KEY,
-      title TEXT,
-      seedVideoId TEXT,
-      iconIndex INTEGER,
-      position INTEGER
-    )`);
-    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS killswitches (
-      key TEXT PRIMARY KEY,
-      enabled INTEGER
-    )`);
-    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS health (
-      deviceId TEXT PRIMARY KEY,
-      versionCode INTEGER,
-      versionName TEXT,
-      timezone TEXT,
-      lastSeenAt INTEGER
-    )`);
-    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS rate_limits (
-      key TEXT PRIMARY KEY,
-      windowStart INTEGER,
-      count INTEGER
-    )`);
-    // Parivaar Mix: each phone's own playlist. family_playlists: the ones the whole family
-    // shares. Times are epoch milliseconds; the routes show them as ISO strings.
-    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS parivaar_playlists (
-      deviceId TEXT PRIMARY KEY,
-      memberName TEXT NOT NULL,
-      playlistId TEXT NOT NULL,
-      updatedAt INTEGER NOT NULL
-    )`);
-    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS family_playlists (
-      id TEXT PRIMARY KEY,
-      playlistId TEXT NOT NULL UNIQUE,
-      title TEXT NOT NULL,
-      addedByDeviceId TEXT NOT NULL,
-      addedAt INTEGER NOT NULL
-    )`);
-    createSangatTables(ctx.storage.sql);
-    // INSERT OR IGNORE keeps any key the owner has already flipped; a feature
-    // key added to FAMILY_FEATURE_KEYS later seeds itself as enabled.
-    for (const key of FAMILY_FEATURE_KEYS) {
-      ctx.storage.sql.exec(
-        "INSERT OR IGNORE INTO killswitches (key, enabled) VALUES (?, 1)",
-        key,
-      );
-    }
+    // Nothing is served until the schema is current. A migration that throws
+    // resets the object, so a half-migrated hub answers nothing at all.
+    ctx.blockConcurrencyWhile(async () => {
+      await migrate(ctx.storage);
+      // INSERT OR IGNORE keeps any key the owner has already flipped; a
+      // feature key added to FAMILY_FEATURE_KEYS later seeds itself as enabled.
+      for (const key of FAMILY_FEATURE_KEYS) {
+        ctx.storage.sql.exec(
+          "INSERT OR IGNORE INTO killswitches (key, enabled) VALUES (?, 1)",
+          key,
+        );
+      }
+    });
   }
 
   /**
@@ -346,48 +311,65 @@ export class FamilyHub extends DurableObject<Env> {
    * unauthenticated. Tasks 4 and 5 reuse this rather than re-checking auth
    * their own way.
    *
-   * It must stay free of real awaits (it is async only for its callers' sake).
-   * A revoke runs between two events of the Durable Object; if this yielded to
-   * anything that opens the input gate (a fetch, a timer, a stream), a revoke
-   * could land between a device being authenticated and its socket being
-   * accepted, and /ws would hand a socket to a device that was just cut off.
+   * The roster read must stay the last thing it does: the digests below are
+   * awaited before it, and nothing is awaited after it. A revoke runs between
+   * two events of the Durable Object; if this yielded to anything that opens
+   * the input gate (a fetch, a timer, a stream) after the read, a revoke could
+   * land between a device being authenticated and its socket being accepted,
+   * and /ws would hand a socket to a device that was just cut off. A revoke
+   * that lands during the digests is harmless: the read then sees it.
    */
   private async authenticate(
     request: Request,
     env: Env,
   ): Promise<AuthResult> {
-    const header = request.headers.get("Authorization");
-    if (!header?.startsWith("Bearer ")) {
+    const token = bearerToken(request);
+    if (token === null) {
       return null;
     }
 
-    const token = header.slice("Bearer ".length).trim();
-    if (!token) {
-      return null;
-    }
+    // Both sides are hashed first, so the comparison is over fixed-length
+    // digests and says nothing about the length of either secret.
+    const presented = await sha256Hex(token);
 
-    if (env.ADMIN_KEY && token === env.ADMIN_KEY) {
+    const adminKey: unknown = env.ADMIN_KEY;
+    if (
+      typeof adminKey === "string" &&
+      adminKey.length >= MIN_ADMIN_KEY_LENGTH &&
+      secretsMatch(presented, await sha256Hex(adminKey))
+    ) {
       return { role: "admin" };
     }
 
+    // Only the hash of a session token is stored, so every approved device's
+    // hash is compared in constant time, none of them skipped once one matches.
     const rows = this.ctx.storage.sql
       .exec<DeviceAuthRow>(
-        "SELECT deviceId, claimSecret FROM roster WHERE sessionToken = ? AND status = 'approved'",
-        token,
+        "SELECT deviceId, sessionTokenHash, claimSecretHash, pendingSessionToken FROM roster WHERE status = 'approved' AND sessionTokenHash IS NOT NULL",
       )
       .toArray();
+    let matched: DeviceAuthRow | null = null;
+    for (const row of rows) {
+      if (secretsMatch(presented, row.sessionTokenHash)) {
+        matched = row;
+      }
+    }
 
-    if (rows.length === 1) {
-      // The phone has now proven it holds its sessionToken, so the claimSecret
-      // that fetched it via /pairing/status has done its job. One write per
-      // device, ever: the guard skips every later authentication.
-      if (rows[0].claimSecret !== null) {
+    if (matched) {
+      // The phone has now proven it holds its sessionToken, so the plaintext
+      // copy kept for /pairing/status and the claimSecret that fetched it have
+      // done their job. One write per device, ever: the guard skips every
+      // later authentication.
+      if (
+        matched.claimSecretHash !== null ||
+        matched.pendingSessionToken !== null
+      ) {
         this.ctx.storage.sql.exec(
-          "UPDATE roster SET claimSecret = NULL WHERE deviceId = ?",
-          rows[0].deviceId,
+          "UPDATE roster SET claimSecretHash = NULL, pendingSessionToken = NULL WHERE deviceId = ?",
+          matched.deviceId,
         );
       }
-      return { role: "device", deviceId: rows[0].deviceId };
+      return { role: "device", deviceId: matched.deviceId };
     }
 
     return null;
@@ -464,23 +446,72 @@ export class FamilyHub extends DurableObject<Env> {
     const token = randomHex(32);
     const expiresAtMs = Date.now() + PAIRING_TOKEN_TTL_MS;
 
+    // The owner gets the token once, in this response; only its hash is kept.
     this.ctx.storage.sql.exec(
-      "INSERT INTO pairing_tokens (token, expiresAt, usedAt) VALUES (?, ?, NULL)",
-      token,
+      "INSERT INTO pairing_tokens (tokenHash, expiresAt, usedAt) VALUES (?, ?, NULL)",
+      await sha256Hex(token),
       expiresAtMs,
     );
 
     return json({ token, expiresAt: new Date(expiresAtMs).toISOString() });
   }
 
+  /**
+   * Spends a pairing token and creates its pending device in one transaction.
+   * The UPDATE only matches a token that is still unused and unexpired, so a
+   * token already spent (or one that lapsed) since the caller looked at it
+   * changes no row, and then no device is created either. True means this call
+   * won the token.
+   */
+  private claimPairingToken(
+    tokenHash: string,
+    now: number,
+    device: {
+      deviceId: string;
+      deviceName: string | null;
+      claimSecretHash: string;
+      role: DeviceRole;
+    },
+  ): boolean {
+    return this.ctx.storage.transactionSync(() => {
+      const spend = this.ctx.storage.sql.exec(
+        "UPDATE pairing_tokens SET usedAt = ? WHERE tokenHash = ? AND usedAt IS NULL AND expiresAt >= ?",
+        now,
+        tokenHash,
+        now,
+      );
+      spend.toArray();
+      if (spend.rowsWritten === 0) {
+        return false;
+      }
+      this.ctx.storage.sql.exec(
+        "INSERT INTO roster (deviceId, deviceName, status, sessionTokenHash, pendingSessionToken, approvedAt, claimSecretHash, role, claimedAt) VALUES (?, ?, 'pending', NULL, NULL, NULL, ?, ?, ?)",
+        device.deviceId,
+        device.deviceName,
+        device.claimSecretHash,
+        device.role,
+        now,
+      );
+      return true;
+    });
+  }
+
   private async handlePairingClaim(request: Request): Promise<Response> {
     const body = await readJsonBody(request);
     const token = typeof body.token === "string" ? body.token : "";
-    const deviceName =
-      typeof body.deviceName === "string" ? body.deviceName : null;
 
     if (!token) {
       return json({ error: "not found" }, 404);
+    }
+
+    // Like the role below, checked before the pairing token is looked up or
+    // spent, so a bad name never burns the owner's link.
+    let deviceName: string | null = null;
+    if (typeof body.deviceName === "string") {
+      deviceName = cleanDeviceName(body.deviceName);
+      if (deviceName === null) {
+        return json({ error: "deviceName must not be empty" }, 400);
+      }
     }
 
     // Checked before the token is looked up or spent, so a malformed role
@@ -490,10 +521,11 @@ export class FamilyHub extends DurableObject<Env> {
       return json({ error: ROLE_ERROR }, 400);
     }
 
+    const tokenHash = await sha256Hex(token);
     const rows = this.ctx.storage.sql
       .exec<PairingTokenRow>(
-        "SELECT token, expiresAt, usedAt FROM pairing_tokens WHERE token = ?",
-        token,
+        "SELECT expiresAt, usedAt FROM pairing_tokens WHERE tokenHash = ?",
+        tokenHash,
       )
       .toArray();
 
@@ -507,7 +539,7 @@ export class FamilyHub extends DurableObject<Env> {
     // limiter exists to prevent.
     if (
       !this.rateLimit(
-        `claim:${token}`,
+        `claim:${tokenHash}`,
         CLAIM_WINDOW_SECONDS,
         CLAIM_MAX_ATTEMPTS,
       )
@@ -522,18 +554,19 @@ export class FamilyHub extends DurableObject<Env> {
 
     const deviceId = crypto.randomUUID();
     const claimSecret = randomHex(32);
-    this.ctx.storage.sql.exec(
-      "INSERT INTO roster (deviceId, deviceName, status, sessionToken, approvedAt, claimSecret, role) VALUES (?, ?, 'pending', NULL, NULL, ?, ?)",
+    // Hashed before the write below, so nothing is awaited between the last
+    // check and the write that depends on it.
+    const claimSecretHash = await sha256Hex(claimSecret);
+    const spent = this.claimPairingToken(tokenHash, Date.now(), {
       deviceId,
       deviceName,
-      claimSecret,
+      claimSecretHash,
       role,
-    );
-    this.ctx.storage.sql.exec(
-      "UPDATE pairing_tokens SET usedAt = ? WHERE token = ?",
-      Date.now(),
-      token,
-    );
+    });
+    if (!spent) {
+      // Lost a race for the same token between the check and the write.
+      return json({ error: "gone" }, 410);
+    }
 
     return json({ deviceId, status: "pending", claimSecret });
   }
@@ -553,7 +586,7 @@ export class FamilyHub extends DurableObject<Env> {
 
     const rows = this.ctx.storage.sql
       .exec<ClaimStatusRow>(
-        "SELECT status, sessionToken, claimSecret FROM roster WHERE deviceId = ?",
+        "SELECT status, pendingSessionToken, claimSecretHash FROM roster WHERE deviceId = ?",
         deviceId,
       )
       .toArray();
@@ -579,15 +612,18 @@ export class FamilyHub extends DurableObject<Env> {
     // collected its token.
     const row = rows[0];
     if (
-      row.claimSecret === null ||
-      !secretsMatch(claimSecret, row.claimSecret) ||
+      row.claimSecretHash === null ||
+      !secretsMatch(await sha256Hex(claimSecret), row.claimSecretHash) ||
       (row.status !== "pending" && row.status !== "approved")
     ) {
       return json({ error: "not found" }, 404);
     }
 
-    if (row.status === "approved" && row.sessionToken !== null) {
-      return json({ status: "approved", sessionToken: row.sessionToken });
+    if (row.status === "approved" && row.pendingSessionToken !== null) {
+      return json({
+        status: "approved",
+        sessionToken: row.pendingSessionToken,
+      });
     }
     return json({ status: "pending" });
   }
@@ -605,7 +641,7 @@ export class FamilyHub extends DurableObject<Env> {
 
     const devices = this.ctx.storage.sql
       .exec<RosterRow>(
-        "SELECT deviceId, deviceName, status, sessionToken, approvedAt, role FROM roster",
+        "SELECT deviceId, deviceName, status, approvedAt, role, claimedAt FROM roster",
       )
       .toArray()
       .map((row) => ({
@@ -614,6 +650,7 @@ export class FamilyHub extends DurableObject<Env> {
         status: row.status,
         approvedAt: row.approvedAt,
         role: row.role,
+        claimedAt: row.claimedAt,
       }));
 
     return json({ devices });
@@ -698,9 +735,36 @@ export class FamilyHub extends DurableObject<Env> {
       return throttled;
     }
 
+    const refusal = this.approvalRefusal(deviceId);
+    if (refusal) {
+      return refusal;
+    }
+
+    // The owner is never shown the phone's credential. The plaintext waits in
+    // pendingSessionToken only until the phone collects it through
+    // /pairing/status and first uses it; the lookup key is its hash. Hashed
+    // before the write, so nothing is awaited between the last check and it.
+    const sessionToken = randomHex(32);
+    const approved = this.commitApproval(
+      deviceId,
+      await sha256Hex(sessionToken),
+      sessionToken,
+      Date.now(),
+    );
+    if (!approved) {
+      // The row changed (revoked, approved, or lapsed) since the check above;
+      // answer for what it is now.
+      return this.approvalRefusal(deviceId) ?? json({ error: "not found" }, 404);
+    }
+
+    return json({ deviceId, status: "approved" });
+  }
+
+  /** The 404 or 410 that stops an approval, or null when it may go ahead. */
+  private approvalRefusal(deviceId: string): Response | null {
     const rows = this.ctx.storage.sql
-      .exec<RosterStatusRow>(
-        "SELECT deviceId, status FROM roster WHERE deviceId = ?",
+      .exec<RosterApprovalRow>(
+        "SELECT deviceId, status, claimedAt FROM roster WHERE deviceId = ?",
         deviceId,
       )
       .toArray();
@@ -709,16 +773,36 @@ export class FamilyHub extends DurableObject<Env> {
       return json({ error: "not found" }, 404);
     }
 
-    const sessionToken = randomHex(32);
-    const approvedAtMs = Date.now();
-    this.ctx.storage.sql.exec(
-      "UPDATE roster SET status = 'approved', sessionToken = ?, approvedAt = ? WHERE deviceId = ?",
-      sessionToken,
-      approvedAtMs,
-      deviceId,
-    );
+    // A request with no recorded claim time is as untrustworthy as an old one.
+    const claimedAt = rows[0].claimedAt;
+    if (claimedAt === null || Date.now() - claimedAt > PENDING_APPROVAL_TTL_MS) {
+      return json({ error: "expired" }, 410);
+    }
+    return null;
+  }
 
-    return json({ deviceId, sessionToken, status: "approved" });
+  /**
+   * The write that approves a device. It only matches a row that is still
+   * pending and still inside the hour, so a device revoked, already approved
+   * or lapsed since the caller's check is left exactly as it is (a revoked
+   * row is never brought back). True means this call approved it.
+   */
+  private commitApproval(
+    deviceId: string,
+    sessionTokenHash: string,
+    sessionToken: string,
+    now: number,
+  ): boolean {
+    const update = this.ctx.storage.sql.exec(
+      "UPDATE roster SET status = 'approved', sessionTokenHash = ?, pendingSessionToken = ?, approvedAt = ? WHERE deviceId = ? AND status = 'pending' AND claimedAt IS NOT NULL AND claimedAt >= ?",
+      sessionTokenHash,
+      sessionToken,
+      now,
+      deviceId,
+      now - PENDING_APPROVAL_TTL_MS,
+    );
+    update.toArray();
+    return update.rowsWritten > 0;
   }
 
   private async handleRosterRevoke(
@@ -747,7 +831,7 @@ export class FamilyHub extends DurableObject<Env> {
     }
 
     this.ctx.storage.sql.exec(
-      "UPDATE roster SET status = 'revoked', sessionToken = NULL, claimSecret = NULL WHERE deviceId = ?",
+      "UPDATE roster SET status = 'revoked', sessionTokenHash = NULL, pendingSessionToken = NULL, claimSecretHash = NULL WHERE deviceId = ?",
       deviceId,
     );
     // The same turn as the update, with nothing awaited in between: no upgrade can
@@ -1111,117 +1195,62 @@ export class FamilyHub extends DurableObject<Env> {
   }
 
   async fetch(request: Request): Promise<Response> {
-    const { pathname } = new URL(request.url);
-
-    if (request.method === "GET" && pathname === "/ws") {
-      return this.handleSangatSocket(request);
+    const route = matchRoute(request.method, new URL(request.url).pathname);
+    if (!route) {
+      return new Response("not found", { status: 404 });
     }
 
-    if (request.method === "GET" && pathname === "/sangat/live") {
-      return this.handleSangatLive(request);
-    }
-
-    if (request.method === "PUT" && pathname === "/sangat/car") {
-      return this.handleSangatCar(request);
-    }
-
-    if (request.method === "PUT" && pathname === "/parivaar/playlist") {
-      return this.runRoute(request, "device", putParivaarPlaylist);
-    }
-
-    if (request.method === "GET" && pathname === "/parivaar/playlists") {
-      return this.runRoute(request, "any", listParivaarPlaylists);
-    }
-
-    if (pathname === "/family-playlists") {
-      if (request.method === "GET") {
-        return this.runRoute(request, "any", listFamilyPlaylists);
-      }
-      if (request.method === "POST") {
-        return this.runRoute(request, "device", addFamilyPlaylist);
-      }
-    }
-
-    const familyPlaylistMatch = /^\/family-playlists\/([^/]+)$/.exec(pathname);
-    if (request.method === "DELETE" && familyPlaylistMatch) {
-      const id = decodeSegment(familyPlaylistMatch[1]);
-      return this.runRoute(request, "any", (ctx, req, auth) =>
-        deleteFamilyPlaylist(ctx, req, auth, id),
-      );
-    }
-
-    if (request.method === "GET" && pathname === "/ping") {
-      return new Response("ok", { status: 200 });
-    }
-
-    if (request.method === "POST" && pathname === "/pairing/create") {
-      return this.handlePairingCreate(request);
-    }
-
-    if (request.method === "POST" && pathname === "/pairing/claim") {
-      return this.handlePairingClaim(request);
-    }
-
-    if (request.method === "POST" && pathname === "/pairing/status") {
-      return this.handlePairingStatus(request);
-    }
-
-    if (request.method === "GET" && pathname === "/roster") {
-      return this.handleRosterList(request);
-    }
-
-    const approveMatch = /^\/roster\/([^/]+)\/approve$/.exec(pathname);
-    if (request.method === "POST" && approveMatch) {
-      return this.handleRosterApprove(
-        request,
-        decodeURIComponent(approveMatch[1]),
-      );
-    }
-
-    const revokeMatch = /^\/roster\/([^/]+)\/revoke$/.exec(pathname);
-    if (request.method === "POST" && revokeMatch) {
-      return this.handleRosterRevoke(
-        request,
-        decodeURIComponent(revokeMatch[1]),
-      );
-    }
-
-    const roleMatch = /^\/roster\/([^/]+)\/role$/.exec(pathname);
-    if (request.method === "PUT" && roleMatch) {
-      return this.handleRosterRole(request, decodeURIComponent(roleMatch[1]));
-    }
-
-    if (request.method === "GET" && pathname === "/me") {
-      return this.handleMe(request);
-    }
-
-    if (pathname === "/stations") {
-      if (request.method === "GET") {
+    switch (route.name) {
+      case "ping":
+        return new Response("ok", { status: 200 });
+      case "pairingCreate":
+        return this.handlePairingCreate(request);
+      case "pairingClaim":
+        return this.handlePairingClaim(request);
+      case "pairingStatus":
+        return this.handlePairingStatus(request);
+      case "rosterList":
+        return this.handleRosterList(request);
+      case "rosterApprove":
+        return this.handleRosterApprove(request, route.deviceId as string);
+      case "rosterRevoke":
+        return this.handleRosterRevoke(request, route.deviceId as string);
+      case "rosterRole":
+        return this.handleRosterRole(request, route.deviceId as string);
+      case "me":
+        return this.handleMe(request);
+      case "stationsGet":
         return this.handleStationsGet(request);
-      }
-      if (request.method === "PUT") {
+      case "stationsPut":
         return this.handleStationsPut(request);
-      }
-    }
-
-    if (pathname === "/health") {
-      if (request.method === "POST") {
+      case "healthPost":
         return this.handleHealthPost(request);
-      }
-      if (request.method === "GET") {
+      case "healthGet":
         return this.handleHealthGet(request);
-      }
-    }
-
-    if (pathname === "/killswitches") {
-      if (request.method === "GET") {
+      case "killswitchesGet":
         return this.handleKillSwitchesGet(request);
-      }
-      if (request.method === "PUT") {
+      case "killswitchesPut":
         return this.handleKillSwitchesPut(request);
+      case "sangatSocket":
+        return this.handleSangatSocket(request);
+      case "sangatLive":
+        return this.handleSangatLive(request);
+      case "sangatCar":
+        return this.handleSangatCar(request);
+      case "parivaarPlaylistPut":
+        return this.runRoute(request, "device", putParivaarPlaylist);
+      case "parivaarPlaylistsList":
+        return this.runRoute(request, "any", listParivaarPlaylists);
+      case "familyPlaylistsList":
+        return this.runRoute(request, "any", listFamilyPlaylists);
+      case "familyPlaylistsAdd":
+        return this.runRoute(request, "device", addFamilyPlaylist);
+      case "familyPlaylistsDelete": {
+        const id = route.familyPlaylistId as string;
+        return this.runRoute(request, "any", (ctx, req, auth) =>
+          deleteFamilyPlaylist(ctx, req, auth, id),
+        );
       }
     }
-
-    return new Response("not found", { status: 404 });
   }
 }

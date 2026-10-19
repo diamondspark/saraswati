@@ -1,14 +1,6 @@
-import { env, runInDurableObject } from "cloudflare:test";
+import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-
-// Must match the ADMIN_KEY binding injected in vitest.config.ts.
-const TEST_ADMIN_KEY =
-  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-
-function getFamilyHubStub() {
-  const id = env.FAMILY_HUB.idFromName("family");
-  return env.FAMILY_HUB.get(id);
-}
+import { TEST_ADMIN_KEY, getFamilyHubStub, sha256Hex } from "./helpers";
 
 describe("POST /pairing/create", () => {
   it("returns 401 without the admin bearer token", async () => {
@@ -103,10 +95,11 @@ describe("POST /pairing/claim", () => {
 
     // No endpoint can create an already-expired token, so seed one directly
     // in the real DO's SQLite storage via the sanctioned test helper.
+    const expiredTokenHash = await sha256Hex(expiredToken);
     await runInDurableObject(stub, (_instance, state) => {
       state.storage.sql.exec(
-        "INSERT INTO pairing_tokens (token, expiresAt, usedAt) VALUES (?, ?, NULL)",
-        expiredToken,
+        "INSERT INTO pairing_tokens (tokenHash, expiresAt, usedAt) VALUES (?, ?, NULL)",
+        expiredTokenHash,
         Date.now() - 1_000,
       );
     });

@@ -11,8 +11,9 @@ name: saraswati-release
 # sign (environment: release; scripts/sign_release.sh, verified against
 # security/release-cert.sha256 by scripts/verify_apk_signer.sh, then
 # apk_gate.py on both APKs) -> publish (GitHub
-# Release with both signed APKs, then the channel manifest pushed to
-# gh-pages). No job before `sign` ever sees a secret.
+# Release with both signed APKs, then the channel manifest and the setup
+# guide in docs/setup-guide pushed to gh-pages). No job before `sign` ever
+# sees a secret.
 on:
   workflow_dispatch:
     inputs:
@@ -387,12 +388,22 @@ jobs:
           fi
           python3 -I scripts/make_manifest.py "${args[@]}"
 
-      - name: Publish the manifest to gh-pages
+      - name: Publish the manifest and the setup guide to gh-pages
         env:
           CHANNEL: ${{ inputs.channel }}
           VERSION_CODE: ${{ needs.build.outputs.version_code }}
         run: |
           set -euo pipefail
+          # The setup guide (docs/setup-guide, plain HTML and CSS, no build
+          # step) ships on the same gh-pages push as the manifest, at
+          # https://diamondspark.github.io/saraswati/setup-guide/. Stash it
+          # outside the work tree first: checking out gh-pages below replaces
+          # every file from this checkout.
+          [ -d docs/setup-guide ] || {
+            echo "docs/setup-guide is missing from this checkout; refusing to publish a release without the setup guide." >&2
+            exit 1
+          }
+          cp -R docs/setup-guide "$RUNNER_TEMP/setup-guide"
           git fetch origin gh-pages 2>/dev/null || true
           if git show-ref --verify --quiet refs/remotes/origin/gh-pages; then
             git checkout -B gh-pages-publish origin/gh-pages
@@ -401,9 +412,13 @@ jobs:
             git rm -rf . >/dev/null 2>&1 || true
           fi
           cp "$RUNNER_TEMP/${CHANNEL}.json" "./${CHANNEL}.json"
-          git add "${CHANNEL}.json"
+          # Replace the directory, not merge into it, so a page removed from
+          # docs/setup-guide disappears from the site too.
+          rm -rf setup-guide
+          cp -R "$RUNNER_TEMP/setup-guide" ./setup-guide
+          git add "${CHANNEL}.json" setup-guide
           git \
             -c user.name="github-actions[bot]" \
             -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-            commit -m "release: publish ${CHANNEL}.json for v${VERSION_CODE}"
+            commit -m "release: publish ${CHANNEL}.json and setup guide for v${VERSION_CODE}"
           git push origin gh-pages-publish:gh-pages

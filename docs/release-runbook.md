@@ -424,28 +424,46 @@ How a build gets onto a family phone, in order:
 1. **Ship the build.** Release to `beta` ("How to release"), wait out the
    48 hours, then promote to `stable` ("How to promote"). The family phones
    follow Stable.
-2. **Set up the family hub once** (owner only): `cd worker && npx wrangler
-   deploy`, then `npx wrangler secret put ADMIN_KEY` with a value from `openssl
-   rand -hex 32` typed only into your own terminal, then paste it once into the
-   app's Manage Family setup. Never put the key in chat or a file. Deploy from
-   commit `53351555` or later onto a fresh hub: the roster table has no
-   migration for its newest column. Step by step in
+2. **Set up the family hub once** (owner only): `cd worker && npm ci` (once,
+   it installs the pinned `wrangler`; do it before `wrangler login`), then
+   `cd worker && npx wrangler deploy` from commit `8bf722b1` or later (it
+   contains the hashed-token migration, approval expiry, body limits and
+   front-Worker routing; if you squash-merge, replace it with the merge
+   commit). The Worker's migration runner upgrades a hub that is already live
+   in place, so there is no "fresh hub" rule. Never roll back: once the
+   migration has run, an older Worker version cannot read the renamed columns,
+   so redeploy forward. If the URL that `wrangler deploy` prints differs from
+   the app's `HUB_BASE_URL`, stop. Once the build from step 1 is on your own
+   phone, do the admin key in one sitting: generate it with `openssl rand
+   -hex 32` in your own terminal only, run `cd worker && npx wrangler secret
+   put ADMIN_KEY`, and paste it once into the app's Manage Family setup. Never
+   put the key in chat or a file. If your phone is lost or stolen, run `npx
+   wrangler secret put ADMIN_KEY` with a NEW value at once.
+   Step by step in
    [`rollout-checklist.md`](rollout-checklist.md#before-the-first-phone).
 3. **Set up each phone** with [`rollout-checklist.md`](rollout-checklist.md):
    one checklist per phone, covering the architecture check, developer
    verification, install, phone hygiene, pairing and approval, role (adult or
    grandparent), Android Auto, and the 30-day reminder to uninstall Metrolist.
    The family member follows the setup guide, live on a video call:
-   <https://diamondspark.github.io/saraswati/setup-guide/> (published by Phase 3
-   Task 12; not live until that task lands).
+   <https://diamondspark.github.io/saraswati/setup-guide/> (live once a release
+   run publishes it: the release workflow copies `docs/setup-guide` to
+   `gh-pages` next to the channel manifest). Don't publish the setup guide
+   (cut a release) until the app shows the 4-character approval code and
+   tolerates the new approve reply; that is app work and it has to land first.
 
 Known limits, also listed in the checklist:
 
 - The hub caps owner actions at 20 a minute, so a refresh-happy Manage Family
   screen can show "try again in a minute".
-- The free Cloudflare plan's daily request quota is a residual risk if a phone
-  misbehaves. Revoking that phone in Manage Family is the fix.
-- A pairing link expires after 15 minutes and works once.
+- The free Cloudflare plan's daily request quota is a residual risk, and
+  anyone can burn it, not just a misbehaving phone; revoking a phone does not
+  help. The front Worker answers only requests with no Authorization header
+  and unknown routes without waking the Durable Object; `/ping`,
+  `/pairing/claim`, `/pairing/status` and any request carrying some Bearer
+  still wake it, and every request costs a Worker request.
+- A pairing link expires after 15 minutes and works once. A claimed phone
+  can only be approved within 1 hour.
 
 Developer verification is a per-phone step (see "Developer verification (Task
 13)" above); the full procedure is in

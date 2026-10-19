@@ -382,7 +382,7 @@ describe("POST /family-playlists: text, size and revoke races", () => {
       // The revoke lands while the body is being read, as it can between two events.
       const body = new ReadableStream<Uint8Array>({
         pull(controller) {
-          db.exec("UPDATE roster SET status = 'revoked', sessionToken = NULL WHERE deviceId = ?", a.deviceId);
+          db.exec("UPDATE roster SET status = 'revoked', sessionTokenHash = NULL WHERE deviceId = ?", a.deviceId);
           controller.enqueue(payload);
           controller.close();
         },

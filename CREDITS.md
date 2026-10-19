@@ -32,4 +32,12 @@ Metrolist names these two projects as its main inspirations, and Saraswati inher
 
 Saraswati removes or replaces some of these features. They stay credited because their code is part of the base commit and the git history.
 
+## Fonts
+
+<!-- SARASWATI: Task 9 — the typeface of Saral, the grandparents' screen. -->
+
+| Font | Authors | License | Where |
+|---|---|---|---|
+| [Noto Sans Devanagari](https://github.com/notofonts/devanagari) (variable, `wdth` and `wght`; version 2.007) | The Noto Project Authors | [SIL Open Font License 1.1](app/third_party/noto-sans-devanagari/OFL.txt) | `app/src/main/res/font/noto_sans_devanagari.ttf`, taken unmodified from [google/fonts](https://github.com/google/fonts/tree/2bc5d431b584d89e646214bf6cfa75494e76ceea/ofl/notosansdevanagari) at commit `2bc5d431b584d89e646214bf6cfa75494e76ceea` (sha256 `14ec4af41f27482216d1c2229f417ff9b1425e1babb014e57d1d40d03229853e`) |
+
 Thank you to the whole open-source community, for every library, tool and API this project uses.

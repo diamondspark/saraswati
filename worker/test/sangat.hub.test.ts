@@ -2,6 +2,7 @@
 // must cut live sockets at once, a revoke (4001) and the "sangat" kill switch (4003).
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { sha256Hex } from "./helpers";
 import {
   closeAllClients,
   createRoom,
@@ -380,8 +381,9 @@ describe("POST /roster/{id}/revoke", () => {
     expect((await refusedUpgrade(hub, b.token)).status).toBe(401);
     // Even if the owner approved the phone again later, the old seat is gone.
     const fresh = "ab".repeat(32);
+    const freshHash = await sha256Hex(fresh);
     await sql(hub, (db) => {
-      db.exec("UPDATE roster SET status = 'approved', sessionToken = ? WHERE deviceId = ?", fresh, b.deviceId);
+      db.exec("UPDATE roster SET status = 'approved', sessionTokenHash = ? WHERE deviceId = ?", freshHash, b.deviceId);
     });
     const again = await SangatClient.connect(hub, fresh);
     await again.send("reconnect", { session_token: bharat.token });

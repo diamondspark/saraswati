@@ -3,6 +3,7 @@
 // for comparison with the metroserver golden.
 
 import { env, evictAllDurableObjects, runInDurableObject } from "cloudflare:test";
+import { seedRoster } from "../helpers";
 import { normalize } from "./normalize.ts";
 import { runScenario, type TraceTransport } from "./runner.ts";
 import { SCENARIOS, type ScenarioName } from "./scenarios.ts";
@@ -59,19 +60,21 @@ async function clearTraceState(hub: HubStub): Promise<void> {
 // a real phone would be after pairing.
 async function seedDevices(hub: HubStub, clients: string[]): Promise<Map<string, string>> {
   const tokens = new Map<string, string>();
-  await runInDurableObject(hub, (_instance, state) => {
-    for (const client of clients) {
-      const token = randomHex(32);
-      tokens.set(client, token);
-      state.storage.sql.exec(
-        "INSERT OR REPLACE INTO roster (deviceId, deviceName, status, sessionToken, approvedAt, claimSecret, role) VALUES (?, ?, 'approved', ?, ?, NULL, 'adult')",
-        `${DEVICE_PREFIX}${client}`,
-        `Trace phone ${client}`,
-        token,
-        Date.now(),
-      );
-    }
-  });
+  for (const client of clients) {
+    const token = randomHex(32);
+    tokens.set(client, token);
+    const deviceId = `${DEVICE_PREFIX}${client}`;
+    await runInDurableObject(hub, (_instance, state) => {
+      state.storage.sql.exec("DELETE FROM roster WHERE deviceId = ?", deviceId);
+    });
+    await seedRoster(hub, {
+      deviceId,
+      deviceName: `Trace phone ${client}`,
+      status: "approved",
+      sessionToken: token,
+      approvedAt: Date.now(),
+    });
+  }
   return tokens;
 }
 

@@ -25,6 +25,10 @@ import androidx.navigation.compose.dialog
 import androidx.navigation.navArgument
 import com.metrolist.music.constants.DarkModeKey
 import com.metrolist.music.constants.PureBlackKey
+import com.metrolist.music.saraswati.family.FamilyRoutes
+import com.metrolist.music.saraswati.family.FamilyScreen
+import com.metrolist.music.saraswati.family.JoinFamilyScreen
+import com.metrolist.music.saraswati.family.ManageFamilyScreen
 import com.metrolist.music.ui.screens.artist.ArtistAlbumsScreen
 import com.metrolist.music.ui.screens.artist.ArtistItemsScreen
 import com.metrolist.music.ui.screens.artist.ArtistScreen
@@ -101,6 +105,19 @@ fun NavGraphBuilder.navigationBuilder(
 
     composable(Screens.ListenTogether.route) {
         ListenTogetherScreen(navController, showTopBar = false)
+    }
+
+    // SARASWATI: Task 7 — Family tab, Manage Family and the pairing join flow.
+    composable(Screens.Family.route) {
+        FamilyScreen(navController)
+    }
+
+    composable(FamilyRoutes.MANAGE) {
+        ManageFamilyScreen(navController)
+    }
+
+    composable(FamilyRoutes.JOIN) {
+        JoinFamilyScreen(navController)
     }
 
     composable(

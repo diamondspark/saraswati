@@ -6,6 +6,7 @@
 import { fromBinary } from "@bufbuild/protobuf";
 import { env, evictAllDurableObjects, runInDurableObject } from "cloudflare:test";
 import { EnvelopeSchema } from "../src/gen/listentogether_pb";
+import { seedRoster } from "./helpers";
 import { decodeFrame, encodeFrame } from "./traces/wire.ts";
 
 export const HUB_ORIGIN = "https://hub.example";
@@ -56,15 +57,17 @@ export async function seedDevice(
 ): Promise<Device> {
   const deviceId = `${DEVICE_PREFIX}${name}`;
   const token = randomHex(32);
+  // Seeding again under the same name replaces the row, as it always has. The token is stored
+  // hashed, the way the hub keeps it; the plaintext only lives in the returned Device.
   await sql(hub, (db) => {
-    db.exec(
-      "INSERT OR REPLACE INTO roster (deviceId, deviceName, status, sessionToken, approvedAt, claimSecret, role) VALUES (?, ?, ?, ?, ?, NULL, 'adult')",
-      deviceId,
-      `Test phone ${name}`,
-      status,
-      status === "approved" ? token : null,
-      status === "approved" ? Date.now() : null,
-    );
+    db.exec("DELETE FROM roster WHERE deviceId = ?", deviceId);
+  });
+  await seedRoster(hub, {
+    deviceId,
+    deviceName: `Test phone ${name}`,
+    status,
+    sessionToken: status === "approved" ? token : null,
+    approvedAt: status === "approved" ? Date.now() : null,
   });
   return { deviceId, token };
 }

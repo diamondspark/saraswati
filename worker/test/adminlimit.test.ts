@@ -1,19 +1,16 @@
-import { env, runInDurableObject } from "cloudflare:test";
+import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import {
+  type Stub,
+  TEST_ADMIN_KEY,
+  getFamilyHubStub,
+  seedRoster,
+  sha256Hex,
+} from "./helpers";
 
-// Must match the ADMIN_KEY binding injected in vitest.config.ts.
-const TEST_ADMIN_KEY =
-  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const WRONG_BEARER = "cd".repeat(32);
 const ADMIN_BUDGET = 20;
 const ADMIN_WINDOW_MS = 60_000;
-
-function getFamilyHubStub() {
-  const id = env.FAMILY_HUB.idFromName("family");
-  return env.FAMILY_HUB.get(id);
-}
-
-type Stub = ReturnType<typeof getFamilyHubStub>;
 
 interface Route {
   method: string;
@@ -94,14 +91,11 @@ function seedDevice(
   status: "pending" | "approved" | "revoked",
   sessionToken: string | null = null,
 ) {
-  return runInDurableObject(stub, (_instance, state) => {
-    state.storage.sql.exec(
-      "INSERT INTO roster (deviceId, deviceName, status, sessionToken, approvedAt) VALUES (?, ?, ?, ?, NULL)",
-      deviceId,
-      `Device ${deviceId}`,
-      status,
-      sessionToken,
-    );
+  return seedRoster(stub, {
+    deviceId,
+    status,
+    sessionToken,
+    claimedAt: Date.now(),
   });
 }
 
@@ -177,13 +171,17 @@ describe("admin request cap (20 per minute)", () => {
     expect(
       await sql(
         stub,
-        "SELECT deviceId, status, sessionToken FROM roster WHERE deviceId IN (?, ?) ORDER BY deviceId",
+        "SELECT deviceId, status, sessionTokenHash FROM roster WHERE deviceId IN (?, ?) ORDER BY deviceId",
         pending,
         approved,
       ),
     ).toEqual([
-      { deviceId: pending, status: "pending", sessionToken: null },
-      { deviceId: approved, status: "approved", sessionToken },
+      { deviceId: pending, status: "pending", sessionTokenHash: null },
+      {
+        deviceId: approved,
+        status: "approved",
+        sessionTokenHash: await sha256Hex(sessionToken),
+      },
     ]);
     expect(await sql(stub, "SELECT * FROM stations")).toEqual([]);
     expect(

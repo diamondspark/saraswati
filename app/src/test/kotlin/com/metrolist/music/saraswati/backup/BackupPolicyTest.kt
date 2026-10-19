@@ -20,6 +20,14 @@ import com.metrolist.music.constants.DeeplApiKey
 import com.metrolist.music.constants.DiscordAvatarKey
 import com.metrolist.music.constants.DiscordButton1UrlKey
 import com.metrolist.music.constants.DiscordButton2UrlKey
+import com.metrolist.music.constants.FamilyAdminKeyKey
+import com.metrolist.music.constants.FamilyHubClaimSecretKey
+import com.metrolist.music.constants.FamilyDeviceIdKey
+import com.metrolist.music.constants.FamilyHubSessionTokenKey
+import com.metrolist.music.constants.FamilyStationsSavedKey
+import com.metrolist.music.constants.FamilyStationsCacheKey
+import com.metrolist.music.constants.GrandparentRoleKey
+import com.metrolist.music.constants.IsFamilyOwnerKey
 import com.metrolist.music.constants.InnerTubeCookieKey
 import com.metrolist.music.constants.LastFMSessionKey
 import com.metrolist.music.constants.ListenTogetherServerUrlKey
@@ -60,6 +68,46 @@ class BackupPolicyTest {
         assertNull(sanitized[AccountNameKey])
         assertNull(sanitized[AccountEmailKey])
         assertNull(sanitized[AccountChannelHandleKey])
+    }
+
+    // SARASWATI: Task 6 — the family hub credentials ride on
+    // SecretPreferenceKeys.all, so a shared backup must not carry another
+    // device's admin key or session token, and a hostile backup must not be
+    // able to plant one into a live phone.
+    @Test
+    fun `sanitize drops the family hub credentials`() {
+        val prefs =
+            mutablePreferencesOf(
+                FamilyAdminKeyKey to "admin-key",
+                FamilyHubSessionTokenKey to "session-token",
+                FamilyHubClaimSecretKey to "claim-secret",
+            ).toPreferences()
+
+        val sanitized = BackupPolicy.sanitize(prefs)
+
+        assertNull(sanitized[FamilyAdminKeyKey])
+        assertNull(sanitized[FamilyHubSessionTokenKey])
+        assertNull(sanitized[FamilyHubClaimSecretKey])
+    }
+
+    @Test
+    fun `a restore keeps this phone's own family hub credentials and ignores restored ones`() {
+        val live =
+            mutablePreferencesOf(
+                FamilyAdminKeyKey to "live-sealed-admin",
+                FamilyHubSessionTokenKey to "live-sealed-session",
+            ).toPreferences()
+        val restored =
+            mutablePreferencesOf(
+                FamilyAdminKeyKey to "planted-admin",
+                FamilyHubClaimSecretKey to "planted-claim",
+            ).toPreferences()
+
+        val merged = BackupPolicy.mergeRestoreOntoLive(live = live, restored = restored)
+
+        assertEquals("live-sealed-admin", merged[FamilyAdminKeyKey])
+        assertEquals("live-sealed-session", merged[FamilyHubSessionTokenKey])
+        assertNull(merged[FamilyHubClaimSecretKey])
     }
 
     @Test
@@ -203,5 +251,125 @@ class BackupPolicyTest {
     @Test
     fun `NEVER_EXPORT_OR_RESTORE includes every SecretPreferenceKeys entry`() {
         assertTrue(BackupPolicy.NEVER_EXPORT_OR_RESTORE.containsAll(SecretPreferenceKeys.all))
+    }
+
+    // SARASWATI: Task 9 — the grandparent flag is a cache of what the hub says,
+    // and the owner's only way out of Saral is the hub. A backup (shared, old,
+    // or hostile) must never be able to switch a phone into Saral, or out of it.
+    @Test
+    fun `sanitize drops the Saral flag and the stations cache`() {
+        val prefs =
+            mutablePreferencesOf(
+                GrandparentRoleKey to true,
+                FamilyStationsCacheKey to "{}",
+            ).toPreferences()
+
+        val sanitized = BackupPolicy.sanitize(prefs)
+
+        assertNull(sanitized[GrandparentRoleKey])
+        assertNull(sanitized[FamilyStationsCacheKey])
+    }
+
+    @Test
+    fun `a restore leaves this phone's Saral flag exactly as it is`() {
+        val live = mutablePreferencesOf(GrandparentRoleKey to true).toPreferences()
+        val restored = mutablePreferencesOf(AudioQualityKey to "HIGH").toPreferences()
+
+        val merged = BackupPolicy.mergeRestoreOntoLive(live, restored)
+
+        assertEquals(true, merged[GrandparentRoleKey])
+    }
+
+    @Test
+    fun `a hostile backup cannot switch an adult phone into Saral`() {
+        val live = mutablePreferencesOf(AudioQualityKey to "LOW").toPreferences()
+        val restored = mutablePreferencesOf(GrandparentRoleKey to true).toPreferences()
+
+        val merged = BackupPolicy.mergeRestoreOntoLive(live, BackupPolicy.sanitize(restored))
+
+        assertNull(merged[GrandparentRoleKey])
+    }
+    // SARASWATI: fix round 1 — the owner flag, this phone's hub device id and
+    // the "stations were saved" marker are this phone's own hub state. A
+    // restore must not plant or clear them (a planted owner flag, or a device
+    // id that no longer matches the live session token, leaves the phone
+    // pointing at the wrong identity), and none of them belongs in a shared
+    // backup. Their names do not match the sensitive-name regex above, so the
+    // reflection test below pins them by prefix instead.
+    @Test
+    fun `sanitize drops the owner flag, the device id and the stations-saved marker`() {
+        val prefs =
+            mutablePreferencesOf(
+                IsFamilyOwnerKey to true,
+                FamilyDeviceIdKey to "device-1",
+                FamilyStationsSavedKey to true,
+                AudioQualityKey to "HIGH",
+            ).toPreferences()
+
+        val sanitized = BackupPolicy.sanitize(prefs)
+
+        assertNull(sanitized[IsFamilyOwnerKey])
+        assertNull(sanitized[FamilyDeviceIdKey])
+        assertNull(sanitized[FamilyStationsSavedKey])
+        assertEquals("HIGH", sanitized[AudioQualityKey])
+    }
+
+    @Test
+    fun `a restore keeps this phone's own owner flag and device id and ignores planted ones`() {
+        val live =
+            mutablePreferencesOf(
+                IsFamilyOwnerKey to true,
+                FamilyDeviceIdKey to "live-device",
+                FamilyHubSessionTokenKey to "live-sealed-session",
+            ).toPreferences()
+        val restored =
+            mutablePreferencesOf(
+                IsFamilyOwnerKey to false,
+                FamilyDeviceIdKey to "planted-device",
+                FamilyStationsSavedKey to true,
+            ).toPreferences()
+
+        val merged = BackupPolicy.mergeRestoreOntoLive(live, restored)
+
+        assertEquals(true, merged[IsFamilyOwnerKey])
+        assertEquals("live-device", merged[FamilyDeviceIdKey])
+        assertEquals("live-sealed-session", merged[FamilyHubSessionTokenKey])
+        assertNull(merged[FamilyStationsSavedKey])
+    }
+
+    @Test
+    fun `a hostile backup cannot make a phone the owner or give it another device id`() {
+        val live = mutablePreferencesOf(AudioQualityKey to "LOW").toPreferences()
+        val restored =
+            mutablePreferencesOf(
+                IsFamilyOwnerKey to true,
+                FamilyDeviceIdKey to "planted-device",
+            ).toPreferences()
+
+        val merged = BackupPolicy.mergeRestoreOntoLive(live, BackupPolicy.sanitize(restored))
+
+        assertNull(merged[IsFamilyOwnerKey])
+        assertNull(merged[FamilyDeviceIdKey])
+    }
+
+    @Test
+    fun `every family hub state key is excluded from backups, whatever its name looks like`() {
+        val hubState = Regex("^(Family|IsFamily|Grandparent)")
+        val keys =
+            Class
+                .forName("com.metrolist.music.constants.PreferenceKeysKt")
+                .declaredFields
+                .filter { Modifier.isStatic(it.modifiers) }
+                .filter { Preferences.Key::class.java.isAssignableFrom(it.type) }
+                .filter { hubState.containsMatchIn(it.name) }
+                .onEach { it.isAccessible = true }
+
+        assertTrue("expected to find the family keys via reflection", keys.size >= 8)
+        val missing =
+            keys.filterNot { (it.get(null) as Preferences.Key<*>) in BackupPolicy.NEVER_EXPORT_OR_RESTORE }
+        assertTrue(
+            "These family hub preference keys can be exported or restored: " + missing.joinToString(", ") { it.name },
+            missing.isEmpty(),
+        )
     }
 }
