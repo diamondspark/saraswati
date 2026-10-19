@@ -1,5 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "./index";
+import { migrate } from "./migrations";
+import { randomHex, secretsMatch, sha256Hex } from "./secrets";
 
 const PAIRING_TOKEN_TTL_MS = 15 * 60 * 1000;
 const MAX_STATIONS = 6;
@@ -48,7 +50,6 @@ type AuthResult =
 // requires an explicit index signature, not just structurally-compatible
 // named properties.
 interface PairingTokenRow extends Record<string, SqlStorageValue> {
-  token: string;
   expiresAt: number;
   usedAt: number | null;
 }
@@ -57,7 +58,6 @@ interface RosterRow extends Record<string, SqlStorageValue> {
   deviceId: string;
   deviceName: string | null;
   status: string;
-  sessionToken: string | null;
   approvedAt: number | null;
   role: string;
 }
@@ -69,13 +69,15 @@ interface RosterStatusRow extends Record<string, SqlStorageValue> {
 
 interface DeviceAuthRow extends Record<string, SqlStorageValue> {
   deviceId: string;
-  claimSecret: string | null;
+  sessionTokenHash: string;
+  claimSecretHash: string | null;
+  pendingSessionToken: string | null;
 }
 
 interface ClaimStatusRow extends Record<string, SqlStorageValue> {
   status: string;
-  sessionToken: string | null;
-  claimSecret: string | null;
+  pendingSessionToken: string | null;
+  claimSecretHash: string | null;
 }
 
 interface RosterIdRow extends Record<string, SqlStorageValue> {
@@ -117,26 +119,6 @@ interface Station {
   title: string;
   seedVideoId: string;
   iconIndex: number;
-}
-
-function randomHex(byteLength: number): string {
-  const bytes = new Uint8Array(byteLength);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
-    "",
-  );
-}
-
-/**
- * Compares two secrets without bailing out at the first differing byte. The
- * length check is not constant-time, which is fine: the stored secret is
- * always 64 hex chars, so a length mismatch reveals nothing.
- */
-function secretsMatch(provided: string, stored: string): boolean {
-  const encoder = new TextEncoder();
-  const a = encoder.encode(provided);
-  const b = encoder.encode(stored);
-  return a.byteLength === b.byteLength && crypto.subtle.timingSafeEqual(a, b);
 }
 
 function json(body: unknown, status = 200): Response {
@@ -272,51 +254,19 @@ export class FamilyHub extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
 
-    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS pairing_tokens (
-      token TEXT PRIMARY KEY,
-      expiresAt INTEGER,
-      usedAt INTEGER
-    )`);
-    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS roster (
-      deviceId TEXT PRIMARY KEY,
-      deviceName TEXT,
-      status TEXT,
-      sessionToken TEXT,
-      approvedAt INTEGER,
-      claimSecret TEXT,
-      role TEXT NOT NULL DEFAULT 'adult'
-    )`);
-    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS stations (
-      id TEXT PRIMARY KEY,
-      title TEXT,
-      seedVideoId TEXT,
-      iconIndex INTEGER,
-      position INTEGER
-    )`);
-    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS killswitches (
-      key TEXT PRIMARY KEY,
-      enabled INTEGER
-    )`);
-    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS health (
-      deviceId TEXT PRIMARY KEY,
-      versionCode INTEGER,
-      versionName TEXT,
-      timezone TEXT,
-      lastSeenAt INTEGER
-    )`);
-    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS rate_limits (
-      key TEXT PRIMARY KEY,
-      windowStart INTEGER,
-      count INTEGER
-    )`);
-    // INSERT OR IGNORE keeps any key the owner has already flipped; a feature
-    // key added to FAMILY_FEATURE_KEYS later seeds itself as enabled.
-    for (const key of FAMILY_FEATURE_KEYS) {
-      ctx.storage.sql.exec(
-        "INSERT OR IGNORE INTO killswitches (key, enabled) VALUES (?, 1)",
-        key,
-      );
-    }
+    // Nothing is served until the schema is current. A migration that throws
+    // resets the object, so a half-migrated hub answers nothing at all.
+    ctx.blockConcurrencyWhile(async () => {
+      await migrate(ctx.storage);
+      // INSERT OR IGNORE keeps any key the owner has already flipped; a
+      // feature key added to FAMILY_FEATURE_KEYS later seeds itself as enabled.
+      for (const key of FAMILY_FEATURE_KEYS) {
+        ctx.storage.sql.exec(
+          "INSERT OR IGNORE INTO killswitches (key, enabled) VALUES (?, 1)",
+          key,
+        );
+      }
+    });
   }
 
   /**
@@ -343,24 +293,37 @@ export class FamilyHub extends DurableObject<Env> {
       return { role: "admin" };
     }
 
+    // Only the hash of a session token is stored, so the presented bearer is
+    // hashed and every approved device's hash is compared in constant time,
+    // none of them skipped once one matches.
+    const presented = await sha256Hex(token);
     const rows = this.ctx.storage.sql
       .exec<DeviceAuthRow>(
-        "SELECT deviceId, claimSecret FROM roster WHERE sessionToken = ? AND status = 'approved'",
-        token,
+        "SELECT deviceId, sessionTokenHash, claimSecretHash, pendingSessionToken FROM roster WHERE status = 'approved' AND sessionTokenHash IS NOT NULL",
       )
       .toArray();
+    let matched: DeviceAuthRow | null = null;
+    for (const row of rows) {
+      if (secretsMatch(presented, row.sessionTokenHash)) {
+        matched = row;
+      }
+    }
 
-    if (rows.length === 1) {
-      // The phone has now proven it holds its sessionToken, so the claimSecret
-      // that fetched it via /pairing/status has done its job. One write per
-      // device, ever: the guard skips every later authentication.
-      if (rows[0].claimSecret !== null) {
+    if (matched) {
+      // The phone has now proven it holds its sessionToken, so the plaintext
+      // copy kept for /pairing/status and the claimSecret that fetched it have
+      // done their job. One write per device, ever: the guard skips every
+      // later authentication.
+      if (
+        matched.claimSecretHash !== null ||
+        matched.pendingSessionToken !== null
+      ) {
         this.ctx.storage.sql.exec(
-          "UPDATE roster SET claimSecret = NULL WHERE deviceId = ?",
-          rows[0].deviceId,
+          "UPDATE roster SET claimSecretHash = NULL, pendingSessionToken = NULL WHERE deviceId = ?",
+          matched.deviceId,
         );
       }
-      return { role: "device", deviceId: rows[0].deviceId };
+      return { role: "device", deviceId: matched.deviceId };
     }
 
     return null;
@@ -437,9 +400,10 @@ export class FamilyHub extends DurableObject<Env> {
     const token = randomHex(32);
     const expiresAtMs = Date.now() + PAIRING_TOKEN_TTL_MS;
 
+    // The owner gets the token once, in this response; only its hash is kept.
     this.ctx.storage.sql.exec(
-      "INSERT INTO pairing_tokens (token, expiresAt, usedAt) VALUES (?, ?, NULL)",
-      token,
+      "INSERT INTO pairing_tokens (tokenHash, expiresAt, usedAt) VALUES (?, ?, NULL)",
+      await sha256Hex(token),
       expiresAtMs,
     );
 
@@ -463,10 +427,11 @@ export class FamilyHub extends DurableObject<Env> {
       return json({ error: ROLE_ERROR }, 400);
     }
 
+    const tokenHash = await sha256Hex(token);
     const rows = this.ctx.storage.sql
       .exec<PairingTokenRow>(
-        "SELECT token, expiresAt, usedAt FROM pairing_tokens WHERE token = ?",
-        token,
+        "SELECT expiresAt, usedAt FROM pairing_tokens WHERE tokenHash = ?",
+        tokenHash,
       )
       .toArray();
 
@@ -480,7 +445,7 @@ export class FamilyHub extends DurableObject<Env> {
     // limiter exists to prevent.
     if (
       !this.rateLimit(
-        `claim:${token}`,
+        `claim:${tokenHash}`,
         CLAIM_WINDOW_SECONDS,
         CLAIM_MAX_ATTEMPTS,
       )
@@ -495,17 +460,19 @@ export class FamilyHub extends DurableObject<Env> {
 
     const deviceId = crypto.randomUUID();
     const claimSecret = randomHex(32);
+    const claimedAt = Date.now();
     this.ctx.storage.sql.exec(
-      "INSERT INTO roster (deviceId, deviceName, status, sessionToken, approvedAt, claimSecret, role) VALUES (?, ?, 'pending', NULL, NULL, ?, ?)",
+      "INSERT INTO roster (deviceId, deviceName, status, sessionTokenHash, pendingSessionToken, approvedAt, claimSecretHash, role, claimedAt) VALUES (?, ?, 'pending', NULL, NULL, NULL, ?, ?, ?)",
       deviceId,
       deviceName,
-      claimSecret,
+      await sha256Hex(claimSecret),
       role,
+      claimedAt,
     );
     this.ctx.storage.sql.exec(
-      "UPDATE pairing_tokens SET usedAt = ? WHERE token = ?",
-      Date.now(),
-      token,
+      "UPDATE pairing_tokens SET usedAt = ? WHERE tokenHash = ?",
+      claimedAt,
+      tokenHash,
     );
 
     return json({ deviceId, status: "pending", claimSecret });
@@ -526,7 +493,7 @@ export class FamilyHub extends DurableObject<Env> {
 
     const rows = this.ctx.storage.sql
       .exec<ClaimStatusRow>(
-        "SELECT status, sessionToken, claimSecret FROM roster WHERE deviceId = ?",
+        "SELECT status, pendingSessionToken, claimSecretHash FROM roster WHERE deviceId = ?",
         deviceId,
       )
       .toArray();
@@ -552,15 +519,18 @@ export class FamilyHub extends DurableObject<Env> {
     // collected its token.
     const row = rows[0];
     if (
-      row.claimSecret === null ||
-      !secretsMatch(claimSecret, row.claimSecret) ||
+      row.claimSecretHash === null ||
+      !secretsMatch(await sha256Hex(claimSecret), row.claimSecretHash) ||
       (row.status !== "pending" && row.status !== "approved")
     ) {
       return json({ error: "not found" }, 404);
     }
 
-    if (row.status === "approved" && row.sessionToken !== null) {
-      return json({ status: "approved", sessionToken: row.sessionToken });
+    if (row.status === "approved" && row.pendingSessionToken !== null) {
+      return json({
+        status: "approved",
+        sessionToken: row.pendingSessionToken,
+      });
     }
     return json({ status: "pending" });
   }
@@ -578,7 +548,7 @@ export class FamilyHub extends DurableObject<Env> {
 
     const devices = this.ctx.storage.sql
       .exec<RosterRow>(
-        "SELECT deviceId, deviceName, status, sessionToken, approvedAt, role FROM roster",
+        "SELECT deviceId, deviceName, status, approvedAt, role FROM roster",
       )
       .toArray()
       .map((row) => ({
@@ -682,16 +652,20 @@ export class FamilyHub extends DurableObject<Env> {
       return json({ error: "not found" }, 404);
     }
 
+    // The owner is never shown the phone's credential. The plaintext waits in
+    // pendingSessionToken only until the phone collects it through
+    // /pairing/status and first uses it; the lookup key is its hash.
     const sessionToken = randomHex(32);
     const approvedAtMs = Date.now();
     this.ctx.storage.sql.exec(
-      "UPDATE roster SET status = 'approved', sessionToken = ?, approvedAt = ? WHERE deviceId = ?",
+      "UPDATE roster SET status = 'approved', sessionTokenHash = ?, pendingSessionToken = ?, approvedAt = ? WHERE deviceId = ?",
+      await sha256Hex(sessionToken),
       sessionToken,
       approvedAtMs,
       deviceId,
     );
 
-    return json({ deviceId, sessionToken, status: "approved" });
+    return json({ deviceId, status: "approved" });
   }
 
   private async handleRosterRevoke(
@@ -720,7 +694,7 @@ export class FamilyHub extends DurableObject<Env> {
     }
 
     this.ctx.storage.sql.exec(
-      "UPDATE roster SET status = 'revoked', sessionToken = NULL, claimSecret = NULL WHERE deviceId = ?",
+      "UPDATE roster SET status = 'revoked', sessionTokenHash = NULL, pendingSessionToken = NULL, claimSecretHash = NULL WHERE deviceId = ?",
       deviceId,
     );
 

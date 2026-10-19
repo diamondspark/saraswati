@@ -1,9 +1,12 @@
-import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import {
+  type Stub,
+  TEST_ADMIN_KEY,
+  approveAndGetSessionToken,
+  getFamilyHubStub,
+  seedPendingDevice,
+} from "./helpers";
 
-// Must match the ADMIN_KEY binding injected in vitest.config.ts.
-const TEST_ADMIN_KEY =
-  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const WRONG_BEARER = "cd".repeat(32);
 
 const ALL_ENABLED = {
@@ -12,13 +15,6 @@ const ALL_ENABLED = {
   family_playlists: true,
   cast_relay: true,
 };
-
-function getFamilyHubStub() {
-  const id = env.FAMILY_HUB.idFromName("family");
-  return env.FAMILY_HUB.get(id);
-}
-
-type Stub = ReturnType<typeof getFamilyHubStub>;
 
 function putKillSwitches(
   stub: Stub,
@@ -50,29 +46,6 @@ async function adminKillSwitches(stub: Stub) {
 async function resetAllEnabled(stub: Stub) {
   const response = await putKillSwitches(stub, ALL_ENABLED);
   expect(response.status).toBe(200);
-}
-
-async function seedPendingDevice(
-  stub: Stub,
-  deviceId: string,
-  deviceName: string,
-) {
-  await runInDurableObject(stub, (_instance, state) => {
-    state.storage.sql.exec(
-      "INSERT INTO roster (deviceId, deviceName, status, sessionToken, approvedAt) VALUES (?, ?, 'pending', NULL, NULL)",
-      deviceId,
-      deviceName,
-    );
-  });
-}
-
-async function approveAndGetSessionToken(stub: Stub, deviceId: string) {
-  const response = await stub.fetch(
-    `https://example.com/roster/${deviceId}/approve`,
-    { method: "POST", headers: { Authorization: `Bearer ${TEST_ADMIN_KEY}` } },
-  );
-  expect(response.status).toBe(200);
-  return ((await response.json()) as { sessionToken: string }).sessionToken;
 }
 
 async function approvedDeviceToken(stub: Stub, deviceId: string) {

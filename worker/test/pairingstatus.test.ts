@@ -1,26 +1,21 @@
-import { env, runInDurableObject } from "cloudflare:test";
+import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import {
+  type Stub,
+  TEST_ADMIN_KEY,
+  adminHeaders,
+  getFamilyHubStub,
+  sha256Hex,
+} from "./helpers";
 
-// Must match the ADMIN_KEY binding injected in vitest.config.ts.
-const TEST_ADMIN_KEY =
-  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const HEX_64 = /^[0-9a-f]{64}$/;
 const STATUS_WINDOW_MS = 60_000;
 const STATUS_MAX_CALLS = 12;
-
-function getFamilyHubStub() {
-  const id = env.FAMILY_HUB.idFromName("family");
-  return env.FAMILY_HUB.get(id);
-}
-
-type Stub = ReturnType<typeof getFamilyHubStub>;
 
 interface Claimed {
   deviceId: string;
   claimSecret: string;
 }
-
-const adminHeaders = { Authorization: `Bearer ${TEST_ADMIN_KEY}` };
 
 async function claimDevice(stub: Stub, deviceName = "Test Phone") {
   const created = await stub.fetch("https://example.com/pairing/create", {
@@ -38,13 +33,27 @@ async function claimDevice(stub: Stub, deviceName = "Test Phone") {
   return (await response.json()) as Claimed & { status: string };
 }
 
-async function approve(stub: Stub, deviceId: string): Promise<string> {
+async function approve(stub: Stub, deviceId: string): Promise<void> {
   const response = await stub.fetch(
     `https://example.com/roster/${deviceId}/approve`,
     { method: "POST", headers: adminHeaders },
   );
   expect(response.status).toBe(200);
-  return ((await response.json()) as { sessionToken: string }).sessionToken;
+  // The owner is never handed the phone's credential.
+  expect(await response.json()).toEqual({ deviceId, status: "approved" });
+}
+
+/** Approves, then collects the token through /pairing/status as a phone does. */
+async function approveAndCollect(stub: Stub, claimed: Claimed): Promise<string> {
+  await approve(stub, claimed.deviceId);
+  const response = await status(stub, claimed);
+  expect(response.status).toBe(200);
+  const body = (await response.json()) as {
+    status: string;
+    sessionToken: string;
+  };
+  expect(body.status).toBe("approved");
+  return body.sessionToken;
 }
 
 async function revoke(stub: Stub, deviceId: string) {
@@ -74,16 +83,30 @@ function deviceGetStations(stub: Stub, sessionToken: string) {
   });
 }
 
+/** What the hub holds for a device's claimSecret: its SHA-256, or null once cleared. */
 function storedClaimSecret(stub: Stub, deviceId: string) {
   return runInDurableObject(
     stub,
     (_instance, state) =>
       state.storage.sql
-        .exec<{ claimSecret: string | null }>(
-          "SELECT claimSecret FROM roster WHERE deviceId = ?",
+        .exec<{ claimSecretHash: string | null }>(
+          "SELECT claimSecretHash FROM roster WHERE deviceId = ?",
           deviceId,
         )
-        .one().claimSecret,
+        .one().claimSecretHash,
+  );
+}
+
+function storedPendingToken(stub: Stub, deviceId: string) {
+  return runInDurableObject(
+    stub,
+    (_instance, state) =>
+      state.storage.sql
+        .exec<{ pendingSessionToken: string | null }>(
+          "SELECT pendingSessionToken FROM roster WHERE deviceId = ?",
+          deviceId,
+        )
+        .one().pendingSessionToken,
   );
 }
 
@@ -133,13 +156,16 @@ describe("POST /pairing/claim claimSecret", () => {
     expect(body.claimSecret).toMatch(HEX_64);
   });
 
-  it("stores the claimSecret on the roster row and never reuses one", async () => {
+  it("stores only the claimSecret's SHA-256 on the roster row and never reuses a secret", async () => {
     const stub = getFamilyHubStub();
 
     const first = await claimDevice(stub);
     const second = await claimDevice(stub);
 
     expect(await storedClaimSecret(stub, first.deviceId)).toBe(
+      await sha256Hex(first.claimSecret),
+    );
+    expect(await storedClaimSecret(stub, first.deviceId)).not.toBe(
       first.claimSecret,
     );
     expect(first.claimSecret).not.toBe(second.claimSecret);
@@ -168,25 +194,30 @@ describe("POST /pairing/status", () => {
     expect(await response.json()).toEqual({ status: "pending" });
   });
 
-  it("returns the very sessionToken approve returned, once approved", async () => {
+  it("hands a freshly approved phone a working sessionToken, which only /pairing/status ever returns", async () => {
     const stub = getFamilyHubStub();
     const claimed = await claimDevice(stub);
-    const sessionToken = await approve(stub, claimed.deviceId);
+    await approve(stub, claimed.deviceId);
 
     const response = await status(stub, claimed);
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      status: "approved",
-      sessionToken,
-    });
-    expect(sessionToken).toMatch(HEX_64);
+    const body = (await response.json()) as {
+      status: string;
+      sessionToken: string;
+    };
+    expect(body.status).toBe("approved");
+    expect(body.sessionToken).toMatch(HEX_64);
+    expect((await deviceGetStations(stub, body.sessionToken)).status).toBe(200);
   });
 
   it("can be polled repeatedly until the token is first used", async () => {
     const stub = getFamilyHubStub();
     const claimed = await claimDevice(stub);
-    const sessionToken = await approve(stub, claimed.deviceId);
+    await approve(stub, claimed.deviceId);
+    const sessionToken = (
+      (await (await status(stub, claimed)).json()) as { sessionToken: string }
+    ).sessionToken;
 
     for (let i = 0; i < 3; i += 1) {
       const response = await status(stub, claimed);
@@ -240,12 +271,12 @@ describe("POST /pairing/status", () => {
       );
 
       const revoked = await claimDevice(stub);
-      const revokedToken = await approve(stub, revoked.deviceId);
+      const revokedToken = await approveAndCollect(stub, revoked);
       await revoke(stub, revoked.deviceId);
       const revokedBody = await notFoundBody(await status(stub, revoked));
 
       const used = await claimDevice(stub);
-      const usedToken = await approve(stub, used.deviceId);
+      const usedToken = await approveAndCollect(stub, used);
       expect((await deviceGetStations(stub, usedToken)).status).toBe(200);
       const cleared = await notFoundBody(await status(stub, used));
 
@@ -274,8 +305,9 @@ describe("POST /pairing/status", () => {
       const deviceId = "12121212-1212-4212-8212-121212121212";
       await runInDurableObject(stub, (_instance, state) => {
         state.storage.sql.exec(
-          "INSERT INTO roster (deviceId, deviceName, status, sessionToken, approvedAt) VALUES (?, 'Seeded', 'pending', NULL, NULL)",
+          "INSERT INTO roster (deviceId, deviceName, status, sessionTokenHash, approvedAt, claimedAt) VALUES (?, 'Seeded', 'pending', NULL, NULL, ?)",
           deviceId,
+          Date.now(),
         );
       });
 
@@ -361,15 +393,18 @@ describe("POST /pairing/status", () => {
     it("clears it after the sessionToken's first device-role use, and status becomes 404", async () => {
       const stub = getFamilyHubStub();
       const claimed = await claimDevice(stub);
-      const sessionToken = await approve(stub, claimed.deviceId);
-      expect((await status(stub, claimed)).status).toBe(200);
+      const sessionToken = await approveAndCollect(stub, claimed);
       expect(await storedClaimSecret(stub, claimed.deviceId)).toBe(
-        claimed.claimSecret,
+        await sha256Hex(claimed.claimSecret),
+      );
+      expect(await storedPendingToken(stub, claimed.deviceId)).toBe(
+        sessionToken,
       );
 
       expect((await deviceGetStations(stub, sessionToken)).status).toBe(200);
 
       expect(await storedClaimSecret(stub, claimed.deviceId)).toBeNull();
+      expect(await storedPendingToken(stub, claimed.deviceId)).toBeNull();
       expect((await status(stub, claimed)).status).toBe(404);
       // The session itself keeps working after the secret is gone.
       expect((await deviceGetStations(stub, sessionToken)).status).toBe(200);
@@ -379,14 +414,18 @@ describe("POST /pairing/status", () => {
       const stub = getFamilyHubStub();
       const first = await claimDevice(stub);
       const second = await claimDevice(stub);
-      const firstToken = await approve(stub, first.deviceId);
-      const secondToken = await approve(stub, second.deviceId);
+      const firstToken = await approveAndCollect(stub, first);
+      const secondToken = await approveAndCollect(stub, second);
 
       expect((await deviceGetStations(stub, firstToken)).status).toBe(200);
 
       expect(await storedClaimSecret(stub, first.deviceId)).toBeNull();
+      expect(await storedPendingToken(stub, first.deviceId)).toBeNull();
       expect(await storedClaimSecret(stub, second.deviceId)).toBe(
-        second.claimSecret,
+        await sha256Hex(second.claimSecret),
+      );
+      expect(await storedPendingToken(stub, second.deviceId)).toBe(
+        secondToken,
       );
       const response = await status(stub, second);
       expect(await response.json()).toEqual({
@@ -407,7 +446,7 @@ describe("POST /pairing/status", () => {
       expect((await deviceGetStations(stub, TEST_ADMIN_KEY)).status).toBe(200);
 
       expect(await storedClaimSecret(stub, claimed.deviceId)).toBe(
-        claimed.claimSecret,
+        await sha256Hex(claimed.claimSecret),
       );
       expect((await status(stub, claimed)).status).toBe(200);
     });
@@ -420,6 +459,7 @@ describe("POST /pairing/status", () => {
       await revoke(stub, claimed.deviceId);
 
       expect(await storedClaimSecret(stub, claimed.deviceId)).toBeNull();
+      expect(await storedPendingToken(stub, claimed.deviceId)).toBeNull();
       expect((await status(stub, claimed)).status).toBe(404);
     });
 
