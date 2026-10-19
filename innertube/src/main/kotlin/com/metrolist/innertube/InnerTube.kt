@@ -7,6 +7,8 @@ import com.metrolist.innertube.models.YouTubeLocale
 import com.metrolist.innertube.models.response.NextResponse
 import com.metrolist.innertubex.InnerTube as InnerTubeX
 import com.metrolist.innertubex.InnerTubeHttpException
+import com.metrolist.innertubex.models.Context
+import kotlinx.serialization.Serializable
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.okhttp.OkHttp
@@ -15,6 +17,8 @@ import io.ktor.client.plugins.compression.ContentEncoding
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.request.get
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
 import io.ktor.client.request.header
 import io.ktor.client.request.url
 import io.ktor.client.statement.HttpResponse
@@ -33,8 +37,20 @@ import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.net.Proxy
+import java.security.MessageDigest
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+
+// SARASWATI: Phase 4 Task 12 — the origin the signed create-playlist request names.
+private const val MUSIC_ORIGIN = "https://music.youtube.com"
+
+// innertubex keeps its own CreatePlaylistBody internal; this has the same wire shape.
+@Serializable
+private data class CreatePlaylistRequestBody(
+    val context: Context,
+    val title: String,
+    val privacyStatus: String,
+)
 
 /**
  * Compatibility facade that keeps Metrolist's parsed response models while InnerTubeX owns
@@ -321,6 +337,42 @@ class InnerTube(
         client: YouTubeClient,
         title: String,
     ) = innerTubeX.createPlaylist(client, title).requireSuccess("createPlaylist")
+
+    // SARASWATI: Phase 4 Task 12 — innertubex v0.8.4 builds the create body itself with "PRIVATE" fixed, and its
+    // signing helper is private, so this overload builds the same request with the session the facade already
+    // holds (cookie, SAPISIDHASH, visitor data, account) and the caller's privacyStatus: {"title":…,"privacyStatus":…}
+    // as in ytmusicapi's create_playlist. The Parivaar playlist is UNLISTED so the other phones can read it by link.
+    suspend fun createPlaylist(
+        client: YouTubeClient,
+        title: String,
+        privacyStatus: String,
+    ): HttpResponse {
+        val session = innerTubeX.sessionSnapshot()
+        val body = CreatePlaylistRequestBody(client.toContext(session.locale, session.visitorData, session.dataSyncId), title, privacyStatus)
+        val response =
+            httpClient.post("playlist/create") {
+                contentType(ContentType.Application.Json)
+                setBody(body)
+                header("X-Goog-Api-Format-Version", "1")
+                header("X-YouTube-Client-Name", client.clientId)
+                header("X-YouTube-Client-Version", client.clientVersion)
+                header("Origin", MUSIC_ORIGIN)
+                header("X-Origin", MUSIC_ORIGIN)
+                header("Referer", "$MUSIC_ORIGIN/")
+                header("X-Goog-AuthUser", session.authUser)
+                header("Accept-Language", session.locale.hl)
+                session.visitorData?.takeIf { it.isNotBlank() }?.let { header("X-Goog-Visitor-Id", it) }
+                session.cookie?.takeIf { it.isNotBlank() }?.let { header("Cookie", it) }
+                session.sapisid?.takeIf { it.isNotBlank() }?.let { header("Authorization", sapisidHash(it)) }
+            }
+        return response.requireSuccess("createPlaylist")
+    }
+
+    private fun sapisidHash(sapisid: String): String {
+        val timestamp = System.currentTimeMillis() / 1000
+        val digest = MessageDigest.getInstance("SHA-1").digest("$timestamp $sapisid $MUSIC_ORIGIN".toByteArray())
+        return "SAPISIDHASH ${timestamp}_${digest.joinToString("") { "%02x".format(it) }}"
+    }
 
     suspend fun renamePlaylist(
         client: YouTubeClient,

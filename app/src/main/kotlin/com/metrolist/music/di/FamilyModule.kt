@@ -11,6 +11,9 @@ package com.metrolist.music.di
 import android.content.Context
 import com.metrolist.music.BuildConfig
 import com.metrolist.music.saraswati.family.DataStoreFamilyStore
+import com.metrolist.music.db.MusicDatabase
+import com.metrolist.music.playback.DownloadUtil
+import com.metrolist.music.saraswati.family.FamilyFeature
 import com.metrolist.music.saraswati.family.FamilyFeatureGate
 import com.metrolist.music.saraswati.family.FamilyStore
 import com.metrolist.music.saraswati.family.FamilyStoreHubIdentity
@@ -18,6 +21,15 @@ import com.metrolist.music.saraswati.family.HubApi
 import com.metrolist.music.saraswati.family.HubClient
 import com.metrolist.music.saraswati.family.HubConfig
 import com.metrolist.music.saraswati.family.HubIdentity
+import com.metrolist.music.saraswati.family.parivaar.DatabaseTopSongsSource
+import com.metrolist.music.saraswati.family.parivaar.HubClientParivaarHub
+import com.metrolist.music.saraswati.family.parivaar.InnerTubePlaylistPort
+import com.metrolist.music.saraswati.family.parivaar.MixDownloader
+import com.metrolist.music.saraswati.family.parivaar.ParivaarHub
+import com.metrolist.music.saraswati.family.parivaar.ParivaarMixRefresher
+import com.metrolist.music.saraswati.family.parivaar.ParivaarMixStore
+import com.metrolist.music.saraswati.family.parivaar.TopSongsPlaylistSync
+import com.metrolist.music.saraswati.family.parivaar.YouTubePlaylistPort
 import com.metrolist.music.saraswati.family.sangat.SangatCarMode
 import com.metrolist.music.saraswati.family.sangat.SangatForeground
 import com.metrolist.music.saraswati.family.sangat.SangatLiveWatcher
@@ -94,6 +106,61 @@ object FamilyModule {
     @Singleton
     fun provideSangatForeground(watcher: SangatLiveWatcher): SangatForeground =
         SangatForeground(watcher, CoroutineScope(SupervisorJob() + Dispatchers.Default))
+
+    // SARASWATI: Phase 4 Task 12 — the weekly top-songs playlist and the daily Parivaar Mix. Both stand down when
+    // the owner has switched parivaar_mix off.
+    @Provides
+    @Singleton
+    fun provideParivaarHub(hub: HubClient): ParivaarHub = HubClientParivaarHub(hub)
+
+    @Provides
+    @Singleton
+    fun provideYouTubePlaylistPort(): YouTubePlaylistPort = InnerTubePlaylistPort()
+
+    @Provides
+    @Singleton
+    fun provideParivaarMixStore(
+        @ApplicationContext context: Context,
+    ): ParivaarMixStore = ParivaarMixStore(context.dataStore, CoroutineScope(SupervisorJob() + Dispatchers.IO))
+
+    @Provides
+    @Singleton
+    fun provideTopSongsPlaylistSync(
+        port: YouTubePlaylistPort,
+        hub: ParivaarHub,
+        identity: HubIdentity,
+        database: MusicDatabase,
+        gate: FamilyFeatureGate,
+        @ApplicationContext context: Context,
+    ): TopSongsPlaylistSync =
+        TopSongsPlaylistSync(
+            port,
+            hub,
+            identity,
+            DatabaseTopSongsSource(database),
+            context.dataStore,
+            enabled = { gate.isEnabled(FamilyFeature.PARIVAAR_MIX) },
+        )
+
+    @Provides
+    @Singleton
+    fun provideParivaarMixRefresher(
+        hub: ParivaarHub,
+        port: YouTubePlaylistPort,
+        identity: HubIdentity,
+        store: ParivaarMixStore,
+        downloadUtil: DownloadUtil,
+        gate: FamilyFeatureGate,
+        @ApplicationContext context: Context,
+    ): ParivaarMixRefresher =
+        ParivaarMixRefresher(
+            hub,
+            port,
+            identity,
+            store,
+            MixDownloader.create(context, downloadUtil),
+            enabled = { gate.isEnabled(FamilyFeature.PARIVAAR_MIX) },
+        )
 
     @Provides
     @Singleton

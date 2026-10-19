@@ -35,6 +35,8 @@ import com.metrolist.music.constants.ListenTogetherServerUrlKey
 import com.metrolist.music.constants.OpenRouterApiKey
 import com.metrolist.music.constants.OpenRouterBaseUrlKey
 import com.metrolist.music.constants.ParivaarMixKey
+import com.metrolist.music.constants.ParivaarPlaylistIdKey
+import com.metrolist.music.constants.ParivaarTopSongsSyncedAtKey
 import com.metrolist.music.constants.ProxyPasswordKey
 import com.metrolist.music.constants.ProxyUrlKey
 import com.metrolist.music.constants.SongSortTypeKey
@@ -266,6 +268,8 @@ class BackupPolicyTest {
                 FamilyStationsCacheKey to "{}",
                 FamilyFeaturesDisabledKey to setOf("sangat"),
                 ParivaarMixKey to "{}",
+                ParivaarPlaylistIdKey to "PLabcdefghij",
+                ParivaarTopSongsSyncedAtKey to 1L,
             ).toPreferences()
 
         val sanitized = BackupPolicy.sanitize(prefs)
@@ -274,6 +278,8 @@ class BackupPolicyTest {
         assertNull(sanitized[FamilyStationsCacheKey])
         assertNull(sanitized[FamilyFeaturesDisabledKey])
         assertNull(sanitized[ParivaarMixKey])
+        assertNull(sanitized[ParivaarPlaylistIdKey])
+        assertNull(sanitized[ParivaarTopSongsSyncedAtKey])
     }
 
     @Test

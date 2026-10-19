@@ -143,6 +143,8 @@ import com.metrolist.music.saraswati.family.FamilyRoutes
 import com.metrolist.music.saraswati.family.FamilyFeatureGate
 import com.metrolist.music.saraswati.family.FamilyViewModel
 import com.metrolist.music.saraswati.family.HealthReporter
+import com.metrolist.music.saraswati.family.parivaar.ParivaarMixRefresher
+import com.metrolist.music.saraswati.family.parivaar.TopSongsPlaylistSync
 import com.metrolist.music.saraswati.family.sangat.SangatForeground
 import com.metrolist.music.saraswati.family.PairingInbox
 import com.metrolist.music.saraswati.family.StationsCache
@@ -245,6 +247,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
+import java.time.Instant
 import java.util.Locale
 import javax.inject.Inject
 
@@ -302,6 +305,13 @@ class MainActivity : FragmentActivity() {
     // SARASWATI: fix wave B1 (I2) — the paired phone's heartbeat for the owner's health view.
     @Inject
     lateinit var healthReporter: HealthReporter
+
+    // SARASWATI: Phase 4 Task 12
+    @Inject
+    lateinit var topSongsPlaylistSync: TopSongsPlaylistSync
+
+    @Inject
+    lateinit var parivaarMixRefresher: ParivaarMixRefresher
 
     // SARASWATI: Phase 4 Task 9 — the owner's four kill-switches, and the poll for family members who are
     // driving with Sangat on. The watcher runs only between onStart and onStop, never in Saral.
@@ -518,6 +528,12 @@ class MainActivity : FragmentActivity() {
                 launch { stationsRefresher.refresh() }
                 // SARASWATI: fix wave B1 (I2) — its own job too, so a slow hub holds up neither of the others.
                 launch { healthReporter.report() }
+                // SARASWATI: Phase 4 Task 12 — this phone's weekly top-songs playlist, then the daily Parivaar Mix
+                // built from everyone's. One job, in that order; each is a no-op until it is due and never throws.
+                launch {
+                    topSongsPlaylistSync.syncIfDue(Instant.now(), Build.MODEL)
+                    parivaarMixRefresher.refreshIfDue(Instant.now())
+                }
                 // SARASWATI: Phase 4 Task 9 — the kill-switches, and (owner phone only, once) a device session.
                 launch { featureGate.refresh() }
                 // (the self-pair refreshes the gate again itself once it has a session — review fix M7)
