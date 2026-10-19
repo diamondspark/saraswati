@@ -85,4 +85,43 @@ class CookieVaultTest {
             throw ProviderException("Keystore is broken")
         }
     }
+    // SARASWATI: per-slot AAD — a ciphertext is bound to the slot it was
+    // sealed for, so one slot's value can't be replayed into another's.
+    @Test
+    fun `a value sealed for one purpose does not open under another`() {
+        val sealed = vault.seal("secret", purpose = "familyAdminKey")
+
+        assertEquals("secret", vault.open(sealed, purpose = "familyAdminKey"))
+        assertNull(vault.open(sealed, purpose = "familyHubSessionToken"))
+        assertNull(vault.open(sealed))
+        assertNull(vault.open(sealed, purpose = "cookie"))
+    }
+
+    @Test
+    fun `a value sealed with no purpose is the cookie's and opens only as the cookie`() {
+        val sealed = vault.seal("SAPISID=abc")
+
+        assertEquals("SAPISID=abc", vault.open(sealed))
+        assertEquals("SAPISID=abc", vault.open(sealed, purpose = "cookie"))
+        assertNull(vault.open(sealed, purpose = "familyAdminKey"))
+    }
+
+    @Test
+    fun `the cookie's AAD is unchanged so phones that already hold a sealed cookie keep it`() {
+        val provider = SoftwareKeyProvider()
+        val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, provider.key())
+        cipher.updateAAD("saraswati.cookie.v1".toByteArray(Charsets.UTF_8))
+        val legacy = "v1:" + Base64.getEncoder().encodeToString(cipher.iv + cipher.doFinal("SAPISID=old".toByteArray()))
+
+        assertEquals("SAPISID=old", CookieVault(provider).open(legacy))
+    }
+
+    @Test
+    fun `a purpose that could blur the AAD is refused`() {
+        listOf("", "a.b", "a b", "a\u0000b", "../cookie").forEach { purpose ->
+            assertNull(purpose, runCatching { vault.seal("x", purpose = purpose) }.getOrNull())
+            assertNull(purpose, vault.open(vault.seal("x"), purpose = purpose))
+        }
+    }
 }

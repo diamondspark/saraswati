@@ -12,6 +12,13 @@
 // use, so a value sealed for cookie storage can't be silently replayed
 // into a different field even if DataStore's key namespace were ever
 // confused (defense in depth; DataStore uses distinct keys anyway).
+//
+// SARASWATI: Task 6 review — the binding is per slot: AAD =
+// "saraswati.<purpose>.v1". The default purpose is "cookie", which is the
+// AAD every sealed cookie on a phone already carries, so existing cookies
+// keep opening. The family hub credentials each seal under their own
+// purpose (SealedPreferences.purposeOf), so a ciphertext lifted from one
+// slot does not open in another.
 package com.metrolist.music.saraswati.security
 
 import java.security.GeneralSecurityException
@@ -22,7 +29,11 @@ import javax.crypto.spec.GCMParameterSpec
 class CookieVault(
     private val keys: AesGcmKeyProvider,
 ) {
-    fun seal(plain: String): String {
+    fun seal(
+        plain: String,
+        purpose: String = COOKIE_PURPOSE,
+    ): String {
+        require(isValidPurpose(purpose)) { "invalid seal purpose" }
         // SARASWATI: a real Android Keystore key defaults to
         // setRandomizedEncryptionRequired(true) and REJECTS a caller-
         // supplied IV (InvalidAlgorithmParameterException: "Caller-provided
@@ -37,7 +48,7 @@ class CookieVault(
         require(iv.size == IV_LENGTH_BYTES) {
             "Expected a ${IV_LENGTH_BYTES}-byte GCM IV from the provider, got ${iv.size}"
         }
-        cipher.updateAAD(AAD)
+        cipher.updateAAD(aad(purpose))
         val cipherTextAndTag = cipher.doFinal(plain.toByteArray(Charsets.UTF_8))
         val payload = iv + cipherTextAndTag
         return PREFIX + Base64.getEncoder().encodeToString(payload)
@@ -46,10 +57,14 @@ class CookieVault(
     /**
      * Returns the original plaintext, or null if [stored] is not our
      * format ("v1:..."), was tampered with, or was sealed under a
-     * different key (including a key from a different device).
+     * different key (including a key from a different device), or was
+     * sealed for a different [purpose].
      */
-    fun open(stored: String): String? {
-        if (!stored.startsWith(PREFIX)) return null
+    fun open(
+        stored: String,
+        purpose: String = COOKIE_PURPOSE,
+    ): String? {
+        if (!stored.startsWith(PREFIX) || !isValidPurpose(purpose)) return null
         return try {
             val payload = Base64.getDecoder().decode(stored.removePrefix(PREFIX))
             if (payload.size < IV_LENGTH_BYTES) return null
@@ -57,7 +72,7 @@ class CookieVault(
             val cipherTextAndTag = payload.copyOfRange(IV_LENGTH_BYTES, payload.size)
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.DECRYPT_MODE, keys.key(), GCMParameterSpec(TAG_LENGTH_BITS, iv))
-            cipher.updateAAD(AAD)
+            cipher.updateAAD(aad(purpose))
             String(cipher.doFinal(cipherTextAndTag), Charsets.UTF_8)
         } catch (e: GeneralSecurityException) {
             // Wrong key, or the tag didn't verify (tampered ciphertext).
@@ -78,7 +93,15 @@ class CookieVault(
 
     private companion object {
         const val PREFIX = "v1:"
-        val AAD = "saraswati.cookie.v1".toByteArray(Charsets.UTF_8)
+        const val COOKIE_PURPOSE = "cookie"
+
+        // Letters, digits and underscore only, so no purpose can add a
+        // separator that makes two different purposes produce the same AAD.
+        val PURPOSE = Regex("[A-Za-z0-9_]{1,64}")
+
+        fun isValidPurpose(purpose: String): Boolean = PURPOSE.matches(purpose)
+
+        fun aad(purpose: String): ByteArray = "saraswati.$purpose.v1".toByteArray(Charsets.UTF_8)
         const val IV_LENGTH_BYTES = 12
         const val TAG_LENGTH_BITS = 128
         const val TRANSFORMATION = "AES/GCM/NoPadding"

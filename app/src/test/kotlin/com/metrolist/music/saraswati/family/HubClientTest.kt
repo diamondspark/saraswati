@@ -588,6 +588,9 @@ class HubClientTest {
         assertFalse(ClaimResult("d", "pending", secret).toString().contains(secret))
         assertFalse(ApprovedDevice("d", secret, "approved").toString().contains(secret))
         assertFalse(PairingStatus.Approved(secret).toString().contains(secret))
+        assertFalse(PairingToken(secret, "2026-10-19T18:27:00.000Z").toString().contains(secret))
+        assertFalse(ClaimRequest(secret, "Mummy's Pixel", DeviceRole.ADULT).toString().contains(secret))
+        assertFalse(PairingStatusRequest("d", secret).toString().contains(secret))
     }
 
     @Test
@@ -709,5 +712,43 @@ class HubClientTest {
                 "cancellation should be prompt, not wait out the 10s server delay",
                 System.nanoTime() - started < TimeUnit.SECONDS.toNanos(5),
             )
+        }
+    @Test
+    fun `a response of exactly the 1 MiB cap is read and one byte more is refused`() =
+        runBlocking {
+            val cap = 1 shl 20
+            val prefix = """{"devices":[]}"""
+            reply(200, prefix + " ".repeat(cap - prefix.length))
+            assertEquals(emptyList<RosterEntry>(), hub.getRoster("admin").getOrNull())
+
+            reply(200, prefix + " ".repeat(cap + 1 - prefix.length))
+            val failure = hub.getRoster("admin").exceptionOrNull()
+
+            assertTrue("expected an IOException but got $failure", failure is IOException)
+            assertEquals("hub response is too large", failure?.message)
+        }
+
+    @Test
+    fun `an oversized response is a failure for every function that reads a body`() =
+        runBlocking {
+            val huge = """{"devices":[]}""" + " ".repeat((1 shl 20) + 1)
+            for ((name, run) in allCalls) {
+                reply(200, huge)
+                assertTrue(name, run().isFailure)
+            }
+        }
+
+    @Test
+    fun `a bearer OkHttp cannot put in a header fails the call without a request or the bearer in the message`() =
+        runBlocking {
+            for (bad in listOf("key\nInjected: header", "key\r\nx", "key\u0000")) {
+                val failure = hub.getRoster(bad).exceptionOrNull()
+
+                assertTrue("expected IllegalArgumentException for ${bad.length} chars but got $failure", failure is IllegalArgumentException)
+                assertEquals("invalid hub request", failure?.message)
+                assertNull(failure?.cause)
+                assertFalse(failure.toString().contains("Injected"))
+            }
+            assertEquals(0, server.requestCount)
         }
 }

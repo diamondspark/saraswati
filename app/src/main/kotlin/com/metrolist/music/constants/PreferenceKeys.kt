@@ -535,8 +535,10 @@ val InnerTubeCookieKey = stringPreferencesKey("innerTubeCookie")
 // SecretPreferenceKeys.all and sealed at rest exactly like InnerTubeCookieKey
 // (SecretPreferenceKeys.VAULT_SEALED, SealedPreferences): read them through
 // dataStore[key] / rememberPreference so they are opened, and write them
-// through rememberPreference or SaraswatiVault.cookieVault.seal(...) — a plain
-// settings[key] = plaintext is wiped by SecretScrubber on the next start.
+// through rememberPreference or SealedPreferences.write(...) — a plain
+// settings[key] = plaintext is wiped by SecretScrubber on the next start, and
+// a bare vault.seal(...) uses the cookie's slot, which does not open here:
+// each key seals under its own purpose (SealedPreferences.purposeOf).
 // The owner's admin key, this phone's own hub session token (issued on
 // approval), and the one-time claim secret that proves this phone is the one
 // that claimed a pairing token while it waits for approval.

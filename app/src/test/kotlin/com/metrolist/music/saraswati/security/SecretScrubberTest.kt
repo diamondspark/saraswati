@@ -106,7 +106,7 @@ class SecretScrubberTest {
     @Test
     fun `keeps vault-sealed hub credentials`() =
         runBlocking {
-            val sealed = hubKeys.associateWith { vault.seal("value-for-${it.name}") }
+            val sealed = hubKeys.associateWith { SealedPreferences.seal(it, "value-for-${it.name}", vault) }
             val dataStore =
                 InMemoryPreferencesDataStore(
                     mutablePreferencesOf(*sealed.map { (key, value) -> key to value }.toTypedArray()),
@@ -117,6 +117,25 @@ class SecretScrubberTest {
             val after = dataStore.data.first()
             for ((key, value) in sealed) {
                 assertEquals(key.name, value, after[key])
+            }
+        }
+
+    @Test
+    fun `drops a value sealed for a different slot, hub or cookie`() =
+        runBlocking {
+            val slots = hubKeys + InnerTubeCookieKey
+            for (from in slots) {
+                for (into in slots) {
+                    if (from == into) continue
+                    val dataStore =
+                        InMemoryPreferencesDataStore(
+                            mutablePreferencesOf(into to SealedPreferences.seal(from, "from-${from.name}", vault)),
+                        )
+
+                    SecretScrubber.scrub(dataStore, vault)
+
+                    assertNull("${from.name} replayed into ${into.name}", dataStore.data.first()[into])
+                }
             }
         }
 

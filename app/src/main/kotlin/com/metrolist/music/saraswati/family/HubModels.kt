@@ -9,8 +9,10 @@
 // while `approvedAt` and `lastSeenAt` are epoch milliseconds (null until the
 // Worker has a value for them).
 //
-// The three types that carry a bearer credential override toString() so a
-// stray log line or crash report never prints it.
+// Every type that carries a credential (a pairing token, a claim secret or a
+// session token) overrides toString() so a stray log line or crash report
+// never prints it: PairingToken, ClaimResult, PairingStatus.Approved,
+// ApprovedDevice and the wire requests ClaimRequest and PairingStatusRequest.
 package com.metrolist.music.saraswati.family
 
 import kotlinx.serialization.KSerializer
@@ -55,7 +57,9 @@ internal object DeviceRoleSerializer : KSerializer<DeviceRole> {
 data class PairingToken(
     val token: String,
     val expiresAt: String,
-)
+) {
+    override fun toString(): String = "PairingToken(token=<redacted>, expiresAt=$expiresAt)"
+}
 
 @Serializable
 data class ClaimResult(
@@ -170,7 +174,9 @@ internal data class ClaimRequest(
     val deviceName: String,
     // Null is omitted from the body (kotlinx default), so the Worker applies its own default.
     val role: DeviceRole? = null,
-)
+) {
+    override fun toString(): String = "ClaimRequest(token=<redacted>, deviceName=$deviceName, role=$role)"
+}
 
 @Serializable
 internal data class RoleRequest(

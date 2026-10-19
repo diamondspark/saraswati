@@ -16,9 +16,17 @@ package com.metrolist.music.saraswati.security
 
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
+import com.metrolist.music.constants.InnerTubeCookieKey
 
 object SealedPreferences {
     fun isSealed(key: Preferences.Key<*>): Boolean = key in SecretPreferenceKeys.VAULT_SEALED
+
+    /**
+     * The slot a sealed key's ciphertext is bound to (see CookieVault). The
+     * cookie keeps the AAD it has always had; every other sealed key is bound
+     * to its own name, so a value sealed for one slot never opens in another.
+     */
+    fun purposeOf(key: Preferences.Key<*>): String = if (key == InnerTubeCookieKey) "cookie" else key.name
 
     /**
      * The plaintext behind a stored value. For a sealed key this is null
@@ -33,7 +41,7 @@ object SealedPreferences {
         vault: CookieVault,
     ): T? =
         if (isSealed(key)) {
-            (raw as? String)?.let { vault.open(it) } as T?
+            (raw as? String)?.let { vault.open(it, purposeOf(key)) } as T?
         } else {
             raw
         }
@@ -45,7 +53,7 @@ object SealedPreferences {
         vault: CookieVault,
     ): T =
         if (isSealed(key)) {
-            vault.seal(value as String) as T
+            vault.seal(value as String, purposeOf(key)) as T
         } else {
             value
         }

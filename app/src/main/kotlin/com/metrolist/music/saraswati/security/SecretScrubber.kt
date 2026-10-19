@@ -39,7 +39,7 @@ object SecretScrubber {
     private fun MutablePreferences.holdsVaultSealedValue(
         key: Preferences.Key<*>,
         vault: CookieVault,
-    ): Boolean = (this[key as Preferences.Key<Any>] as? String)?.let { vault.open(it) != null } ?: false
+    ): Boolean = (this[key as Preferences.Key<Any>] as? String)?.let { vault.open(it, SealedPreferences.purposeOf(key)) != null } ?: false
 
     @Suppress("UNCHECKED_CAST")
     private fun MutablePreferences.removeAny(key: Preferences.Key<*>) {

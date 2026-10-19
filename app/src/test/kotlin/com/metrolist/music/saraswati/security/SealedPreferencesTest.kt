@@ -110,4 +110,28 @@ class SealedPreferencesTest {
         assertEquals(true, prefs[PureBlackKey])
         assertEquals(2, prefs.asMap().size)
     }
+    // SARASWATI: the Task 6 review found every sealed slot shared the
+    // cookie's AAD, so a ciphertext sealed for one slot opened in another.
+    @Test
+    fun `a value sealed for one slot does not unseal in any other slot`() {
+        for (from in sealedKeys) {
+            val sealed = SealedPreferences.seal(from, "value-for-${from.name}", vault)
+            for (into in sealedKeys) {
+                if (into == from) {
+                    assertEquals(from.name, "value-for-${from.name}", SealedPreferences.unseal(into, sealed, vault))
+                } else {
+                    assertNull("${from.name} -> ${into.name}", SealedPreferences.unseal(into, sealed, vault))
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `every sealed slot has its own purpose and only the cookie keeps the original one`() {
+        val purposes = sealedKeys.map { SealedPreferences.purposeOf(it) }
+
+        assertEquals(purposes.size, purposes.toSet().size)
+        assertEquals("cookie", SealedPreferences.purposeOf(InnerTubeCookieKey))
+        assertEquals(sealedKeys.size - 1, purposes.count { it != "cookie" })
+    }
 }
