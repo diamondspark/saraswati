@@ -240,6 +240,24 @@ describe("parseIntent: answer", () => {
     }
   });
 
+  it("an answer with a bidi mark, embedding, override or isolate falls back", () => {
+    const marks = ["\u061c", "\u200e", "\u200f", "\u202a", "\u202b", "\u202c", "\u202d", "\u202e", "\u2066", "\u2067", "\u2068", "\u2069"];
+    for (const mark of marks) {
+      for (const text of [`Tap play${mark}.gpj`, `${mark}Tap play`, `Tap play${mark}`]) {
+        expect(parse(said({ kind: "answer", text })), JSON.stringify(text)).toEqual(FALLBACK);
+      }
+    }
+  });
+
+  it("an answer keeps the zero-width joiners Devanagari needs, and the characters next to the bidi ranges", () => {
+    const joiners = "क्\u200dष और क्\u200cष";
+    expect(parse(said({ kind: "answer", text: joiners }))).toEqual(accepted({ kind: "answer", text: joiners }));
+    for (const near of ["\u202f", "\u2065", "\u206a", "\u2060", "\u200b"]) {
+      const text = `Tap${near}play`;
+      expect(parse(said({ kind: "answer", text })), JSON.stringify(text)).toEqual(accepted({ kind: "answer", text }));
+    }
+  });
+
   it("a Hindi answer is accepted", () => {
     const text = "तारे पर टैप करके गाना पसंद करें।";
     expect(parse(said({ kind: "answer", text }))).toEqual(accepted({ kind: "answer", text }));

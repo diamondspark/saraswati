@@ -2,13 +2,15 @@
 // comes from a fake AiRunner; nothing in this file reaches a real model. Check order: auth (401),
 // kill switch (503), body (400), burst limit (429), daily limit (429).
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { runInDurableObject } from "cloudflare:test";
+import { beforeEach, describe, expect, it } from "vitest";
 import { ASK_MODEL_FALLBACK, ASK_MODEL_PRIMARY } from "../src/ask/models";
 import { hubStub, seedDevice, sql } from "./sangat.helpers";
 import { ageRateWindow, call, rateKeys, rateRow, revoke, setSwitch, TEST_ADMIN_KEY } from "./registry.helpers";
 import {
   askAs,
   clearBurst,
+  consoleOutput,
   everythingStored,
   fakeAi,
   MORNING,
@@ -718,21 +720,44 @@ describe("POST /ask: privacy", () => {
     expect(stored).toContain("device:");
   });
 
+  it("the console spy sees what the hub and the handler write (positive control)", async () => {
+    const hub = hubStub();
+    const a = await seedDevice(hub, "a");
+    const levels = ["log", "info", "warn", "error", "debug"] as const;
+
+    // A call made inside the Durable Object, at every level.
+    for (const level of levels) {
+      const seen = await consoleOutput(() => runInDurableObject(hub, () => console[level](`zq-control-do-${level}`)));
+      expect(seen, level).toContain(`zq-control-do-${level}`);
+    }
+    // A call made while handleAsk is running, from the model's side.
+    const fromHandler = await consoleOutput(() =>
+      askAs(hub, a, validBody(), fakeAi(() => (console.error("zq-control-handler"), said(search("x"))))),
+    );
+    expect(fromHandler).toContain("zq-control-handler");
+    // And a quiet run is empty, so a hit above is the spy and not leftover noise.
+    await clearBurst(hub, a);
+    expect(await consoleOutput(() => askAs(hub, a, validBody(), fakeAi(said(search("x")))))).toBe("[]");
+  });
+
   it("the question and the model's words are never logged", async () => {
     const hub = hubStub();
     const a = await seedDevice(hub, "a");
-    const spies = (["log", "info", "warn", "error", "debug"] as const).map((level) => vi.spyOn(console, level).mockImplementation(() => {}));
-    try {
-      await askAs(hub, a, validBody("zq-private-marker-77"), fakeAi(said(search("zq-model-words"))));
+    const question = "zq-private-marker-77";
+
+    const logged = await consoleOutput(async () => {
+      await askAs(hub, a, validBody(question), fakeAi(said(search("zq-model-words"))));
       await clearBurst(hub, a);
-      await askAs(hub, a, validBody("zq-private-marker-77"), fakeAi(new Error("zq-model-words"), { response: "zq-model-words" }));
+      await askAs(hub, a, validBody(question), fakeAi(new Error("zq-model-words"), { response: "zq-model-words" }));
       await clearBurst(hub, a);
-      await askAs(hub, a, validBody("zq-private-marker-77"), fakeAi(new Error("zq-model-words"), new Error("zq-model-words")));
-      const logged = JSON.stringify(spies.flatMap((spy) => spy.mock.calls));
-      expect(logged).not.toContain("zq-");
-    } finally {
-      for (const spy of spies) spy.mockRestore();
-    }
+      await askAs(hub, a, validBody(question), fakeAi(new Error("zq-model-words"), new Error("zq-model-words")));
+      await clearBurst(hub, a);
+      // The real route too: no binding in the test pool, so this is the search fallback.
+      expect((await post(a.token, validBody(question))).status).toBe(200);
+      await post(a.token, { question, locale: "bad locale" });
+    });
+
+    expect(logged).not.toContain("zq-");
   });
 
   it("the prompt carries station titles and the question but no device names or versions", async () => {

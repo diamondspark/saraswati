@@ -6,7 +6,7 @@
 
 import type { AiRunner } from "../ask/ai";
 import { ASK_BURST_MAX, ASK_BURST_WINDOW_SECONDS, chargeAsk } from "../ask/caps";
-import { parseIntent } from "../ask/intent";
+import { CONTROL, parseIntent } from "../ask/intent";
 import { ASK_MODEL_FALLBACK, ASK_MODEL_PRIMARY, ASK_TIMEOUT_MS, modelInput } from "../ask/models";
 import { buildMessages } from "../ask/prompt";
 import { json, readStrictJsonObject } from "../http";
@@ -15,7 +15,6 @@ import { cleanText, featureDisabled, tooManyRequests, unauthorized } from "./com
 
 const QUESTION_MAX = 200;
 const LOCALE = /^[a-z]{2}(-[A-Z]{2})?$/;
-const CONTROL = /[\p{Cc}\u2028\u2029]/u;
 
 interface StationRow extends Record<string, SqlStorageValue> {
   id: string;

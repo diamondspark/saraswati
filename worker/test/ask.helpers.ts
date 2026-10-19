@@ -3,6 +3,7 @@
 // readers for the tables Ask touches.
 
 import { runInDurableObject } from "cloudflare:test";
+import { vi } from "vitest";
 import type { AiRunner } from "../src/ask/ai";
 import type { AuthResult, HubContext } from "../src/hubContext";
 import { handleAsk } from "../src/routes/ask";
@@ -115,3 +116,19 @@ export const everythingStored = (hub: Hub) =>
     for (const { name } of tables) dump[name] = db.exec(`SELECT * FROM "${name}"`).toArray();
     return JSON.stringify(dump);
   });
+
+/**
+ * Runs `fn` with every console method recorded and silenced, and returns what was written as one
+ * string. The hub runs in this isolate, so this sees console calls made inside it.
+ */
+export async function consoleOutput(fn: () => Promise<unknown>): Promise<string> {
+  const spies = (["log", "info", "warn", "error", "debug"] as const).map((level) =>
+    vi.spyOn(console, level).mockImplementation(() => {}),
+  );
+  try {
+    await fn();
+    return JSON.stringify(spies.flatMap((spy) => spy.mock.calls));
+  } finally {
+    for (const spy of spies) spy.mockRestore();
+  }
+}

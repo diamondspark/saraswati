@@ -1,6 +1,7 @@
 // The pieces behind POST /ask, one at a time: the prompt, the model settings and the Neuron
 // budget, the AI binding wrapper, the day and reset time, and the test/prod Wrangler pair.
 
+import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { bindingRunner } from "../src/ask/ai";
 import {
@@ -23,6 +24,7 @@ import {
   modelInput,
 } from "../src/ask/models";
 import { buildMessages, SYSTEM_PROMPT_MAX_CHARS } from "../src/ask/prompt";
+import poolConfig from "../vitest.config.ts?raw";
 import prodConfig from "../wrangler.toml?raw";
 import testConfig from "../wrangler.test.toml?raw";
 
@@ -289,5 +291,18 @@ describe("wrangler.test.toml", () => {
     expect(prod.slice(aiAt)).toEqual(["[ai]", 'binding = "AI"']);
     expect(settings(testConfig)).toEqual(prod.slice(0, aiAt));
     expect(testConfig).not.toMatch(/^\s*\[ai\]/m);
+  });
+
+  it("the pool has no AI binding at all, real or fake", () => {
+    expect((env as unknown as Record<string, unknown>).AI).toBeUndefined();
+  });
+
+  it("vitest.config.ts loads wrangler.test.toml and turns remote bindings off", () => {
+    // Source check: a comment saying so does not count.
+    const code = poolConfig.split("\n").filter((line) => !line.trim().startsWith("//")).join("\n");
+    expect(code).toMatch(/configPath:\s*"\.\/wrangler\.test\.toml"/);
+    expect(code).toMatch(/remoteBindings:\s*false\b/);
+    expect(code).not.toMatch(/wrangler\.toml/);
+    expect(code).not.toMatch(/remoteBindings:\s*true/);
   });
 });

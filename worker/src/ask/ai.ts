@@ -6,10 +6,6 @@ export interface AiRunner {
   run(model: string, input: object, timeoutMs: number): Promise<unknown>;
 }
 
-interface RunnableAi {
-  run(model: string, input: object, options: { signal: AbortSignal }): Promise<unknown>;
-}
-
 /** Races `ai.run` against a timer, and aborts the call when the timer wins. */
 export function bindingRunner(ai: Ai): AiRunner {
   return {
@@ -25,7 +21,7 @@ export function bindingRunner(ai: Ai): AiRunner {
       });
       // Started inside a promise so a missing binding or a synchronous throw is a rejection.
       const call = Promise.resolve().then(() =>
-        (ai as unknown as RunnableAi).run(model, input, { signal: controller.signal }),
+        ai.run(model, input as Record<string, unknown>, { signal: controller.signal }),
       );
       try {
         return await Promise.race([call, timedOut]);

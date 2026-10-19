@@ -15,7 +15,11 @@ const TEXT_MAX = 280;
 const RAW_MAX = 1000;
 
 // \p{Cc} covers newline and tab too. Joiners (Cf) stay: Devanagari conjuncts need them.
-const CONTROL = /[\p{Cc}\u2028\u2029]/u;
+export const CONTROL = /[\p{Cc}\u2028\u2029]/u;
+// An answer is shown as it is, and these reorder text on screen: the Arabic letter mark, the
+// left-to-right and right-to-left marks, the embeddings and overrides, and the isolates.
+// U+200C and U+200D (the joiners) are not in the list on purpose.
+const BIDI = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u;
 const FENCED = /^```(?:json)?\s*\n?([\s\S]*?)\s*```$/i;
 
 /** Trimmed text of 1 to `max` characters without control characters, else null. */
@@ -80,7 +84,7 @@ function validate(value: unknown, stationIds: ReadonlySet<string>): AskIntent | 
       return { kind: "sangat" };
     case "answer": {
       const text = cleanField(value.text, TEXT_MAX);
-      return text === null || hasLink(text) ? null : { kind: "answer", text };
+      return text === null || BIDI.test(text) || hasLink(text) ? null : { kind: "answer", text };
     }
     default:
       return null;
