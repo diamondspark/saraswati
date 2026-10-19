@@ -9,10 +9,16 @@
 // the Sangat kill-switch is off or this phone has no session. A hub that cannot be reached, or answers
 // something unusable, gives an empty list; it never throws. Rooms this phone hosts are left out, and each room
 // code in car mode is announced once on [carPrompts] (forgotten when the room leaves the list).
+//
+// The kill-switches would otherwise only be read when the app resumes, so a phone left on screen would keep
+// a stale answer for as long as it stays there. The watcher therefore asks the gate to refresh itself when the
+// hub answers 503 (Sangat is off) and, whatever the poll says, every [GATE_REFRESH_EVERY_POLLS] polls — which
+// also lets a gate that says "off" find out it has been switched back on, though nothing is polled meanwhile.
 package com.metrolist.music.saraswati.family.sangat
 
 import com.metrolist.music.saraswati.family.FamilyFeature
 import com.metrolist.music.saraswati.family.FamilyFeatureGate
+import com.metrolist.music.saraswati.family.HubException
 import com.metrolist.music.saraswati.family.HubIdentity
 import com.metrolist.music.saraswati.family.LiveSangatRoom
 import kotlinx.coroutines.CoroutineScope
@@ -51,14 +57,19 @@ class SangatLiveWatcher(
     private val prompted = HashSet<String>()
     private var job: Job? = null
 
+    /** True between [start] and [stop]. */
+    val running: Boolean get() = job?.isActive == true
+
     /** Polls at once, then every [POLL_INTERVAL_MS], until [stop]. Calling it again restarts the loop. */
     @Synchronized
     fun start(scope: CoroutineScope) {
         job?.cancel()
         job =
             scope.launch {
+                var polls = 0
                 while (isActive) {
-                    pollOnce()
+                    pollOnce(this)
+                    if (++polls % GATE_REFRESH_EVERY_POLLS == 0) refreshGateAsync(this)
                     delay(POLL_INTERVAL_MS)
                 }
             }
@@ -71,7 +82,7 @@ class SangatLiveWatcher(
         rooms.value = emptyList()
     }
 
-    private suspend fun pollOnce() {
+    private suspend fun pollOnce(scope: CoroutineScope) {
         val fetched =
             if (!gate.isEnabled(FamilyFeature.SANGAT)) {
                 emptyList()
@@ -81,7 +92,9 @@ class SangatLiveWatcher(
                     emptyList()
                 } else {
                     try {
-                        hub.getLiveSangat(token).getOrNull() ?: emptyList()
+                        val answer = hub.getLiveSangat(token)
+                        if ((answer.exceptionOrNull() as? HubException)?.status == 503) refreshGateAsync(scope)
+                        answer.getOrNull() ?: emptyList()
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -97,6 +110,19 @@ class SangatLiveWatcher(
         announce(visible)
     }
 
+    // Beside the poll, not in it: a slow hub or disk must not hold up the list the screen shows.
+    private fun refreshGateAsync(scope: CoroutineScope) {
+        scope.launch {
+            try {
+                gate.refresh()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // The gate keeps its last answer.
+            }
+        }
+    }
+
     private fun announce(visible: List<LiveSangatRoom>) {
         val fresh =
             synchronized(prompted) {
@@ -109,5 +135,8 @@ class SangatLiveWatcher(
     companion object {
         const val POLL_INTERVAL_MS = 30_000L
         private const val PROMPT_BUFFER = 8
+
+        /** Every 10th poll, so about every 5 minutes. */
+        const val GATE_REFRESH_EVERY_POLLS = 10
     }
 }

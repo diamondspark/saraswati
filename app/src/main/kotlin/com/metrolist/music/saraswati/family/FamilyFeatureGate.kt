@@ -59,6 +59,9 @@ class FamilyFeatureGate(
 
     fun isEnabled(feature: FamilyFeature): Boolean = state.value[feature] ?: true
 
+    /** Returns once the stored switches have been read (or a refresh has been applied); a connect at a cold start waits for it. */
+    suspend fun awaitHydrated() = hydration.join()
+
     /**
      * Asks the hub for the switches with this phone's session token and keeps the answer. Does nothing without
      * a session, and keeps the last values on any failure. Never throws except to pass on a cancellation.

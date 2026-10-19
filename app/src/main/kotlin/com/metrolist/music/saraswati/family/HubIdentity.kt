@@ -23,7 +23,15 @@ class FamilyStoreHubIdentity(
 ) : HubIdentity {
     override suspend fun sessionToken(): String? = readSession()?.sessionToken
 
-    override suspend fun deviceId(): String? = readSession()?.deviceId
+    // SARASWATI: Phase 4 review fix (M11) — the plain device-id slot, no Keystore decrypt per Sangat poll.
+    override suspend fun deviceId(): String? =
+        try {
+            store.sessionDeviceId()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
 
     private suspend fun readSession(): FamilySession? =
         try {

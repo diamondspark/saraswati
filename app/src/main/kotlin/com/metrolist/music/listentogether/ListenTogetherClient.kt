@@ -35,7 +35,7 @@ import com.metrolist.music.saraswati.family.FamilyFeatureGate
 import com.metrolist.music.saraswati.family.HubIdentity
 import com.metrolist.music.saraswati.family.sangat.SangatApprovalPolicy
 import com.metrolist.music.saraswati.family.sangat.SangatCarMode
-import com.metrolist.music.saraswati.family.sangat.SangatReconnectPolicy
+import com.metrolist.music.saraswati.family.sangat.SangatConnect
 import com.metrolist.music.constants.ListenTogetherSessionTimestampKey
 import com.metrolist.music.constants.ListenTogetherSessionTokenKey
 import com.metrolist.music.constants.ListenTogetherUserIdKey
@@ -56,6 +56,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -248,6 +249,7 @@ class ListenTogetherClient
             private const val PING_INTERVAL_MS = 25000L
             private const val INITIAL_PING_INTERVAL_MS = 250L
             private const val MAX_LOG_ENTRIES = 500
+            private const val GATE_HYDRATION_WAIT_MS = 3_000L // SARASWATI: Phase 4 review fix (M8)
             private const val SESSION_GRACE_PERIOD_MS = 10 * 60 * 1000L // 10 minutes
             private const val BACKGROUND_DISCONNECT_DELAY_MS = 30 * 60 * 1000L // 30 minutes
 
@@ -589,6 +591,7 @@ class ListenTogetherClient
         private val pingSequence = AtomicLong(0L)
         private val lastPlaybackRevision = AtomicLong(0L)
 
+        // SARASWATI: Phase 4 Task 9 — volatile, and a generation that a disconnect or a refusal bumps so a connect still reading the token drops out
         @Volatile private var webSocket: WebSocket? = null
         private val connectGeneration = AtomicInteger(0)
         private var pingJob: Job? = null
@@ -630,14 +633,17 @@ class ListenTogetherClient
                 true
             }
 
+        // SARASWATI: Phase 4 review fix (I2) — the upgrade carries the hub bearer, so a redirect is never followed
         private val client =
-            OkHttpClient
-                .Builder()
-                .connectTimeout(30, TimeUnit.SECONDS)
-                .readTimeout(60, TimeUnit.SECONDS)
-                .writeTimeout(30, TimeUnit.SECONDS)
-                .pingInterval(60, TimeUnit.SECONDS) // Match server ping interval
-                .build()
+            SangatConnect
+                .hardened(
+                    OkHttpClient
+                        .Builder()
+                        .connectTimeout(30, TimeUnit.SECONDS)
+                        .readTimeout(60, TimeUnit.SECONDS)
+                        .writeTimeout(30, TimeUnit.SECONDS)
+                        .pingInterval(60, TimeUnit.SECONDS), // Match server ping interval
+                ).build()
 
         private fun normalizeServerUrl(url: String): String {
             val trimmed = url.trim()
@@ -709,41 +715,32 @@ class ListenTogetherClient
         }
 
         private suspend fun openSocket(generation: Int) {
-            val url = getServerUrl()
-            var refusal: String? = null
-            var token: String? = null
-            try {
-                if (url.isEmpty()) {
-                    refusal = "Sangat is not set up in this build."
-                } else if (!featureGate.isEnabled(FamilyFeature.SANGAT)) {
-                    refusal = "Sangat is switched off."
-                } else {
-                    token = identity.sessionToken()
-                    if (token == null) refusal = "Pair this phone with your family to use Sangat."
+            // SARASWATI: the stored kill-switches may not be read yet at a cold start (M8); a short wait, not a hang
+            withTimeoutOrNull(GATE_HYDRATION_WAIT_MS) { featureGate.awaitHydrated() }
+            val plan =
+                try {
+                    val url = getServerUrl()
+                    val enabled = featureGate.isEnabled(FamilyFeature.SANGAT)
+                    SangatConnect.plan(url, enabled, if (url.isEmpty() || !enabled) null else identity.sessionToken())
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    SangatConnect.Plan.Refuse("Could not start the Sangat connection.")
                 }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                refusal = "Could not start the Sangat connection."
-            }
             // disconnect() or another refusal got here first.
             if (generation != connectGeneration.get()) return
-            if (refusal != null || token == null) {
-                failTerminally(refusal ?: "Could not start the Sangat connection.")
+            if (plan !is SangatConnect.Plan.Open) {
+                // Nothing was asked of the hub, so nothing it said is a reason to forget the room.
+                haltConnection((plan as SangatConnect.Plan.Refuse).message)
                 return
             }
 
             val request =
                 try {
-                    Request
-                        .Builder()
-                        .url(url)
-                        .header("User-Agent", context.packageName)
-                        .header("Authorization", "Bearer $token")
-                        .build()
+                    SangatConnect.request(plan.url, plan.token, context.packageName)
                 } catch (e: IllegalArgumentException) {
                     // Not logged with its message: OkHttp quotes the header value that it rejected.
-                    failTerminally("Could not start the Sangat connection.")
+                    haltConnection("Could not start the Sangat connection.")
                     return
                 }
 
@@ -794,7 +791,7 @@ class ListenTogetherClient
                             reason: String,
                         ) {
                             log(LogLevel.INFO, "Connection closed", "Code: $code, Reason: $reason")
-                            handleDisconnect(code)
+                            handleDisconnect(code) // SARASWATI: Phase 4 Task 9 — the close code decides whether to reconnect
                         }
 
                         override fun onFailure(
@@ -803,7 +800,7 @@ class ListenTogetherClient
                             response: Response?,
                         ) {
                             log(LogLevel.ERROR, "Connection failure", t.message)
-                            handleConnectionFailure(t, response?.code)
+                            handleConnectionFailure(t, response?.code) // SARASWATI: Phase 4 Task 9 — the upgrade's HTTP code decides
                         }
                     },
                 )
@@ -839,7 +836,7 @@ class ListenTogetherClient
             pingJob = null
             serverClock.reset()
             lastPlaybackRevision.set(0L)
-            connectGeneration.incrementAndGet()
+            connectGeneration.incrementAndGet() // SARASWATI: Phase 4 Task 9 — cancels a connect still reading the token
             webSocket?.close(1000, "User disconnected")
             webSocket = null
             _connectionState.value = ConnectionState.DISCONNECTED
@@ -1064,10 +1061,12 @@ class ListenTogetherClient
             }
         }
 
+        // SARASWATI: Phase 4 Task 9 — closeCode added
         private fun handleDisconnect(closeCode: Int? = null) {
-            if (!SangatReconnectPolicy.shouldReconnect(null, closeCode)) {
+            val failure = SangatConnect.afterFailure(null, closeCode)
+            if (failure is SangatConnect.Failure.Stop) {
                 log(LogLevel.WARNING, "Server closed the connection for good", "Code: $closeCode")
-                failTerminally(terminalMessage(null, closeCode))
+                stopFor(failure)
                 return
             }
             pingJob?.cancel()
@@ -1092,6 +1091,28 @@ class ListenTogetherClient
 
         // SARASWATI: Phase 4 Task 9 — a refusal the hub will repeat (no or revoked session, Sangat off) ends
         // the connection for good: no retry, no half-kept room, one ConnectionError.
+        private fun stopFor(stop: SangatConnect.Failure.Stop) {
+            if (stop.refreshGate) scope.launch { featureGate.refresh() }
+            if (stop.wipeSession) failTerminally(stop.message) else haltConnection(stop.message)
+        }
+
+        // SARASWATI: Phase 4 review fix (M9) — the same stop, but the stored room and session stay, so a hub
+        // having a bad moment (or a Keystore that is briefly closed) does not cost the family their room.
+        private fun haltConnection(message: String) {
+            connectGeneration.incrementAndGet()
+            pingJob?.cancel()
+            pingJob = null
+            webSocket = null
+            serverClock.reset()
+            releaseWakeLock()
+            _pendingJoinRequests.value = emptyList()
+            _bufferingUsers.value = emptyList()
+            reconnectAttempts = 0
+            _connectionState.value = ConnectionState.ERROR
+            emitEvent(ListenTogetherEvent.ConnectionError(message))
+            evaluateBackgroundDisconnectPolicy("connection_halted")
+        }
+
         private fun failTerminally(message: String) {
             connectGeneration.incrementAndGet()
             pingJob?.cancel()
@@ -1116,23 +1137,14 @@ class ListenTogetherClient
             evaluateBackgroundDisconnectPolicy("connection_terminal")
         }
 
-        private fun terminalMessage(
-            httpCode: Int?,
-            closeCode: Int?,
-        ): String =
-            when {
-                closeCode == SangatReconnectPolicy.CLOSE_DEVICE_REVOKED || httpCode == 401 ->
-                    "This phone is no longer signed in to the family hub."
-                else -> "Sangat is switched off."
-            }
-
         private fun handleConnectionFailure(
             t: Throwable,
-            httpCode: Int? = null,
+            httpCode: Int? = null, // SARASWATI: Phase 4 Task 9
         ) {
-            if (!SangatReconnectPolicy.shouldReconnect(httpCode, null)) {
+            val failure = SangatConnect.afterFailure(httpCode, null)
+            if (failure is SangatConnect.Failure.Stop) {
                 log(LogLevel.WARNING, "Hub refused the connection for good", "HTTP $httpCode")
-                failTerminally(terminalMessage(httpCode, null))
+                stopFor(failure)
                 return
             }
             pingJob?.cancel()
@@ -1152,7 +1164,8 @@ class ListenTogetherClient
                 reconnectAttempts++
                 _connectionState.value = ConnectionState.RECONNECTING
 
-                val delayMs = maxOf(calculateBackoffDelay(reconnectAttempts), SangatReconnectPolicy.minimumBackoffMs(httpCode))
+                // SARASWATI: Phase 4 Task 9 — a 429 waits at least a minute
+                val delayMs = maxOf(calculateBackoffDelay(reconnectAttempts), (failure as SangatConnect.Failure.Retry).minBackoffMs)
                 val delaySeconds = delayMs / 1000
 
                 log(

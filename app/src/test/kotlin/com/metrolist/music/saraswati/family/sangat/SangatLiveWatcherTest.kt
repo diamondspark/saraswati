@@ -194,4 +194,66 @@ class SangatLiveWatcherTest {
 
         assertEquals(0, hub.polls.size)
     }
+
+    private fun awaitGate(
+        feature: com.metrolist.music.saraswati.family.FamilyFeature,
+        enabled: Boolean,
+    ) {
+        repeat(100) {
+            time.runCurrent()
+            if (gate.isEnabled(feature) == enabled) return
+            Thread.sleep(50)
+        }
+        assertEquals(enabled, gate.isEnabled(feature))
+    }
+
+    @Test
+    fun `a gate that says off recovers within about five minutes while the watcher runs`() {
+        killSwitchHub.killSwitches = mapOf("sangat" to false)
+        runBlocking { gate.refresh() }
+        killSwitchHub.killSwitches = mapOf("sangat" to true)
+        val watcher = watcher()
+
+        watcher.start(scope)
+        time.runCurrent()
+        time.advanceBy(SangatLiveWatcher.POLL_INTERVAL_MS * (SangatLiveWatcher.GATE_REFRESH_EVERY_POLLS - 2))
+        assertEquals("not asked yet", 1, killSwitchHub.callsTo("getKillSwitches").size)
+
+        time.advanceBy(SangatLiveWatcher.POLL_INTERVAL_MS * 2)
+        awaitGate(com.metrolist.music.saraswati.family.FamilyFeature.SANGAT, true)
+
+        hub.rooms = Result.success(listOf(room("BBBB")))
+        time.advanceBy(SangatLiveWatcher.POLL_INTERVAL_MS)
+        assertTrue("polling resumed", hub.polls.isNotEmpty())
+        assertEquals(1, watcher.liveRooms.value.size)
+    }
+
+    @Test
+    fun `a switch turned off while the app is open stops the polling at the next refresh`() {
+        val watcher = watcher()
+        watcher.start(scope)
+        time.runCurrent()
+        killSwitchHub.killSwitches = mapOf("sangat" to false)
+
+        time.advanceBy(SangatLiveWatcher.POLL_INTERVAL_MS * SangatLiveWatcher.GATE_REFRESH_EVERY_POLLS)
+        awaitGate(com.metrolist.music.saraswati.family.FamilyFeature.SANGAT, false)
+        val before = hub.polls.size
+        time.advanceBy(SangatLiveWatcher.POLL_INTERVAL_MS * 3)
+
+        assertEquals(before, hub.polls.size)
+        assertTrue(watcher.liveRooms.value.isEmpty())
+    }
+
+    @Test
+    fun `a 503 from the hub refreshes the gate at once`() {
+        hub.rooms = Result.failure(HubException(503, "off"))
+        killSwitchHub.killSwitches = mapOf("sangat" to false)
+        val watcher = watcher()
+
+        watcher.start(scope)
+        time.runCurrent()
+
+        assertEquals(1, killSwitchHub.callsTo("getKillSwitches").size)
+        awaitGate(com.metrolist.music.saraswati.family.FamilyFeature.SANGAT, false)
+    }
 }

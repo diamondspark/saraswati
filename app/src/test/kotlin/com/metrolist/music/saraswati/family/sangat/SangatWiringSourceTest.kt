@@ -46,31 +46,40 @@ class SangatWiringSourceTest {
     }
 
     @Test
-    fun `the upgrade carries the device bearer and needs a session and the kill-switch`() {
+    fun `the upgrade is planned from the gate and the session, and built by the tested function`() {
         val open = bodyOf(client, "private suspend fun openSocket")
-        assertTrue(open.contains(""".header("Authorization", "Bearer ${'$'}token")"""))
         assertTrue(open.contains("identity.sessionToken()"))
         assertTrue(open.contains("featureGate.isEnabled(FamilyFeature.SANGAT)"))
-        assertTrue("the connect is refused before the request is built", open.indexOf("failTerminally") < open.indexOf("Request"))
+        assertTrue(open.contains("featureGate.awaitHydrated()"))
+        assertTrue("the plan comes before the request", open.indexOf("SangatConnect.plan(") in 0 until open.indexOf("SangatConnect.request("))
+        assertFalse("no request is built by hand", open.contains("Request\n") || open.contains("Request.Builder"))
         assertEquals("the bearer is never logged", 0, Regex("""log\([^)]*token""").findAll(open).count())
+        assertTrue(source("src/main/kotlin/com/metrolist/music/saraswati/family/sangat/SangatConnect.kt").contains(""".header("Authorization", "Bearer ${'$'}token")"""))
+    }
+
+    @Test
+    fun `the socket's OkHttp client never follows a redirect`() {
+        val clientField = client.substringAfter("private val client =").substringBefore("private fun normalizeServerUrl")
+        assertTrue(clientField.contains("SangatConnect"))
+        assertTrue(clientField.contains(".hardened("))
     }
 
     @Test
     fun `reconnects and auto-approvals go through the policies`() {
-        assertTrue(bodyOf(client, "private fun handleConnectionFailure").contains("SangatReconnectPolicy.shouldReconnect(httpCode, null)"))
-        assertTrue(bodyOf(client, "private fun handleDisconnect").contains("SangatReconnectPolicy.shouldReconnect(null, closeCode)"))
+        assertTrue(bodyOf(client, "private fun handleConnectionFailure").contains("SangatConnect.afterFailure(httpCode, null)"))
+        assertTrue(bodyOf(client, "private fun handleDisconnect").contains("SangatConnect.afterFailure(null, closeCode)"))
         assertEquals(2, Regex("""SangatApprovalPolicy\.autoApprove\(""").findAll(client).count())
     }
 
     @Test
     fun `the live watcher starts in one place, and only for the full app in the foreground`() {
-        assertEquals(1, Regex("""sangatLiveWatcher\.start\(""").findAll(mainActivity).count())
-        val sync = bodyOf(mainActivity, "private fun syncSangatWatcher")
-        assertTrue(sync.contains("inForeground && !grandparentRole"))
-        assertTrue(sync.contains("sangatLiveWatcher.start(lifecycleScope)"))
-        assertTrue(bodyOf(mainActivity, "override fun onStop").contains("syncSangatWatcher()"))
-        assertTrue(bodyOf(mainActivity, "override fun onStart").contains("syncSangatWatcher()"))
-        assertTrue(bodyOf(mainActivity, "private fun applyGrandparentRole").contains("syncSangatWatcher()"))
+        val foreground = source("src/main/kotlin/com/metrolist/music/saraswati/family/sangat/SangatForeground.kt")
+        assertEquals(1, Regex("""watcher\.start\(""").findAll(foreground).count())
+        assertTrue(bodyOf(foreground, "private fun sync").contains("started > 0 && !saral"))
+        assertFalse("MainActivity does not start it itself", mainActivity.contains("sangatLiveWatcher"))
+        assertTrue(bodyOf(mainActivity, "override fun onStop").contains("sangatForeground.activityStopped()"))
+        assertTrue(bodyOf(mainActivity, "override fun onStart").contains("sangatForeground.activityStarted()"))
+        assertTrue(bodyOf(mainActivity, "private fun applyGrandparentRole").contains("sangatForeground.setSaral(value)"))
     }
 
     @Test

@@ -19,6 +19,7 @@ import com.metrolist.music.saraswati.family.HubClient
 import com.metrolist.music.saraswati.family.HubConfig
 import com.metrolist.music.saraswati.family.HubIdentity
 import com.metrolist.music.saraswati.family.sangat.SangatCarMode
+import com.metrolist.music.saraswati.family.sangat.SangatForeground
 import com.metrolist.music.saraswati.family.sangat.SangatLiveWatcher
 import com.metrolist.music.saraswati.security.SaraswatiVault
 import com.metrolist.music.utils.dataStore
@@ -87,6 +88,12 @@ object FamilyModule {
         identity: HubIdentity,
         gate: FamilyFeatureGate,
     ): SangatLiveWatcher = SangatLiveWatcher(hub, identity, gate)
+
+    // SARASWATI: Phase 4 review fix (M13) — one process-wide foreground count, polling on a scope of its own.
+    @Provides
+    @Singleton
+    fun provideSangatForeground(watcher: SangatLiveWatcher): SangatForeground =
+        SangatForeground(watcher, CoroutineScope(SupervisorJob() + Dispatchers.Default))
 
     @Provides
     @Singleton

@@ -143,7 +143,7 @@ import com.metrolist.music.saraswati.family.FamilyRoutes
 import com.metrolist.music.saraswati.family.FamilyFeatureGate
 import com.metrolist.music.saraswati.family.FamilyViewModel
 import com.metrolist.music.saraswati.family.HealthReporter
-import com.metrolist.music.saraswati.family.sangat.SangatLiveWatcher
+import com.metrolist.music.saraswati.family.sangat.SangatForeground
 import com.metrolist.music.saraswati.family.PairingInbox
 import com.metrolist.music.saraswati.family.StationsCache
 import com.metrolist.music.saraswati.family.StationsRefresher
@@ -309,11 +309,10 @@ class MainActivity : FragmentActivity() {
     lateinit var featureGate: FamilyFeatureGate
 
     @Inject
-    lateinit var sangatLiveWatcher: SangatLiveWatcher
+    lateinit var sangatForeground: SangatForeground
 
     // The owner's own phone pairs itself here (ensureSelfPaired) so it has the device session Sangat needs.
     private val familyViewModel: FamilyViewModel by viewModels()
-    private var inForeground = false
 
     private lateinit var navController: NavHostController
     private var pendingIntent: Intent? = null
@@ -372,8 +371,7 @@ class MainActivity : FragmentActivity() {
 
     override fun onStart() {
         super.onStart()
-        inForeground = true
-        syncSangatWatcher()
+        sangatForeground.activityStarted() // SARASWATI: Phase 4 Task 9 — counted per process (review fix M13)
         // Request notification permission on Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -417,8 +415,7 @@ class MainActivity : FragmentActivity() {
         // running, so the host must keep reporting playback state to the LT server; detaching
         // the player listener here used to break LT for any host that wasn't staring at the
         // app the whole session. Full teardown happens in onDestroy() via safeUnbindService().
-        inForeground = false
-        syncSangatWatcher()
+        sangatForeground.activityStopped() // SARASWATI: Phase 4 Task 9 — counted per process (review fix M13)
         super.onStop()
     }
 
@@ -523,6 +520,7 @@ class MainActivity : FragmentActivity() {
                 launch { healthReporter.report() }
                 // SARASWATI: Phase 4 Task 9 — the kill-switches, and (owner phone only, once) a device session.
                 launch { featureGate.refresh() }
+                // (the self-pair refreshes the gate again itself once it has a session — review fix M7)
                 launch { familyViewModel.ensureSelfPaired(Build.MODEL) }
             }
         }
@@ -595,13 +593,9 @@ class MainActivity : FragmentActivity() {
     private fun applyGrandparentRole(value: Boolean) {
         grandparentRole = value
         SaralActive.on = value
-        syncSangatWatcher()
-    }
-
-    // SARASWATI: Phase 4 Task 9 — the poll for Sangat rooms runs while the full app is on screen, and never
-    // while this phone is Saral (a grandparent's phone gets no prompts and makes no extra requests).
-    private fun syncSangatWatcher() {
-        if (inForeground && !grandparentRole) sangatLiveWatcher.start(lifecycleScope) else sangatLiveWatcher.stop()
+        // SARASWATI: Phase 4 Task 9 — the poll for Sangat rooms runs while the full app is on screen, and never
+        // while this phone is Saral (a grandparent's phone gets no prompts and makes no extra requests).
+        sangatForeground.setSaral(value)
     }
 
     // SARASWATI: Task 9 — empties the launch intent and anything queued so that
