@@ -558,6 +558,19 @@ val FamilyDeviceIdKey = stringPreferencesKey("familyDeviceId")
 // hub. Until then an empty list from the hub means "nobody has set any yet" and
 // the editor starts on four defaults; after it, an empty list is shown as empty.
 val FamilyStationsSavedKey = booleanPreferencesKey("familyStationsSaved")
+
+// SARASWATI: Task 9 — a CACHE of the role the hub holds for this phone, not a
+// setting. true makes MainActivity host Saral (the grandparents' easy mode) as
+// the whole app. It is written only from the hub's own answer
+// (GrandparentRoleSync) and is never offered as a toggle, so the one way out of
+// Saral is the owner switching the role in Manage Family. Kept out of backups
+// (BackupPolicy) so a restore can neither lock a phone into Saral nor free it.
+val GrandparentRoleKey = booleanPreferencesKey("grandparentRole")
+
+// SARASWATI: Task 9 — the last station list the hub gave this phone, as JSON.
+// Saral and the car's Stations folder read it without waiting for the network
+// (StationsCache). Not a secret; not restored from backups.
+val FamilyStationsCacheKey = stringPreferencesKey("familyStationsCache")
 val AccountNameKey = stringPreferencesKey("accountName")
 val AccountEmailKey = stringPreferencesKey("accountEmail")
 val AccountChannelHandleKey = stringPreferencesKey("accountChannelHandle")

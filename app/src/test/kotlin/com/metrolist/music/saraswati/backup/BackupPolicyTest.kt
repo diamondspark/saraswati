@@ -23,6 +23,8 @@ import com.metrolist.music.constants.DiscordButton2UrlKey
 import com.metrolist.music.constants.FamilyAdminKeyKey
 import com.metrolist.music.constants.FamilyHubClaimSecretKey
 import com.metrolist.music.constants.FamilyHubSessionTokenKey
+import com.metrolist.music.constants.FamilyStationsCacheKey
+import com.metrolist.music.constants.GrandparentRoleKey
 import com.metrolist.music.constants.InnerTubeCookieKey
 import com.metrolist.music.constants.LastFMSessionKey
 import com.metrolist.music.constants.ListenTogetherServerUrlKey
@@ -246,5 +248,42 @@ class BackupPolicyTest {
     @Test
     fun `NEVER_EXPORT_OR_RESTORE includes every SecretPreferenceKeys entry`() {
         assertTrue(BackupPolicy.NEVER_EXPORT_OR_RESTORE.containsAll(SecretPreferenceKeys.all))
+    }
+
+    // SARASWATI: Task 9 — the grandparent flag is a cache of what the hub says,
+    // and the owner's only way out of Saral is the hub. A backup (shared, old,
+    // or hostile) must never be able to switch a phone into Saral, or out of it.
+    @Test
+    fun `sanitize drops the Saral flag and the stations cache`() {
+        val prefs =
+            mutablePreferencesOf(
+                GrandparentRoleKey to true,
+                FamilyStationsCacheKey to "{}",
+            ).toPreferences()
+
+        val sanitized = BackupPolicy.sanitize(prefs)
+
+        assertNull(sanitized[GrandparentRoleKey])
+        assertNull(sanitized[FamilyStationsCacheKey])
+    }
+
+    @Test
+    fun `a restore leaves this phone's Saral flag exactly as it is`() {
+        val live = mutablePreferencesOf(GrandparentRoleKey to true).toPreferences()
+        val restored = mutablePreferencesOf(AudioQualityKey to "HIGH").toPreferences()
+
+        val merged = BackupPolicy.mergeRestoreOntoLive(live, restored)
+
+        assertEquals(true, merged[GrandparentRoleKey])
+    }
+
+    @Test
+    fun `a hostile backup cannot switch an adult phone into Saral`() {
+        val live = mutablePreferencesOf(AudioQualityKey to "LOW").toPreferences()
+        val restored = mutablePreferencesOf(GrandparentRoleKey to true).toPreferences()
+
+        val merged = BackupPolicy.mergeRestoreOntoLive(live, BackupPolicy.sanitize(restored))
+
+        assertNull(merged[GrandparentRoleKey])
     }
 }

@@ -156,17 +156,21 @@ one. If the phone just keeps waiting, see "If something goes wrong".
 - [ ] They sign in to YouTube inside Saraswati with their own hands. Never ask
       for or send a password.
 - [ ] **Adult:** the normal app. Nothing more to do.
-- [ ] **Grandparent (Saral):** they go through the favourite-singers step.
-      Hindi/Bollywood, devotional/bhajan and ghazal start pre-selected, and
-      each can be turned off.
+- [ ] **Grandparent (Saral):** once approved, the phone turns into the station
+      tiles on its own within a few seconds. The favourite-singers step is not
+      built yet (deferred in Task 9: the build has no taste-profile call), so
+      there is nothing to pick here.
 - [ ] Grandparent: the station tiles you set in Manage Family show up and look
       right.
 - [ ] Grandparent: they start a station and pause it with no help. This is the
       design's own test for Saral.
-- [ ] Grandparent: do every other in-app step first. The plan says Saral replaces
-      the whole app with no Settings and no other tabs, and it does not yet
-      say how to switch Saral off again on a phone. Check that before the first
-      grandparent's phone.
+- [ ] Grandparent: do every other in-app step first, signing in to YouTube
+      included. Saral replaces the whole app with no Settings and no other
+      tabs, the moment the owner approves the phone, and nothing on that phone
+      switches it off. The easy order is to pair the phone as Adult, finish
+      the sign-in, then have the owner set it to grandparent in Manage Family.
+      To bring the full app back later, the owner sets the phone to Adult
+      there; the phone follows the next time it is opened.
 
 ### 7. Car (only if they use Android Auto)
 

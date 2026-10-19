@@ -9,6 +9,7 @@
 // everything else finishes synchronously.
 package com.metrolist.music.saraswati.family
 
+import com.metrolist.music.saraswati.saral.GrandparentRoleSync
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -29,13 +30,22 @@ class JoinFamilyViewModelTest {
     private lateinit var hub: FakeHub
     private lateinit var store: FakeStore
     private lateinit var inbox: PairingInbox
+    private lateinit var roles: FakeRoleStore
     private lateinit var vm: JoinFamilyViewModel
 
     private val link = "$TEST_HUB_URL/pair#$TEST_TOKEN"
 
     private fun newVm(dispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Unconfined): JoinFamilyViewModel {
         scope = CoroutineScope(SupervisorJob() + dispatcher)
-        return JoinFamilyViewModel(hub, store, HubConfig(TEST_HUB_URL), inbox, scope, pollIntervalMs = 1)
+        return JoinFamilyViewModel(
+            hub,
+            store,
+            HubConfig(TEST_HUB_URL),
+            inbox,
+            GrandparentRoleSync(hub, store, roles),
+            scope,
+            pollIntervalMs = 1,
+        )
     }
 
     private fun awaitState(predicate: (JoinUiState) -> Boolean): JoinUiState =
@@ -46,6 +56,7 @@ class JoinFamilyViewModelTest {
         hub = FakeHub()
         store = FakeStore()
         inbox = PairingInbox()
+        roles = FakeRoleStore()
         vm = newVm()
     }
 
@@ -261,5 +272,47 @@ class JoinFamilyViewModelTest {
         assertFalse(store.claim.toString().contains("claim-secret"))
         assertFalse(store.session.toString().contains("the-session-token"))
         assertFalse(PendingClaim("d", "claim-secret-x").toString().contains("claim-secret"))
+    }
+
+    // --- Task 9: approval turns Saral on (the hub's role, cached) -----------
+
+    @Test
+    fun `approval of a grandparent phone caches the role the hub reported`() {
+        hub.meRole = DeviceRole.GRANDPARENT
+        hub.scriptStatus(PairingStatus.Approved("tok"))
+        vm = newVm(Dispatchers.Default)
+        vm.submitInput(link)
+
+        vm.claim("Mummy's Pixel", DeviceRole.GRANDPARENT)
+        awaitState { it is JoinUiState.Approved }
+
+        assertTrue(roles.grandparent)
+        assertEquals(listOf(true), roles.writes.toList())
+    }
+
+    @Test
+    fun `approval of an adult phone leaves Saral off`() {
+        hub.meRole = DeviceRole.ADULT
+        hub.scriptStatus(PairingStatus.Approved("tok"))
+        vm = newVm(Dispatchers.Default)
+        vm.submitInput(link)
+
+        vm.claim("Papa's Samsung", DeviceRole.ADULT)
+        awaitState { it is JoinUiState.Approved }
+
+        assertEquals(false, roles.grandparent)
+    }
+
+    @Test
+    fun `the role the phone picked is not what turns Saral on, only the hub's answer`() {
+        hub.failWith("getMe", OFFLINE)
+        hub.scriptStatus(PairingStatus.Approved("tok"))
+        vm = newVm(Dispatchers.Default)
+        vm.submitInput(link)
+
+        vm.claim("Mummy's Pixel", DeviceRole.GRANDPARENT)
+        awaitState { it is JoinUiState.Approved }
+
+        assertTrue("an unconfirmed pick must not lock the phone into Saral", roles.writes.isEmpty())
     }
 }

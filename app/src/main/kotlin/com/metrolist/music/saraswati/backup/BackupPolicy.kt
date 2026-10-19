@@ -42,6 +42,8 @@ import com.metrolist.music.constants.DiscordButton1UrlKey
 import com.metrolist.music.constants.DiscordButton2UrlKey
 import com.metrolist.music.constants.DiscordNameKey
 import com.metrolist.music.constants.DiscordUsernameKey
+import com.metrolist.music.constants.FamilyStationsCacheKey
+import com.metrolist.music.constants.GrandparentRoleKey
 import com.metrolist.music.constants.ListenTogetherServerUrlKey
 import com.metrolist.music.constants.ListenTogetherSessionTimestampKey
 import com.metrolist.music.constants.MaxImageCacheSizeKey
@@ -124,6 +126,14 @@ object BackupPolicy {
                 // from an untrusted file.
                 MaxImageCacheSizeKey,
                 MaxSongCacheSizeKey,
+                // SARASWATI: Task 9 — Saral's on/off is a cache of the role the
+                // hub holds for this phone, and the owner's switch in Manage
+                // Family is the only way out of it. A restored backup must not
+                // be able to put an adult's phone into Saral (no Settings to
+                // undo it from) or take a grandparent's out of it. The stations
+                // cache is hub data, refreshed from the hub, not a backup item.
+                GrandparentRoleKey,
+                FamilyStationsCacheKey,
             )
 
     // Preference keys the coverage test's wider regex flags as

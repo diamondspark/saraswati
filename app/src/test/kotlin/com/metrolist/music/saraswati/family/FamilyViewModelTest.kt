@@ -24,6 +24,7 @@ class FamilyViewModelTest {
     private lateinit var scope: CoroutineScope
     private lateinit var hub: FakeHub
     private lateinit var store: FakeStore
+    private lateinit var cache: FakeStationsCache
     private lateinit var vm: FamilyViewModel
     private var newIds = 0
 
@@ -35,8 +36,9 @@ class FamilyViewModelTest {
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         hub = FakeHub()
         store = FakeStore(admin = TEST_ADMIN_KEY)
+        cache = FakeStationsCache()
         newIds = 0
-        vm = FamilyViewModel(hub, store, HubConfig(TEST_HUB_URL), scope, newStationId = { "new-${++newIds}" })
+        vm = FamilyViewModel(hub, store, HubConfig(TEST_HUB_URL), cache, scope, newStationId = { "new-${++newIds}" })
     }
 
     @After
@@ -774,5 +776,69 @@ class FamilyViewModelTest {
         assertEquals(6, StationIcons.COUNT)
         assertEquals(StationIcons.drawableFor(0), StationIcons.drawableFor(StationIcons.COUNT))
         assertEquals(StationIcons.drawableFor(0), StationIcons.drawableFor(-6))
+    }
+
+    // --- Task 9: the station cache Saral and the car read -------------------
+
+    @Test
+    fun `a list loaded from the hub refreshes the cache`() {
+        hubWith(3)
+
+        assertEquals(listOf((1..3).map { station(it) }), cache.replaced.toList())
+    }
+
+    @Test
+    fun `a saved edit refreshes the cache with the list the hub returned`() {
+        hubWith(2)
+        cache.replaced.clear()
+
+        vm.addStation("Ghazals", "dQw4w9WgXcQ", iconIndex = 3)
+
+        assertEquals(listOf(hub.stations), cache.replaced.toList())
+        assertEquals(3, cache.snapshot().size)
+    }
+
+    @Test
+    fun `a removal and a reorder refresh the cache too`() {
+        hubWith(3)
+        cache.replaced.clear()
+
+        vm.removeStation("s2")
+        vm.moveStation("s3", -1)
+
+        assertEquals(listOf(listOf("s1", "s3")), cache.replaced.take(1).map { list -> list.map { it.id } })
+        assertEquals(listOf("s3", "s1"), cache.snapshot().map { it.id })
+    }
+
+    @Test
+    fun `the unsaved defaults never reach the cache`() {
+        vm.loadSettings()
+        vm.updateStation(vm.stations.value.first().id, "Mummy's Favourites", video(1), 0)
+
+        assertTrue(cache.replaced.isEmpty())
+        assertTrue(cache.snapshot().isEmpty())
+    }
+
+    @Test
+    fun `a failed save leaves the cache alone`() {
+        hubWith(2)
+        cache.replaced.clear()
+        hub.failWith("setStations", hubFailure(400))
+
+        vm.addStation("New", "dQw4w9WgXcQ", 0)
+
+        assertTrue(cache.replaced.isEmpty())
+    }
+
+    @Test
+    fun `a cache that cannot be written does not turn a saved edit into an error`() {
+        hubWith(2)
+        cache.failWrites = java.io.IOException("disk full")
+
+        vm.addStation("New", "dQw4w9WgXcQ", 0)
+
+        assertNull(vm.error.value)
+        assertEquals(StationsState.SYNCED, vm.stationsState.value)
+        assertEquals(3, vm.stations.value.size)
     }
 }

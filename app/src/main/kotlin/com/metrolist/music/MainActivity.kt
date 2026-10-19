@@ -114,9 +114,11 @@ import androidx.core.net.toUri
 import androidx.core.util.Consumer
 import androidx.core.view.WindowCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.coroutineScope
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.navigation.NavController
@@ -138,6 +140,10 @@ import com.metrolist.music.saraswati.SaraswatiDeepLinkPolicy
 import com.metrolist.music.saraswati.SaraswatiFeatures
 import com.metrolist.music.saraswati.family.FamilyRoutes
 import com.metrolist.music.saraswati.family.PairingInbox
+import com.metrolist.music.saraswati.family.StationsCache
+import com.metrolist.music.saraswati.saral.GrandparentRoleSync
+import com.metrolist.music.saraswati.saral.SaralApp
+import com.metrolist.music.saraswati.saral.SaralShell
 import com.metrolist.music.saraswati.family.PairingLink
 import com.metrolist.music.saraswati.security.DeepLinkGuard
 import com.metrolist.music.constants.AppBarHeight
@@ -154,6 +160,7 @@ import com.metrolist.music.constants.EnableHighRefreshRateKey
 import com.metrolist.music.constants.EnableLandscapeScalingKey
 import com.metrolist.music.constants.ExperimentalLyricsKey
 import com.metrolist.music.constants.ForceBottomNavBarKey
+import com.metrolist.music.constants.GrandparentRoleKey
 import com.metrolist.music.constants.LastSeenVersionKey
 import com.metrolist.music.constants.ListenTogetherInTopBarKey
 import com.metrolist.music.constants.LyricsProviderOrderKey
@@ -271,8 +278,23 @@ class MainActivity : FragmentActivity() {
     @Inject
     lateinit var pairingInbox: PairingInbox
 
+    // SARASWATI: Task 9 — refreshes the cached grandparent role from the hub.
+    @Inject
+    lateinit var grandparentRoleSync: GrandparentRoleSync
+
+    // SARASWATI: Task 9 — never read here. Injecting it builds it now, so its
+    // storage is read while the first frame is composed and Saral's tiles are
+    // already there when it appears.
+    @Inject
+    lateinit var stationsCache: StationsCache
+
     private lateinit var navController: NavHostController
     private var pendingIntent: Intent? = null
+
+    // SARASWATI: Task 9 — a cache of the role the hub holds for this phone
+    // (GrandparentRoleKey). true makes Saral the whole app: setContent hosts it
+    // instead of MetrolistApp, so no route, tab or Settings exists to reach.
+    private var grandparentRole by mutableStateOf(false)
     private var latestVersionName by mutableStateOf(BuildConfig.BASE_VERSION_NAME)
 
     // Keep PlayerConnection as regular property - NOT mutableStateOf to prevent UI recomposition
@@ -391,6 +413,13 @@ class MainActivity : FragmentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        // SARASWATI: Task 9 — Saral follows no link, widget, share or recognition
+        // intent, and must not hold one for later either (it would be replayed
+        // the moment the owner switches this phone back to the full app).
+        if (!SaralShell.routesIncomingIntents(grandparentRole)) {
+            dropIntentsForSaral(intent)
+            return
+        }
         if (::navController.isInitialized) {
             handleWidgetTargetIntent(intent, navController)
             // SARASWATI (audit A9.3): a malformed link (e.g. a non-hierarchical
@@ -435,6 +464,25 @@ class MainActivity : FragmentActivity() {
                         window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
                     }
                 }
+        }
+
+        // SARASWATI: Task 9 — read the cached role before the first frame, so a
+        // grandparent's phone never flashes the full app, then follow it live.
+        grandparentRole = dataStore[GrandparentRoleKey] == true
+        if (grandparentRole) dropIntentsForSaral(intent)
+        lifecycleScope.launch {
+            dataStore.data
+                .map { it[GrandparentRoleKey] == true }
+                .distinctUntilChanged()
+                .collect {
+                    grandparentRole = it
+                    if (it) dropIntentsForSaral(intent)
+                }
+        }
+        // On launch and on every return to the app, ask the hub what this phone
+        // is. A failed or missing answer changes nothing (GrandparentRoleSync).
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) { grandparentRoleSync.refresh() }
         }
 
         // Defer migration and version tracking to avoid blocking first frame
@@ -482,15 +530,31 @@ class MainActivity : FragmentActivity() {
         }
 
         setContent {
-            MetrolistApp(
-                latestVersionName = latestVersionName,
-                onLatestVersionNameChange = { latestVersionName = it },
-                playerConnection = playerConnectionSnapshot,
-                database = database,
-                downloadUtil = downloadUtil,
-                syncUtils = syncUtils,
-            )
+            when (SaralShell.contentFor(grandparentRole)) {
+                SaralShell.Content.SARAL -> {
+                    LaunchedEffect(Unit) { setSystemBarAppearance(isDark = true) }
+                    SaralApp(playerConnection = playerConnectionSnapshot)
+                }
+                SaralShell.Content.FULL_APP ->
+                    MetrolistApp(
+                        latestVersionName = latestVersionName,
+                        onLatestVersionNameChange = { latestVersionName = it },
+                        playerConnection = playerConnectionSnapshot,
+                        database = database,
+                        downloadUtil = downloadUtil,
+                        syncUtils = syncUtils,
+                    )
+            }
         }
+    }
+
+    // SARASWATI: Task 9 — empties the launch intent and anything queued so that
+    // nothing sent while Saral is on is replayed later by the full app.
+    private fun dropIntentsForSaral(intent: Intent) {
+        pendingIntent = null
+        intent.action = null
+        intent.data = null
+        intent.replaceExtras(null as Bundle?)
     }
 
     @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")

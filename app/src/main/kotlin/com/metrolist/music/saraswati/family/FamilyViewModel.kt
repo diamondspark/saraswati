@@ -19,6 +19,10 @@
 // resolves) so the owner gets an answer at once, then the whole resulting list
 // is sent. A list that is not complete yet (the four starting defaults have no
 // video until the owner picks one) is kept as an unsaved draft, never sent.
+//
+// Task 9: every list the hub confirms (loaded or saved) also refreshes the
+// StationsCache that Saral and the car read. A draft never does, and a cache
+// that cannot be written never turns a saved edit into an error.
 package com.metrolist.music.saraswati.family
 
 import androidx.lifecycle.ViewModel
@@ -77,12 +81,13 @@ class FamilyViewModel
         private val hub: HubApi,
         private val store: FamilyStore,
         private val config: HubConfig,
+        private val stationsCache: StationsCache,
         scope: CoroutineScope,
         private val newStationId: () -> String = { UUID.randomUUID().toString() },
     ) : ViewModel(scope) {
         @Inject
-        constructor(hub: HubApi, store: FamilyStore, config: HubConfig) :
-            this(hub, store, config, CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate))
+        constructor(hub: HubApi, store: FamilyStore, config: HubConfig, stationsCache: StationsCache) :
+            this(hub, store, config, stationsCache, CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate))
 
         private val _pairingState = MutableStateFlow<PairingUiState>(PairingUiState.Idle)
         val pairingState: StateFlow<PairingUiState> = _pairingState.asStateFlow()
@@ -335,6 +340,7 @@ class FamilyViewModel
                         } else {
                             _stations.value = fromHub
                             _stationsState.value = StationsState.SYNCED
+                            cacheStations(fromHub)
                         }
                     }.onFailure { fail(it) }
             }
@@ -378,6 +384,7 @@ class FamilyViewModel
                 .onSuccess { saved ->
                     _stations.value = saved
                     _stationsState.value = StationsState.SYNCED
+                    cacheStations(saved)
                     try {
                         store.markStationsSaved()
                     } catch (e: CancellationException) {
@@ -402,6 +409,16 @@ class FamilyViewModel
                 return null
             }
             return Station(id, name, video, iconIndex.coerceIn(0, StationIcons.COUNT - 1))
+        }
+
+        private suspend fun cacheStations(list: List<Station>) {
+            try {
+                stationsCache.replace(list)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // The hub holds the list; the cache is refreshed again on the next launch.
+            }
         }
 
         private suspend fun stationsEverSaved(): Boolean =

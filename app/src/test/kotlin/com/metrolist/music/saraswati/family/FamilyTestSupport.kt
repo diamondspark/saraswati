@@ -11,6 +11,11 @@
 // HubClientTest.
 package com.metrolist.music.saraswati.family
 
+import com.metrolist.music.saraswati.saral.GrandparentRoleStore
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.io.IOException
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -35,6 +40,9 @@ class FakeHub : HubApi {
         linkedMapOf("sangat" to true, "parivaar_mix" to true, "family_playlists" to true, "cast_relay" to true)
 
     @Volatile var pairingToken = PairingToken(TEST_TOKEN, "2026-10-19T18:27:00.000Z")
+
+    /** While set, getStations waits on it: stands in for a hub that is slow or unreachable. */
+    @Volatile var stationsGate: CompletableDeferred<Unit>? = null
 
     @Volatile var meRole: DeviceRole = DeviceRole.ADULT
 
@@ -123,7 +131,12 @@ class FakeHub : HubApi {
 
     override suspend fun getMe(sessionToken: String) = run("getMe", sessionToken) { Me("me", meRole) }
 
-    override suspend fun getStations(auth: String) = run("getStations", auth) { stations }
+    override suspend fun getStations(auth: String): Result<List<Station>> {
+        calls.add("getStations($auth)")
+        stationsGate?.await()
+        failures["getStations"]?.let { return Result.failure(it) }
+        return Result.success(stations)
+    }
 
     override suspend fun setStations(
         adminKey: String,
@@ -162,6 +175,7 @@ class FakeStore(
     var claim: PendingClaim? = null
     var stationsSaved = false
     var failWrites: Throwable? = null
+    var failReads: Throwable? = null
 
     private fun checkWrite() {
         failWrites?.let { throw it }
@@ -175,7 +189,10 @@ class FakeStore(
         owner = true
     }
 
-    override suspend fun session() = session
+    override suspend fun session(): FamilySession? {
+        failReads?.let { throw it }
+        return session
+    }
 
     override suspend fun pendingClaim() = claim
 
@@ -207,3 +224,39 @@ class FakeStore(
 }
 
 val OFFLINE: Throwable = IOException("no route to host")
+
+/** Mirrors DataStoreStationsCache's contract: synchronous snapshot; an empty list never replaces a good one. */
+class FakeStationsCache(
+    initial: List<Station> = emptyList(),
+) : StationsCache {
+    private val state = MutableStateFlow(initial)
+    override val stations: StateFlow<List<Station>> = state.asStateFlow()
+
+    val replaced = CopyOnWriteArrayList<List<Station>>()
+    var failWrites: Throwable? = null
+
+    override suspend fun replace(stations: List<Station>) {
+        failWrites?.let { throw it }
+        replaced.add(stations)
+        if (stations.isNotEmpty()) state.value = stations
+    }
+}
+
+class FakeRoleStore(
+    var grandparent: Boolean = false,
+) : GrandparentRoleStore {
+    var failWrites: Throwable? = null
+    var failReads: Throwable? = null
+    val writes = CopyOnWriteArrayList<Boolean>()
+
+    override suspend fun isGrandparent(): Boolean {
+        failReads?.let { throw it }
+        return grandparent
+    }
+
+    override suspend fun setGrandparent(value: Boolean) {
+        failWrites?.let { throw it }
+        writes.add(value)
+        grandparent = value
+    }
+}

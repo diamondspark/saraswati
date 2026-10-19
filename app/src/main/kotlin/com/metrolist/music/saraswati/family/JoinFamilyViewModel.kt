@@ -13,10 +13,14 @@
 // backs off further on a 429. The claim is stored the moment the hub issues
 // it, so closing the app while waiting resumes the wait instead of burning
 // the owner's one-time link.
+//
+// Task 9: once approved, the first getMe() both reports the role and caches it
+// (GrandparentRoleSync), which is what turns Saral on for a grandparent phone.
 package com.metrolist.music.saraswati.family
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.metrolist.music.saraswati.saral.GrandparentRoleSync
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -65,12 +69,13 @@ class JoinFamilyViewModel
         private val store: FamilyStore,
         private val config: HubConfig,
         private val inbox: PairingInbox,
+        private val roleSync: GrandparentRoleSync,
         scope: CoroutineScope,
         private val pollIntervalMs: Long,
     ) : ViewModel(scope) {
         @Inject
-        constructor(hub: HubApi, store: FamilyStore, config: HubConfig, inbox: PairingInbox) :
-            this(hub, store, config, inbox, CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate), POLL_INTERVAL_MS)
+        constructor(hub: HubApi, store: FamilyStore, config: HubConfig, inbox: PairingInbox, roleSync: GrandparentRoleSync) :
+            this(hub, store, config, inbox, roleSync, CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate), POLL_INTERVAL_MS)
 
         private val _state = MutableStateFlow<JoinUiState>(JoinUiState.Idle)
         val state: StateFlow<JoinUiState> = _state.asStateFlow()
@@ -181,7 +186,7 @@ class JoinFamilyViewModel
         ) {
             if (!guardedWrite { store.completeClaim(claim.deviceId, sessionToken) }) return
             // The first authenticated call also lets the hub drop the claim secret.
-            val role = hub.getMe(sessionToken).getOrNull()?.role ?: chosenRole
+            val role = roleSync.refresh() ?: chosenRole
             _state.value = JoinUiState.Approved(role)
         }
 

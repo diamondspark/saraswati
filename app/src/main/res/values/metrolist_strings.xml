@@ -1100,4 +1100,26 @@
     <string name="family_feature_family_playlists_desc">Off hides playlists the family shares.</string>
     <string name="family_feature_cast_relay">Cast relay</string>
     <string name="family_feature_cast_relay_desc">Off hides casting from one family phone to another.</string>
+
+    <!-- SARASWATI: Task 9 — Saral, the grandparents' screen. Hindi on purpose: the one screen built only for them.
+         The copy is the approved mockup's, except the last three lines, which are new and need a
+         native-speaker read. -->
+    <string name="saral_identity">सरस्वती · सरल</string>
+    <string name="saral_station_bollywood">बॉलीवुड क्लासिक्स</string>
+    <string name="saral_station_bhajan">भजन और भक्ति गीत</string>
+    <string name="saral_station_ghazal">ग़ज़लें और पुराने गीत</string>
+    <string name="saral_station_meditation">शांति और ध्यान</string>
+    <string name="saral_idle">टाइल दबाएं और सुनें</string>
+    <string name="saral_now_playing">%1$s बज रहा है</string>
+    <string name="saral_play">चलाएं</string>
+    <string name="saral_pause">रोकें</string>
+    <string name="saral_next">आगे वाला गीत</string>
+    <string name="saral_previous">पिछला गीत</string>
+    <string name="saral_voice_search">बोलकर खोजें</string>
+    <string name="saral_listening">सुन रहे हैं…</string>
+    <string name="saral_say_song">गाने का नाम बोलें</string>
+    <string name="saral_close">बंद करें</string>
+    <string name="saral_empty">स्टेशन अभी तैयार नहीं हैं</string>
+    <string name="saral_voice_not_found">गाना नहीं मिला, फिर से बोलें</string>
+    <string name="saral_voice_unavailable">इस फ़ोन पर बोलकर खोजना उपलब्ध नहीं है</string>
 </resources>
