@@ -438,6 +438,46 @@ class FamilyViewModelTest {
         assertTrue(vm.isMember.value)
     }
 
+    // SARASWATI: fix wave B1 — the Family tab shows the code of a claim that waits for approval.
+    @Test
+    fun `a stored claim gives the Family tab the code to show, and no claim gives none`() {
+        vm.refreshMembership()
+        assertNull(vm.pendingClaimCode.value)
+
+        store.claim = PendingClaim("3f2b8c1e-9a4d-4f6b-8e2a-1c5d7e9f0a3b", "secret")
+        vm.refreshMembership()
+        assertEquals("0A3B", vm.pendingClaimCode.value)
+
+        store.claim = null
+        vm.refreshMembership()
+        assertNull(vm.pendingClaimCode.value)
+    }
+
+    @Test
+    fun `an approved phone has no waiting code`() {
+        store.claim = PendingClaim("d9", "secret")
+        vm.refreshMembership()
+        store.session = FamilySession("d9", "tok")
+        store.claim = null
+
+        vm.refreshMembership()
+
+        assertNull(vm.pendingClaimCode.value)
+        assertTrue(vm.isMember.value)
+    }
+
+    @Test
+    fun `a storage error reads as no waiting claim`() {
+        store.claim = PendingClaim("d9", "secret")
+        vm.refreshMembership()
+        store.failReads = java.io.IOException("keystore unavailable")
+
+        vm.refreshMembership()
+
+        assertNull(vm.pendingClaimCode.value)
+        assertFalse(vm.hasPendingClaim.value)
+    }
+
     @Test
     fun `a phone that only has a pending claim is not yet a member`() {
         store.claim = PendingClaim("d9", "secret")

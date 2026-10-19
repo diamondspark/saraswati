@@ -135,10 +135,24 @@ class FamilyViewModel
          */
         val hasPendingClaim: StateFlow<Boolean> = _hasPendingClaim.asStateFlow()
 
+        private val _pendingClaimCode = MutableStateFlow<String?>(null)
+
+        /** The four-character code of that waiting claim (what the person says to the owner), or null. */
+        val pendingClaimCode: StateFlow<String?> = _pendingClaimCode.asStateFlow()
+
         fun refreshMembership() {
             viewModelScope.launch {
                 _isMember.value = readFlag { store.session() != null }
-                _hasPendingClaim.value = readFlag { store.pendingClaim() != null }
+                val claim =
+                    try {
+                        store.pendingClaim()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        null
+                    }
+                _hasPendingClaim.value = claim != null
+                _pendingClaimCode.value = claim?.let { ClaimCode.of(it.deviceId) }
             }
         }
 

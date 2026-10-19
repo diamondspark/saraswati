@@ -13,8 +13,13 @@
 // a revoked phone, an empty list or a storage error all leave the cache as it
 // was; a revoked phone (401) also forgets its session so it can join again. A second call while one is running returns at once, so a launch, a
 // resume and Saral's own start never queue three requests.
+//
+// Fix wave B1: a call inside the minute after the last request is skipped too (the
+// cache is only as old as that minute), so ten resumes in a minute send one request.
+// Only a call that is about to ask the hub uses up the minute.
 package com.metrolist.music.saraswati.family
 
+import android.os.SystemClock
 import kotlinx.coroutines.sync.Mutex
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -22,18 +27,23 @@ import kotlin.coroutines.cancellation.CancellationException
 
 @Singleton
 class StationsRefresher
-    @Inject
-    constructor(
+    internal constructor(
         private val hub: HubApi,
         private val family: FamilyStore,
         private val cache: StationsCache,
+        private val throttle: ResumeThrottle,
     ) {
+        @Inject
+        constructor(hub: HubApi, family: FamilyStore, cache: StationsCache) :
+            this(hub, family, cache, ResumeThrottle(ResumeThrottle.RESUME_INTERVAL_MS, SystemClock::elapsedRealtime))
+
         private val running = Mutex()
 
         suspend fun refresh() {
             if (!running.tryLock()) return
             try {
                 val session = guarded { family.session() } ?: return
+                if (!throttle.tryAcquire()) return
                 val answer = hub.getStations(session.sessionToken)
                 // SARASWATI: fix wave A (M3) — a 401 means this phone was revoked; forget the session so Join works.
                 answer.exceptionOrNull()?.let { dropSessionIfRevoked(family, session, it) }

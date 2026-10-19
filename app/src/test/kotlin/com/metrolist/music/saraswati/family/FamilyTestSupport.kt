@@ -12,12 +12,20 @@
 package com.metrolist.music.saraswati.family
 
 import com.metrolist.music.saraswati.saral.GrandparentRoleStore
+import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Delay
+import kotlinx.coroutines.DisposableHandle
+import kotlinx.coroutines.InternalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.IOException
+import java.util.PriorityQueue
 import java.util.concurrent.CopyOnWriteArrayList
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.resume
 
 const val TEST_HUB_URL = "https://hub.example.workers.dev"
 const val TEST_TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -30,6 +38,11 @@ class FakeHub : HubApi {
 
     /** When each pairingStatus call arrived, so a test can measure the gaps between polls. */
     val statusCallNanos = CopyOnWriteArrayList<Long>()
+
+    /** [clockMs] at each pairingStatus call: point it at a [VirtualTimeDispatcher] to read gaps in virtual time. */
+    val statusCallMs = CopyOnWriteArrayList<Long>()
+
+    @Volatile var clockMs: () -> Long = { System.currentTimeMillis() }
     private val failures = HashMap<String, Throwable>()
     private val statusScript = java.util.concurrent.ConcurrentLinkedQueue<Result<PairingStatus>>()
 
@@ -115,6 +128,7 @@ class FakeHub : HubApi {
     ): Result<PairingStatus> {
         calls.add("pairingStatus($deviceId,$claimSecret)")
         statusCallNanos.add(System.nanoTime())
+        statusCallMs.add(clockMs())
         failures["pairingStatus"]?.let { return Result.failure(it) }
         return statusScript.poll() ?: Result.success(PairingStatus.Pending)
     }
@@ -306,5 +320,85 @@ class FakeRoleStore(
         failWrites?.let { throw it }
         writes.add(value)
         grandparent = value
+    }
+}
+
+/** A throttle that never says no: for tests of what a refresh does, not how often it may run. */
+fun noThrottle() = ResumeThrottle(0L) { 0L }
+
+/**
+ * A manual clock for [ResumeThrottle]: moves only when a test says so, so a throttle test never sleeps.
+ */
+class TestClock(
+    var nowMs: Long = 0L,
+) {
+    fun advance(ms: Long) {
+        nowMs += ms
+    }
+
+    val reading: () -> Long = { nowMs }
+}
+
+/**
+ * A single-threaded dispatcher on virtual time, so a test of "nothing is polled for ten minutes" runs in
+ * microseconds and cannot flake. kotlinx-coroutines-test is not a dependency of this project (and a new
+ * dependency means a new entry in the verification metadata), so this is the small part of it these tests
+ * need: [delay] waits on [currentTime], and [advanceBy] runs everything that falls due.
+ */
+@OptIn(InternalCoroutinesApi::class)
+class VirtualTimeDispatcher :
+    CoroutineDispatcher(),
+    Delay {
+    private class Task(
+        val time: Long,
+        val order: Long,
+        val block: Runnable,
+    )
+
+    private val queue = PriorityQueue<Task>(compareBy<Task>({ it.time }, { it.order }))
+    private var counter = 0L
+
+    var currentTime = 0L
+        private set
+
+    override fun dispatch(
+        context: CoroutineContext,
+        block: Runnable,
+    ) {
+        queue.add(Task(currentTime, counter++, block))
+    }
+
+    override fun scheduleResumeAfterDelay(
+        timeMillis: Long,
+        continuation: CancellableContinuation<Unit>,
+    ) {
+        val task = Task(currentTime + timeMillis.coerceAtLeast(0), counter++) { continuation.resume(Unit) }
+        queue.add(task)
+        continuation.invokeOnCancellation { queue.remove(task) }
+    }
+
+    override fun invokeOnTimeout(
+        timeMillis: Long,
+        block: Runnable,
+        context: CoroutineContext,
+    ): DisposableHandle {
+        val task = Task(currentTime + timeMillis.coerceAtLeast(0), counter++, block)
+        queue.add(task)
+        return DisposableHandle { queue.remove(task) }
+    }
+
+    /** Runs what is due now (and what that makes due), without moving the clock. */
+    fun runCurrent() = advanceBy(0)
+
+    /** Moves the clock forward by [ms], running every task that falls due on the way, in time order. */
+    fun advanceBy(ms: Long) {
+        val target = currentTime + ms
+        while (true) {
+            val next = queue.peek()?.takeIf { it.time <= target } ?: break
+            queue.remove(next)
+            currentTime = maxOf(currentTime, next.time)
+            next.block.run()
+        }
+        currentTime = target
     }
 }

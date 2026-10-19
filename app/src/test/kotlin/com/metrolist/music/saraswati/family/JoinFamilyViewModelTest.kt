@@ -42,7 +42,7 @@ class JoinFamilyViewModelTest {
             store,
             HubConfig(TEST_HUB_URL),
             inbox,
-            GrandparentRoleSync(hub, store, roles),
+            GrandparentRoleSync(hub, store, roles, noThrottle()),
             scope,
             pollIntervalMs = 1,
         )
@@ -412,7 +412,7 @@ class JoinFamilyViewModelTest {
                 store,
                 HubConfig(TEST_HUB_URL),
                 inbox,
-                GrandparentRoleSync(hub, store, roles),
+                GrandparentRoleSync(hub, store, roles, noThrottle()),
                 scope,
                 pollIntervalMs = interval,
             )
@@ -496,7 +496,7 @@ class JoinFamilyViewModelTest {
     fun `a revoked phone whose session was cleared can claim a new link`() {
         store.session = FamilySession("device-1", "revoked-token")
         hub.failWith("getMe", hubFailure(401))
-        runBlocking { GrandparentRoleSync(hub, store, roles).refresh() }
+        runBlocking { GrandparentRoleSync(hub, store, roles, noThrottle()).refresh() }
         assertNull(store.session)
         inbox.offer(TEST_TOKEN)
 

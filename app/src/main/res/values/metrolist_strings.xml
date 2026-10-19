@@ -1005,6 +1005,9 @@
     <string name="family_join_desc">Open the link your family owner sent you.</string>
     <string name="family_paired_title">Part of the family</string>
     <string name="family_paired_desc">The family owner approved this phone.</string>
+    <string name="family_waiting_title">Waiting for approval · Code %1$s</string>
+    <string name="family_waiting_desc">Say this code to the family owner. They approve this phone from Manage family.</string>
+    <string name="family_waiting_open_join">Open Join</string>
     <string name="family_owner_setup_link">Family owner? Set up this phone</string>
     <string name="family_owner_setup_title">Owner setup</string>
     <string name="family_owner_setup_desc">Paste the admin key you saved when you set up the family hub. The hub checks it, then it is kept encrypted on this phone only.</string>
@@ -1060,6 +1063,9 @@
     <string name="family_join_sending">Sending…</string>
     <string name="family_join_waiting_title">Request sent</string>
     <string name="family_join_code">Code: %1$s</string>
+    <string name="family_join_still_waiting_title">Still waiting</string>
+    <string name="family_join_still_waiting_desc">The family owner has not approved this phone yet. Check again when they are ready.</string>
+    <string name="family_join_check_again">Check again</string>
     <string name="family_join_waiting_desc">Waiting for the family owner to approve this phone. Keep this screen open, or come back to Join later to check.</string>
     <string name="family_join_done_title">All set</string>
     <string name="family_join_done_adult">This phone is part of the family now. Find it under Family.</string>

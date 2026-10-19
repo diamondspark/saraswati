@@ -218,11 +218,13 @@ class FamilyScreensSourceTest {
     fun `the join waiting screen shows the code large, in a monospace face`() {
         val join = source("$familyDir/JoinFamilyScreen.kt")
         val waiting = join.substringAfter("private fun Waiting(").substringBefore("@Composable")
+        val codeLine = join.substringAfter("private fun CodeLine(").substringBefore("@Composable")
 
         assertTrue("Waiting takes the code", waiting.startsWith("code: String)"))
-        assertTrue("the code uses the Code: string", "R.string.family_join_code" in waiting)
-        assertTrue("monospace", "FontFamily.Monospace" in waiting)
-        assertTrue("large", "MaterialTheme.typography.displayMedium" in waiting)
+        assertTrue("and shows it", "CodeLine(code)" in waiting)
+        assertTrue("the code uses the Code: string", "R.string.family_join_code" in codeLine)
+        assertTrue("monospace", "FontFamily.Monospace" in codeLine)
+        assertTrue("large", "MaterialTheme.typography.displayMedium" in codeLine)
         assertTrue("the screen passes the state's code", "current is JoinUiState.Waiting -> Waiting(code = current.code" in join)
     }
 
@@ -250,5 +252,54 @@ class FamilyScreensSourceTest {
         assertTrue("R.string.family_requests_hint" in manage)
         assertEquals(1, Regex("""R\.string\.family_requests_hint""").findAll(manage).count())
         assertTrue("each row gets the screen's clock", "PendingRow(" in manage && "now = now" in manage.substringAfter("pending.forEach"))
+    }
+    // --- SARASWATI: fix wave B1 — a bounded Join poll and the Family tab's waiting state -----------------
+
+    @Test
+    fun `the join screen stops the poll when it is paused and starts it when it resumes`() {
+        val join = source("$familyDir/JoinFamilyScreen.kt")
+
+        assertTrue(join.contains("LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { viewModel.stop() }"))
+        assertTrue(join.contains("LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.start() }"))
+    }
+
+    @Test
+    fun `the join screen offers Check again once the wait gave up`() {
+        val join = source("$familyDir/JoinFamilyScreen.kt")
+        val still = join.substringAfter("private fun StillWaiting(").substringBefore("/**")
+
+        assertTrue("the screen shows it for the state", "current is JoinUiState.StillWaiting -> StillWaiting(code = current.code, onCheckAgain = viewModel::checkAgain)" in join)
+        assertTrue(Regex("""Button\(onClick = onCheckAgain\)\s*\{\s*Text\(stringResource\(R\.string\.family_join_check_again\)\)""").containsMatchIn(still))
+        assertTrue("CodeLine(code)" in still)
+        assertEquals("Still waiting", string("family_join_still_waiting_title"))
+        assertEquals("Check again", string("family_join_check_again"))
+    }
+
+    @Test
+    fun `the join view model header says when it polls, and nothing in it is false`() {
+        val header =
+            source("$familyDir/JoinFamilyViewModel.kt")
+                .substringBefore("package ")
+                .replace(Regex("""\s*//\s*"""), " ")
+
+        assertFalse("the old claim", header.contains("Nothing polls while Join is not open"))
+        assertTrue(header.contains("stop() on pause"))
+        assertTrue(header.contains("15 minutes"))
+        assertTrue(header.contains("Check again"))
+    }
+
+    @Test
+    fun `the family tab shows the waiting state with the code and an Open Join button instead of the plain entry`() {
+        val screen = source("$familyDir/FamilyScreen.kt")
+        val elseBranch = screen.substringAfter("else -> {")
+
+        assertTrue("the screen reads the code", "viewModel.pendingClaimCode" in screen)
+        assertTrue("the waiting title carries the code", "stringResource(R.string.family_waiting_title, code)" in elseBranch)
+        assertTrue("the button opens Join", Regex("""onClick = \{ navController\.navigate\(FamilyRoutes\.JOIN\) \}\s*\)\s*\{\s*Text\(stringResource\(R\.string\.family_waiting_open_join\)\)""").containsMatchIn(elseBranch))
+        val waiting = elseBranch.indexOf("family_waiting_title")
+        val plain = elseBranch.indexOf("family_join_title")
+        assertTrue("the plain Join entry is the other branch", waiting in 0 until plain)
+        assertEquals("Waiting for approval · Code %1\$s", string("family_waiting_title"))
+        assertEquals("Open Join", string("family_waiting_open_join"))
     }
 }

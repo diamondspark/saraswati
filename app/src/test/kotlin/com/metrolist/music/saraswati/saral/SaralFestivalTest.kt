@@ -21,6 +21,7 @@ import com.metrolist.music.saraswati.family.FakeStore
 import com.metrolist.music.saraswati.family.FamilySession
 import com.metrolist.music.saraswati.family.Station
 import com.metrolist.music.saraswati.family.StationsRefresher
+import com.metrolist.music.saraswati.family.noThrottle
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -73,7 +74,7 @@ class SaralFestivalTest {
     }
 
     private fun newVm(clock: FestivalClock = onDay("2026-11-08")) =
-        SaralViewModel(cache, StationsRefresher(hub, family, cache), search, signIn, scope, clock)
+        SaralViewModel(cache, StationsRefresher(hub, family, cache, noThrottle()), search, signIn, scope, clock)
 
     private fun SaralViewModel.ready(): SaralViewModel {
         bindPlayback(playback)

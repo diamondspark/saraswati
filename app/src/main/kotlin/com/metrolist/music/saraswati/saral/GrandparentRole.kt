@@ -17,12 +17,19 @@
 // Nothing on the phone offers a way out; the owner flips the role in Manage
 // Family and the next refresh picks it up.
 //
+// Fix wave B1: MainActivity calls refresh on every resume, so a call inside the
+// minute after the last hub attempt is skipped (a skip is "no answer", which
+// changes nothing). Only a call that is about to ask the hub uses up the minute:
+// an unpaired, pending or owner phone has nothing to ask with and does not.
+// Join's own call after an approval passes force = true.
+//
 // Two exceptions to "nothing changes the flag but the hub's answer" (fix wave A):
 // a phone that holds the admin key is the owner's and is never Saral (it is
 // released if a stale flag has it), and a 401 clears the stored session but not
 // the flag.
 package com.metrolist.music.saraswati.saral
 
+import android.os.SystemClock
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
@@ -30,6 +37,7 @@ import com.metrolist.music.constants.GrandparentRoleKey
 import com.metrolist.music.saraswati.family.DeviceRole
 import com.metrolist.music.saraswati.family.FamilyStore
 import com.metrolist.music.saraswati.family.HubApi
+import com.metrolist.music.saraswati.family.ResumeThrottle
 import com.metrolist.music.saraswati.family.dropSessionIfRevoked
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
@@ -54,17 +62,22 @@ class DataStoreGrandparentRoleStore(
 
 @Singleton
 class GrandparentRoleSync
-    @Inject
-    constructor(
+    internal constructor(
         private val hub: HubApi,
         private val family: FamilyStore,
         private val roles: GrandparentRoleStore,
+        private val throttle: ResumeThrottle,
     ) {
+        @Inject
+        constructor(hub: HubApi, family: FamilyStore, roles: GrandparentRoleStore) :
+            this(hub, family, roles, ResumeThrottle(ResumeThrottle.RESUME_INTERVAL_MS, SystemClock::elapsedRealtime))
+
         /**
          * Asks the hub what this phone is and caches it. Returns the hub's answer,
-         * or null when there was no answer (and so no change).
+         * or null when there was no answer (and so no change). A call within a minute of the last
+         * hub attempt is skipped unless [force] (a caller that must have the answer now).
          */
-        suspend fun refresh(): DeviceRole? {
+        suspend fun refresh(force: Boolean = false): DeviceRole? {
             // SARASWATI: fix wave A (M2) — the owner's own phone holds the admin key, and only the full
             // app can enter or use it, so this phone must never be locked into Saral: it is released if a
             // stale flag has it, and the hub is not asked what it is.
@@ -73,6 +86,7 @@ class GrandparentRoleSync
                 return null
             }
             val session = guarded { family.session() } ?: return null
+            if (!force && !throttle.tryAcquire()) return null
             val answer = hub.getMe(session.sessionToken)
             // SARASWATI: fix wave A (M3) — a 401 means the owner revoked this phone: forget the session and
             // device id so Join works again. The role cache stays as it is (a revoked grandparent phone

@@ -25,6 +25,7 @@ import com.metrolist.music.saraswati.family.OFFLINE
 import com.metrolist.music.saraswati.family.Station
 import com.metrolist.music.saraswati.family.StationsRefresher
 import com.metrolist.music.saraswati.family.hubFailure
+import com.metrolist.music.saraswati.family.noThrottle
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -155,7 +156,7 @@ class SaralViewModelTest {
         scope.cancel()
     }
 
-    private fun newVm() = SaralViewModel(cache, StationsRefresher(hub, family, cache), search, signIn, scope)
+    private fun newVm() = SaralViewModel(cache, StationsRefresher(hub, family, cache, noThrottle()), search, signIn, scope)
 
     private fun SaralViewModel.ready(): SaralViewModel {
         bindPlayback(playback)
