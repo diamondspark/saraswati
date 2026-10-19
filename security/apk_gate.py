@@ -23,11 +23,20 @@ Usage:
     python3 -I security/apk_gate.py snapshot --apk <apk>
 
 Re-pinning after a deliberate manifest change: build the release APK, run
-``snapshot`` and copy ``intent_filters``, ``queries`` and ``references`` from
-its output into the allowlist (a human reviews that diff). Note that
-``references`` are raw resource ids (``@ref/0x7f150006``) when read from an
-APK, and an id shifts whenever an xml resource is added or removed; the gate's
-message says so when that is the only difference.
+``snapshot`` and copy ``intent_filters``, ``queries``, ``references`` and
+``reference_ids`` from its output into the allowlist (a human reviews that
+diff).
+
+``references`` are pinned by resource *name* (``@xml/network_security_config``):
+a built APK's manifest holds raw ids (``@ref/0x7f150006``) that shift whenever
+any xml resource is added or removed, so the gate resolves them through the
+APK's own resource table (``aapt2 dump resources``, found under
+``$ANDROID_HOME`` / ``$ANDROID_SDK_ROOT`` ``build-tools/*``, then ``PATH``).
+``reference_ids`` keeps the raw ids as a fallback pin. When aapt2 cannot be run
+the gate says so on stderr and compares the raw ids instead, so it fails only if
+a raw id also differs from its pin (which an unrelated resource change can cause;
+re-snapshot with aapt2 available). A source manifest names its resources, so
+``--xml`` never needs aapt2.
 
 Exit codes for ``check``: 0 pass, 1 violations found, 2 usage error.
 """
@@ -37,7 +46,9 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
@@ -60,6 +71,14 @@ _FILTER_ATTRS = ("priority", "order")
 # gate reads the APK's own copy of it by this name.
 _NSC_RESOURCE_NAME = "network_security_config"
 
+# apkanalyzer prints a resource reference it cannot name as @ref/0x7f150006.
+_RAW_REFERENCE = re.compile(r"@(?:ref/)?(0x[0-9a-fA-F]+)")
+
+# One resource line of `aapt2 dump resources`: "    resource 0x7f150006 xml/network_security_config".
+_AAPT2_RESOURCE_LINE = re.compile(r"^\s*resource (0x[0-9a-fA-F]+) (\S+/\S+)\s*$")
+
+_AAPT2_TIMEOUT_SECONDS = 120
+
 # Component tags that can be exported, matching the manifest schema's
 # <application> children that carry android:exported.
 _COMPONENT_TAGS = ("activity", "activity-alias", "service", "receiver", "provider")
@@ -76,8 +95,14 @@ class ManifestFacts:
     intent_filters: dict = dataclasses.field(default_factory=dict)
     # {"packages": [...], "intents": [canonical filters], "providers": [...]}
     queries: dict = dataclasses.field(default_factory=dict)
-    # <application> attribute name -> raw reference string, only those present.
+    # <application> attribute name -> reference string as found, only those present: "@xml/name"
+    # when the manifest names its resources (a source manifest, or after resolve_references),
+    # "@ref/0x7f150006" when it holds raw ids (apkanalyzer's view of a built APK).
     references: dict = dataclasses.field(default_factory=dict)
+    # The raw-id subset of what the manifest held, kept as the fallback pin.
+    reference_ids: dict = dataclasses.field(default_factory=dict)
+    # False while `references` still holds raw ids (aapt2 has not resolved them).
+    references_are_names: bool = True
 
 
 def _android_attr(elem: ET.Element, name: str) -> str | None:
@@ -187,6 +212,8 @@ def parse_manifest(xml_text: str) -> ManifestFacts:
                 if filters:
                     intent_filters[f"{tag}:{name}"] = _canonical_filters(filters)
 
+    reference_ids = {attr: value for attr, value in references.items() if _RAW_REFERENCE.fullmatch(value)}
+
     return ManifestFacts(
         package=package,
         permissions=frozenset(permissions),
@@ -196,7 +223,58 @@ def parse_manifest(xml_text: str) -> ManifestFacts:
         intent_filters=intent_filters,
         queries=_parse_queries(root),
         references=references,
+        reference_ids=reference_ids,
+        references_are_names=not reference_ids,
     )
+
+
+def parse_aapt2_resource_names(dump_text: str) -> dict[str, str]:
+    """``{"0x7f150006": "@xml/network_security_config"}`` from ``aapt2 dump resources`` text.
+
+    Only the ``resource <id> <type>/<name>`` lines count; the value and file lines
+    under them do not. Ids are lower case; the first line for an id wins.
+    """
+    names: dict[str, str] = {}
+    for line in dump_text.splitlines():
+        match = _AAPT2_RESOURCE_LINE.match(line)
+        if match:
+            names.setdefault(match.group(1).lower(), "@" + match.group(2))
+    return names
+
+
+def resolve_references(facts: ManifestFacts, names: dict[str, str]) -> ManifestFacts:
+    """[facts] with each raw ``@ref/0x...`` reference replaced by its resource name.
+
+    An id that is not in [names] stays raw, so the name comparison fails on it and
+    check() says why. Facts that already hold names are returned as they are.
+    """
+    if facts.references_are_names:
+        return facts
+    references = {}
+    for attr, value in facts.references.items():
+        match = _RAW_REFERENCE.fullmatch(value)
+        references[attr] = names.get(match.group(1).lower(), value) if match else value
+    return dataclasses.replace(facts, references=references, references_are_names=True)
+
+
+def find_aapt2(env: dict | None = None) -> str | None:
+    """Path of an aapt2 to run: the newest ``build-tools/*/aapt2`` under ``$ANDROID_HOME``,
+    then under ``$ANDROID_SDK_ROOT``, then whatever ``PATH`` offers; None if there is none."""
+    env = os.environ if env is None else env
+
+    def version(directory: Path) -> tuple[int, ...]:
+        return tuple(int(n) for n in re.findall(r"\d+", directory.name))
+
+    for variable in ("ANDROID_HOME", "ANDROID_SDK_ROOT"):
+        root = env.get(variable)
+        if not root:
+            continue
+        build_tools = sorted((d for d in (Path(root) / "build-tools").glob("*") if d.is_dir()), key=version, reverse=True)
+        for directory in build_tools:
+            candidate = directory / "aapt2"
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+    return shutil.which("aapt2", path=env.get("PATH") or None) if env.get("PATH") else None
 
 
 def check(facts: ManifestFacts, allowlist: dict) -> list[str]:
@@ -273,23 +351,39 @@ def _check_pins(facts: ManifestFacts, allowlist: dict) -> list[str]:
     pinned_references = allowlist.get("references")
     if pinned_references is None:
         violations.append(f"allowlist has no references pin ({_PIN_HINT})")
+        pinned_references = {}
+    if facts.references_are_names:
+        violations.extend(_diff_references(pinned_references, facts.references))
+        for attr, value in sorted(facts.references.items()):
+            match = _RAW_REFERENCE.fullmatch(value)
+            if match and value != pinned_references.get(attr):
+                violations.append(f"note: {value} is not in the APK's resource table, so it has no name to compare")
     else:
-        reference_violations = False
-        for attr in sorted(set(pinned_references) | set(facts.references)):
-            pinned = pinned_references.get(attr)
-            found = facts.references.get(attr)
-            if pinned != found:
-                reference_violations = True
-                violations.append(
-                    f"application {attr} changed: pinned {pinned or 'none'}, found {found or 'none'}"
-                )
-        if reference_violations:
+        # Only raw ids are known (aapt2 could not run): the names cannot be checked, so the ids are,
+        # against the pins taken from the same APK. They fail only when an id really differs.
+        pinned_ids = allowlist.get("reference_ids")
+        if pinned_ids is None:
             violations.append(
-                "note: a raw @ref/0x... id shifts when an xml resource is added or removed; "
-                f"if that is the only change, {_PIN_HINT}"
+                f"allowlist has no reference_ids pin, which comparing raw resource ids needs ({_PIN_HINT})"
             )
+        else:
+            changed = _diff_references(pinned_ids, facts.reference_ids)
+            violations.extend(changed)
+            if changed:
+                violations.append(
+                    "note: a raw @ref/0x... id shifts when an xml resource is added or removed, and aapt2 was not "
+                    f"available to compare names instead; if that is the only change, {_PIN_HINT}"
+                )
 
     return violations
+
+
+def _diff_references(pinned: dict, found: dict) -> list[str]:
+    return [
+        f"application {attr} changed: pinned {pinned.get(attr) or 'none'}, found {found.get(attr) or 'none'}"
+        for attr in sorted(set(pinned) | set(found))
+        if pinned.get(attr) != found.get(attr)
+    ]
 
 
 def _diff_filters(label: str, pinned: list, found: list) -> list[str]:
@@ -395,7 +489,7 @@ def check_hub_agreement(
 
 
 def _facts_to_jsonable(facts: ManifestFacts) -> dict:
-    return {
+    snapshot = {
         "package": facts.package,
         "permissions": sorted(facts.permissions),
         "exported_components": sorted(facts.exported_components),
@@ -403,8 +497,12 @@ def _facts_to_jsonable(facts: ManifestFacts) -> dict:
         "debuggable": facts.debuggable,
         "intent_filters": {owner: facts.intent_filters[owner] for owner in sorted(facts.intent_filters)},
         "queries": facts.queries,
-        "references": facts.references,
+        "reference_ids": facts.reference_ids,
     }
+    # Raw ids are not names: without aapt2 the name pins are left out rather than filled with ids.
+    if facts.references_are_names:
+        snapshot["references"] = facts.references
+    return snapshot
 
 
 def _run_apkanalyzer(*args: str) -> str:
@@ -439,6 +537,50 @@ def _read_apk_network_config(apk_path: str) -> str:
     if not path:
         raise RuntimeError(f"no xml resource named {_NSC_RESOURCE_NAME} in {apk_path}")
     return _run_apkanalyzer("resources", "xml", "--file", path, apk_path)
+
+
+def _run_aapt2_resources(aapt2: str, apk_path: str) -> str:
+    try:
+        result = subprocess.run(
+            [aapt2, "dump", "resources", apk_path],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_AAPT2_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(f"could not run {aapt2}: {exc}") from exc
+    if result.returncode != 0:
+        raise RuntimeError(f"aapt2 dump resources exited {result.returncode}: {result.stderr.strip()[:200]}")
+    return result.stdout
+
+
+_FALLBACK_NOTE = (
+    "comparing raw resource ids against the pinned ids instead of resource names. Ids shift when an xml "
+    "resource is added or removed; run with the Android SDK build-tools available (ANDROID_HOME / "
+    "ANDROID_SDK_ROOT) to compare names."
+)
+
+
+def _resolve_apk_references(facts: ManifestFacts, apk_path: str) -> tuple[ManifestFacts, list[str]]:
+    """[facts] with the APK's raw resource ids turned into names, and the warnings to print.
+
+    Whenever aapt2 is missing or fails, the facts come back unchanged (raw ids) with a warning,
+    and check() then compares the ids against their pins.
+    """
+    if facts.references_are_names:
+        return facts, []
+    aapt2 = find_aapt2()
+    if aapt2 is None:
+        return facts, [
+            "warning: aapt2 not found (looked in build-tools under ANDROID_HOME and ANDROID_SDK_ROOT, then PATH): "
+            + _FALLBACK_NOTE
+        ]
+    try:
+        table = parse_aapt2_resource_names(_run_aapt2_resources(aapt2, apk_path))
+    except RuntimeError as exc:
+        return facts, [f"warning: aapt2 failed ({exc}): " + _FALLBACK_NOTE]
+    return resolve_references(facts, table), []
 
 
 def _load_manifest_text(args: argparse.Namespace) -> str:
@@ -499,6 +641,11 @@ def _cmd_check(args: argparse.Namespace) -> int:
         print(f"check: could not parse manifest: {exc}", file=sys.stderr)
         return 2
 
+    if args.apk:
+        facts, warnings = _resolve_apk_references(facts, args.apk)
+        for warning in warnings:
+            print(warning, file=sys.stderr)
+
     violations = check(facts, allowlist)
 
     section = allowlist.get("hub_host_agreement")
@@ -532,6 +679,12 @@ def _cmd_snapshot(args: argparse.Namespace) -> int:
     except ET.ParseError as exc:
         print(f"snapshot: could not parse manifest: {exc}", file=sys.stderr)
         return 2
+
+    facts, warnings = _resolve_apk_references(facts, args.apk)
+    for warning in warnings:
+        print(warning, file=sys.stderr)
+    if not facts.references_are_names:
+        print("warning: `references` (the name pins) is left out of this snapshot; do not pin raw ids as names", file=sys.stderr)
 
     print(json.dumps(_facts_to_jsonable(facts), indent=2, sort_keys=True))
     return 0

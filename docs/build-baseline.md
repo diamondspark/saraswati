@@ -97,7 +97,13 @@ Both allowlists also pin, exactly, every component's intent filters (actions, ca
 
 The allowlist for the app also carries a `hub_host_agreement` section. `check` then requires that the host of `HUB_BASE_URL` for the gms flavor in `app/build.gradle.kts`, the host of the pairing-link filter (`/pair`) in the merged manifest, an exact (`includeSubdomains="false"`) `<domain>` for it in the APK's own network security config, and an exact entry in `security/egress-allowlist.json` are all the same host.
 
-To change a pin on purpose, build the release APK, run `python3 -I security/apk_gate.py snapshot --apk <apk>`, copy `intent_filters`, `queries` and `references` into the allowlist and review the diff. `references` read from an APK are raw resource ids (`@ref/0x7f150006`), and an id shifts when an xml resource is added or removed; the gate says so when only a reference changed.
+To change a pin on purpose, build the release APK, run `python3 -I security/apk_gate.py snapshot --apk <apk>`, copy `intent_filters`, `queries`, `references` and `reference_ids` into the allowlist and review the diff.
+
+#### References are pinned by name (fix wave B1)
+
+A built APK's manifest holds the three references as raw resource ids (`@ref/0x7f150006`), and an id shifts whenever any xml resource is added or removed, so pinning ids made the gate fail on unrelated resource changes. `references` is now pinned by resource name (`@xml/network_security_config`): `check --apk` and `snapshot --apk` resolve each id through the APK's own resource table with `aapt2 dump resources`. aapt2 is found under `build-tools/*/aapt2` of `$ANDROID_HOME`, then `$ANDROID_SDK_ROOT` (newest build-tools first), then on `PATH`; the GitHub runners set `ANDROID_HOME`, so the CI and release gate steps need nothing extra. `--xml` (a source manifest) already names its resources and never needs aapt2.
+
+`reference_ids` keeps the raw ids as a fallback pin. If aapt2 cannot be found or fails, the gate prints a warning on stderr and compares the raw ids with `reference_ids` instead: it exits 0 if they are unchanged and 1 only if an id differs (which an unrelated resource change can cause; re-snapshot with aapt2 available). `snapshot` without aapt2 leaves `references` out of its output rather than filling it with ids.
 
 ## Final Phase 1 test count (after the whole-branch review fix round)
 

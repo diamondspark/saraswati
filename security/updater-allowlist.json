@@ -39,6 +39,9 @@
     "providers": []
   },
   "references": {
+    "networkSecurityConfig": "@xml/network_security_config"
+  },
+  "reference_ids": {
     "networkSecurityConfig": "@ref/0x7f080000"
   }
 }

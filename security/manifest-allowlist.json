@@ -287,6 +287,11 @@
     "providers": []
   },
   "references": {
+    "dataExtractionRules": "@xml/data_extraction_rules",
+    "fullBackupContent": "@xml/backup_rules",
+    "networkSecurityConfig": "@xml/network_security_config"
+  },
+  "reference_ids": {
     "dataExtractionRules": "@ref/0x7f150003",
     "fullBackupContent": "@ref/0x7f150002",
     "networkSecurityConfig": "@ref/0x7f150006"

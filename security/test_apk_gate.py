@@ -8,6 +8,8 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -66,11 +68,21 @@ def _read_fixture(name: str) -> str:
     return (FIXTURES / name).read_text(encoding="utf-8")
 
 
+AAPT2_RESOURCES = "aapt2_resources.txt"
+
+
+def _resource_names() -> dict:
+    """The id -> @type/name table of a release APK, from a trimmed `aapt2 dump resources`."""
+    return apk_gate.parse_aapt2_resource_names(_read_fixture(AAPT2_RESOURCES))
+
+
 def _pins(xml_text: str) -> dict:
     """What `apk_gate.py snapshot` prints for the pinned sections: the part of
-    the allowlist a human copies from a reviewed release APK."""
-    snapshot = apk_gate._facts_to_jsonable(parse_manifest(xml_text))
-    return {key: snapshot[key] for key in ("intent_filters", "queries", "references")}
+    the allowlist a human copies from a reviewed release APK. References are
+    pinned by resource name, with the raw ids kept as the fallback pin."""
+    facts = parse_manifest(xml_text)
+    snapshot = apk_gate._facts_to_jsonable(apk_gate.resolve_references(facts, _resource_names()))
+    return {key: snapshot[key] for key in ("intent_filters", "queries", "references", "reference_ids")}
 
 
 # clean_manifest.xml carries no intent filters, <queries> or references; its pins
@@ -413,6 +425,302 @@ class PinnedManifestGateTests(unittest.TestCase):
         for key in ("intent_filters", "queries", "references"):
             self.assertViolation(f"allowlist has no {key} pin", violations)
 
+    def test_raw_ids_without_a_reference_ids_pin_fail_closed(self) -> None:
+        facts = parse_manifest(_read_fixture("pinned_manifest.xml"))
+        allowlist = {k: v for k, v in _pinned_allowlist().items() if k != "reference_ids"}
+
+        self.assertViolation("allowlist has no reference_ids pin", check(facts, allowlist))
+
+
+# ---------------------------------------------------------------------------
+# References are pinned by resource name, not by raw id (fix wave B1)
+# ---------------------------------------------------------------------------
+
+NAME_PINS = {
+    "dataExtractionRules": "@xml/data_extraction_rules",
+    "fullBackupContent": "@xml/backup_rules",
+    "networkSecurityConfig": "@xml/network_security_config",
+}
+
+
+def _resolved_facts(edit=lambda xml: xml, table_text: str | None = None) -> apk_gate.ManifestFacts:
+    names = apk_gate.parse_aapt2_resource_names(table_text if table_text is not None else _read_fixture(AAPT2_RESOURCES))
+    return apk_gate.resolve_references(parse_manifest(edit(_read_fixture("pinned_manifest.xml"))), names)
+
+
+def _shift_ids(text: str) -> str:
+    """What adding an xml resource does to the ids after it: 0x7f150002 becomes 0x7f150012, and so on."""
+    return text.replace("0x7f15000", "0x7f15001")
+
+
+class Aapt2ResourceTableTests(unittest.TestCase):
+    def test_ids_map_to_type_and_name(self) -> None:
+        names = _resource_names()
+
+        self.assertEqual("@xml/network_security_config", names["0x7f150006"])
+        self.assertEqual("@xml/backup_rules", names["0x7f150002"])
+        self.assertEqual("@anim/abc_popup_enter", names["0x7f010003"])
+
+    def test_a_string_that_shares_a_name_with_an_xml_resource_stays_a_string(self) -> None:
+        self.assertEqual("@string/network_security_config", _resource_names()["0x7f120001"])
+
+    def test_value_and_file_lines_are_not_resources(self) -> None:
+        names = _resource_names()
+
+        self.assertEqual(11, len(names))
+        self.assertTrue(all(v.startswith("@") and "/" in v for v in names.values()))
+
+    def test_ids_are_lower_case_and_nothing_else_parses(self) -> None:
+        self.assertEqual({"0x7f150006": "@xml/x"}, apk_gate.parse_aapt2_resource_names("  resource 0x7F150006 xml/x\n"))
+        self.assertEqual({}, apk_gate.parse_aapt2_resource_names(""))
+        self.assertEqual({}, apk_gate.parse_aapt2_resource_names("error: not an apk\n"))
+
+
+class ReferenceByNameTests(unittest.TestCase):
+    def assertViolation(self, prefix: str, violations: list[str]) -> None:
+        self.assertTrue(any(v.startswith(prefix) for v in violations), f"no violation starting with {prefix!r} in {violations}")
+
+    def test_raw_ids_resolve_to_names_and_the_ids_are_kept(self) -> None:
+        facts = _resolved_facts()
+
+        self.assertEqual(NAME_PINS, facts.references)
+        self.assertEqual(
+            {"dataExtractionRules": "@ref/0x7f150003", "fullBackupContent": "@ref/0x7f150002", "networkSecurityConfig": "@ref/0x7f150006"},
+            facts.reference_ids,
+        )
+        self.assertTrue(facts.references_are_names)
+
+    def test_the_pinned_manifest_passes_by_name(self) -> None:
+        self.assertEqual([], check(_resolved_facts(), _pinned_allowlist()))
+
+    def test_adding_an_xml_resource_shifts_the_ids_but_not_the_gate(self) -> None:
+        shifted_manifest = lambda xml: _shift_ids(xml)  # noqa: E731
+        shifted_table = _shift_ids(_read_fixture(AAPT2_RESOURCES))
+
+        violations = check(_resolved_facts(shifted_manifest, shifted_table), _pinned_allowlist())
+
+        self.assertEqual([], violations, "the ids moved, the names did not")
+
+    def test_the_same_shift_does_fail_when_only_raw_ids_can_be_compared(self) -> None:
+        facts = parse_manifest(_shift_ids(_read_fixture("pinned_manifest.xml")))
+
+        violations = check(facts, _pinned_allowlist())
+
+        self.assertViolation("application networkSecurityConfig changed: pinned @ref/0x7f150006, found @ref/0x7f150016", violations)
+
+    def test_pointing_a_reference_at_a_different_resource_fails(self) -> None:
+        facts = _resolved_facts(_replace('android:networkSecurityConfig="@ref/0x7f150006"', 'android:networkSecurityConfig="@ref/0x7f150008"'))
+
+        violations = check(facts, _pinned_allowlist())
+
+        self.assertIn("application networkSecurityConfig changed: pinned @xml/network_security_config, found @xml/provider_paths", violations)
+        self.assertFalse(any(v.startswith("note: a raw") for v in violations), "no id-shift excuse when names were compared")
+
+    def test_a_string_with_the_same_name_is_not_the_xml_resource(self) -> None:
+        facts = _resolved_facts(_replace('android:networkSecurityConfig="@ref/0x7f150006"', 'android:networkSecurityConfig="@ref/0x7f120001"'))
+
+        self.assertIn(
+            "application networkSecurityConfig changed: pinned @xml/network_security_config, found @string/network_security_config",
+            check(facts, _pinned_allowlist()),
+        )
+
+    def test_an_id_the_resource_table_does_not_hold_fails_and_says_why(self) -> None:
+        facts = _resolved_facts(_replace('android:networkSecurityConfig="@ref/0x7f150006"', 'android:networkSecurityConfig="@ref/0x7f15ffff"'))
+
+        violations = check(facts, _pinned_allowlist())
+
+        self.assertIn("application networkSecurityConfig changed: pinned @xml/network_security_config, found @ref/0x7f15ffff", violations)
+        self.assertViolation("note: @ref/0x7f15ffff is not in the APK's resource table", violations)
+
+    def test_a_removed_reference_fails(self) -> None:
+        for attr in NAME_PINS:
+            with self.subTest(attr):
+                violations = check(_resolved_facts(lambda xml, a=attr: _strip_attribute(xml, a)), _pinned_allowlist())
+                self.assertTrue(any(f"application {attr} changed" in v and "found none" in v for v in violations), violations)
+
+    def test_a_new_reference_fails(self) -> None:
+        allowlist = _pinned_allowlist()
+        del allowlist["references"]["fullBackupContent"]
+
+        violations = check(_resolved_facts(), allowlist)
+
+        self.assertIn("application fullBackupContent changed: pinned none, found @xml/backup_rules", violations)
+
+    def test_the_name_pins_are_mandatory(self) -> None:
+        allowlist = {k: v for k, v in _pinned_allowlist().items() if k != "references"}
+
+        self.assertViolation("allowlist has no references pin", check(_resolved_facts(), allowlist))
+
+    def test_the_raw_id_pins_are_not_consulted_when_names_were_compared(self) -> None:
+        allowlist = _pinned_allowlist()
+        allowlist["reference_ids"] = {"networkSecurityConfig": "@ref/0x7f150099"}
+
+        self.assertEqual([], check(_resolved_facts(), allowlist))
+
+    def test_a_source_manifest_that_names_its_resources_is_compared_by_name(self) -> None:
+        source = lambda xml: (  # noqa: E731
+            xml.replace("@ref/0x7f150002", "@xml/backup_rules")
+            .replace("@ref/0x7f150003", "@xml/data_extraction_rules")
+            .replace("@ref/0x7f150006", "@xml/network_security_config")
+        )
+        facts = parse_manifest(source(_read_fixture("pinned_manifest.xml")))
+
+        self.assertTrue(facts.references_are_names)
+        self.assertEqual([], check(facts, _pinned_allowlist()))
+        drifted = parse_manifest(source(_read_fixture("pinned_manifest.xml")).replace("@xml/backup_rules", "@xml/other_rules"))
+        self.assertIn("application fullBackupContent changed: pinned @xml/backup_rules, found @xml/other_rules", check(drifted, _pinned_allowlist()))
+
+
+class FindAapt2Tests(unittest.TestCase):
+    def _sdk(self, root: Path, versions: list[str], *, with_aapt2: bool = True) -> None:
+        for version in versions:
+            directory = root / "build-tools" / version
+            directory.mkdir(parents=True)
+            if with_aapt2:
+                tool = directory / "aapt2"
+                tool.write_text("#!/bin/sh\n", encoding="utf-8")
+                tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
+
+    def test_the_newest_build_tools_under_android_home_win(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            sdk = Path(tmp)
+            self._sdk(sdk, ["34.0.0", "36.0.0", "9.0.0", "37.0.0"])
+
+            found = apk_gate.find_aapt2({"ANDROID_HOME": str(sdk), "PATH": ""})
+
+            self.assertEqual(str(sdk / "build-tools" / "37.0.0" / "aapt2"), found)
+
+    def test_android_sdk_root_is_used_when_android_home_is_not_set(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            sdk = Path(tmp)
+            self._sdk(sdk, ["35.0.0"])
+
+            found = apk_gate.find_aapt2({"ANDROID_SDK_ROOT": str(sdk), "PATH": ""})
+
+            self.assertEqual(str(sdk / "build-tools" / "35.0.0" / "aapt2"), found)
+
+    def test_an_sdk_without_the_tool_is_skipped_for_the_next_one(self) -> None:
+        with tempfile.TemporaryDirectory() as empty, tempfile.TemporaryDirectory() as full:
+            self._sdk(Path(empty), ["36.0.0"], with_aapt2=False)
+            self._sdk(Path(full), ["36.0.0"])
+
+            found = apk_gate.find_aapt2({"ANDROID_HOME": empty, "ANDROID_SDK_ROOT": full, "PATH": ""})
+
+            self.assertEqual(str(Path(full) / "build-tools" / "36.0.0" / "aapt2"), found)
+
+    def test_a_tool_on_path_is_the_last_resort(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir = Path(tmp)
+            tool = bin_dir / "aapt2"
+            tool.write_text("#!/bin/sh\n", encoding="utf-8")
+            tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
+
+            found = apk_gate.find_aapt2({"PATH": str(bin_dir)})
+
+            self.assertEqual(str(tool), found)
+
+    def test_nothing_found_is_none(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsNone(apk_gate.find_aapt2({"ANDROID_HOME": tmp, "ANDROID_SDK_ROOT": str(Path(tmp) / "missing"), "PATH": ""}))
+            self.assertIsNone(apk_gate.find_aapt2({}))
+
+
+class ReferenceCliTests(unittest.TestCase):
+    """`check --apk` end to end: names when aapt2 is there, a loud raw-id fallback when it is not."""
+
+    def _check(self, *, manifest: str | None = None, aapt2: str | None = "/sdk/aapt2", table: str | None = None, aapt2_fails: bool = False):
+        manifest = manifest if manifest is not None else _read_fixture("pinned_manifest.xml")
+        resources = mock.Mock(side_effect=RuntimeError("aapt2 dump failed")) if aapt2_fails else mock.Mock(
+            return_value=table if table is not None else _read_fixture(AAPT2_RESOURCES)
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            allowlist = Path(tmp) / "allowlist.json"
+            allowlist.write_text(json.dumps(_pinned_allowlist()), encoding="utf-8")
+            out, err = io.StringIO(), io.StringIO()
+            with mock.patch.object(apk_gate, "_run_apkanalyzer_manifest_print", return_value=manifest), \
+                mock.patch.object(apk_gate, "find_aapt2", return_value=aapt2), \
+                mock.patch.object(apk_gate, "_run_aapt2_resources", resources), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = apk_gate.main(["check", "--apk", "app.apk", "--allowlist", str(allowlist)])
+        return code, out.getvalue(), err.getvalue(), resources
+
+    def test_with_aapt2_the_references_are_compared_by_name_and_nothing_is_said(self) -> None:
+        code, out, err, resources = self._check()
+
+        self.assertEqual((0, "", ""), (code, out, err))
+        resources.assert_called_once_with("/sdk/aapt2", "app.apk")
+
+    def test_with_aapt2_a_shift_of_the_ids_passes(self) -> None:
+        code, out, err, _ = self._check(manifest=_shift_ids(_read_fixture("pinned_manifest.xml")), table=_shift_ids(_read_fixture(AAPT2_RESOURCES)))
+
+        self.assertEqual((0, "", ""), (code, out, err))
+
+    def test_with_aapt2_a_different_resource_fails(self) -> None:
+        manifest = _replace('android:networkSecurityConfig="@ref/0x7f150006"', 'android:networkSecurityConfig="@ref/0x7f150008"')(
+            _read_fixture("pinned_manifest.xml")
+        )
+
+        code, out, _, _ = self._check(manifest=manifest)
+
+        self.assertEqual(1, code)
+        self.assertIn("pinned @xml/network_security_config, found @xml/provider_paths", out)
+
+    def test_without_aapt2_the_same_raw_ids_pass_with_a_warning(self) -> None:
+        code, out, err, resources = self._check(aapt2=None)
+
+        self.assertEqual(0, code, "the pinned raw ids still match")
+        self.assertEqual("", out)
+        self.assertIn("warning: aapt2 not found", err)
+        self.assertIn("raw resource ids", err)
+        resources.assert_not_called()
+
+    def test_without_aapt2_a_changed_raw_id_fails(self) -> None:
+        manifest = _replace('android:networkSecurityConfig="@ref/0x7f150006"', 'android:networkSecurityConfig="@ref/0x7f150007"')(
+            _read_fixture("pinned_manifest.xml")
+        )
+
+        code, out, err, _ = self._check(manifest=manifest, aapt2=None)
+
+        self.assertEqual(1, code)
+        self.assertIn("application networkSecurityConfig changed: pinned @ref/0x7f150006, found @ref/0x7f150007", out)
+        self.assertIn("warning: aapt2 not found", err)
+
+    def test_an_aapt2_that_fails_falls_back_the_same_way(self) -> None:
+        code, out, err, _ = self._check(aapt2_fails=True)
+
+        self.assertEqual((0, ""), (code, out))
+        self.assertIn("warning: aapt2 failed", err)
+        self.assertIn("raw resource ids", err)
+
+    def test_an_aapt2_that_fails_still_fails_a_changed_raw_id(self) -> None:
+        manifest = _replace('android:dataExtractionRules="@ref/0x7f150003"', 'android:dataExtractionRules="@ref/0x7f150004"')(
+            _read_fixture("pinned_manifest.xml")
+        )
+
+        code, out, _, _ = self._check(manifest=manifest, aapt2_fails=True)
+
+        self.assertEqual(1, code)
+        self.assertIn("application dataExtractionRules changed: pinned @ref/0x7f150003, found @ref/0x7f150004", out)
+
+    def test_a_source_manifest_never_needs_aapt2(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "AndroidManifest.xml"
+            source.write_text(
+                _read_fixture("pinned_manifest.xml")
+                .replace("@ref/0x7f150002", "@xml/backup_rules")
+                .replace("@ref/0x7f150003", "@xml/data_extraction_rules")
+                .replace("@ref/0x7f150006", "@xml/network_security_config"),
+                encoding="utf-8",
+            )
+            allowlist = Path(tmp) / "allowlist.json"
+            allowlist.write_text(json.dumps(_pinned_allowlist()), encoding="utf-8")
+            err = io.StringIO()
+            with mock.patch.object(apk_gate, "find_aapt2", side_effect=AssertionError("aapt2 must not be looked for")), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                code = apk_gate.main(["check", "--xml", str(source), "--allowlist", str(allowlist)])
+
+        self.assertEqual((0, ""), (code, err.getvalue()))
+
 
 def _strip_attribute(xml: str, attr: str) -> str:
     import re
@@ -427,8 +735,19 @@ class RealAllowlistTests(unittest.TestCase):
         self.allowlist = json.loads((SECURITY / "manifest-allowlist.json").read_text(encoding="utf-8"))
 
     def test_the_pins_are_present(self) -> None:
-        for key in ("intent_filters", "queries", "references", "hub_host_agreement"):
+        for key in ("intent_filters", "queries", "references", "reference_ids", "hub_host_agreement"):
             self.assertIn(key, self.allowlist)
+
+    def test_references_are_pinned_by_resource_name_with_the_raw_ids_as_the_fallback(self) -> None:
+        for name in ("manifest-allowlist.json", "updater-allowlist.json"):
+            with self.subTest(name):
+                allowlist = json.loads((SECURITY / name).read_text(encoding="utf-8"))
+                self.assertTrue(allowlist["references"], "something is pinned")
+                for attr, value in allowlist["references"].items():
+                    self.assertRegex(value, r"^@xml/[a-z0-9_]+$", attr)
+                self.assertEqual(set(allowlist["references"]), set(allowlist["reference_ids"]))
+                for attr, value in allowlist["reference_ids"].items():
+                    self.assertRegex(value, r"^@ref/0x[0-9a-f]{8}$", attr)
 
     def test_the_pairing_link_is_pinned_as_an_exact_https_path_on_one_host(self) -> None:
         pair = [
@@ -673,13 +992,30 @@ class CliTests(unittest.TestCase):
             self.assertEqual(1, code)
 
     def test_snapshot_prints_the_pinned_sections(self) -> None:
-        with mock.patch.object(apk_gate, "_run_apkanalyzer_manifest_print", return_value=_read_fixture("pinned_manifest.xml")):
+        with mock.patch.object(apk_gate, "_run_apkanalyzer_manifest_print", return_value=_read_fixture("pinned_manifest.xml")), \
+            mock.patch.object(apk_gate, "find_aapt2", return_value="/sdk/aapt2"), \
+            mock.patch.object(apk_gate, "_run_aapt2_resources", return_value=_read_fixture(AAPT2_RESOURCES)):
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 self.assertEqual(0, apk_gate.main(["snapshot", "--apk", "app.apk"]))
 
         snapshot = json.loads(out.getvalue())
-        self.assertEqual(_pins(_read_fixture("pinned_manifest.xml")), {k: snapshot[k] for k in ("intent_filters", "queries", "references")})
+        pins = _pins(_read_fixture("pinned_manifest.xml"))
+        self.assertEqual(pins, {k: snapshot[k] for k in ("intent_filters", "queries", "references", "reference_ids")})
+        self.assertEqual("@xml/network_security_config", snapshot["references"]["networkSecurityConfig"])
+        self.assertEqual("@ref/0x7f150006", snapshot["reference_ids"]["networkSecurityConfig"])
+
+    def test_snapshot_without_aapt2_prints_the_ids_only_and_says_names_are_missing(self) -> None:
+        with mock.patch.object(apk_gate, "_run_apkanalyzer_manifest_print", return_value=_read_fixture("pinned_manifest.xml")), \
+            mock.patch.object(apk_gate, "find_aapt2", return_value=None):
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                self.assertEqual(0, apk_gate.main(["snapshot", "--apk", "app.apk"]))
+
+        snapshot = json.loads(out.getvalue())
+        self.assertNotIn("references", snapshot, "raw ids must never be copied into the name pins")
+        self.assertEqual("@ref/0x7f150006", snapshot["reference_ids"]["networkSecurityConfig"])
+        self.assertIn("aapt2", err.getvalue())
 
 
 if __name__ == "__main__":

@@ -56,10 +56,17 @@ class FamilyScreensSourceTest {
                 .map { "$file: $it" }
         }
 
+    // SARASWATI: fix wave B1 — every .kt file under the family package, subpackages included (Phase 4
+    // adds some), keyed by its path below [dir]: "JoinFamilyScreen.kt", "sangat/SangatScreen.kt".
+    private fun sourcesUnder(dir: File): Map<String, String> =
+        dir
+            .walkTopDown()
+            .filter { it.isFile && it.extension == "kt" }
+            .associate { it.relativeTo(dir).invariantSeparatorsPath to it.readText() }
+
     private fun familySources(): Map<String, String> {
         val dir = listOf(File(familyDir), File("app/$familyDir")).firstOrNull { it.isDirectory }
-        val files = requireNotNull(dir) { "cannot find $familyDir from ${File(".").absolutePath}" }.listFiles { f -> f.name.endsWith(".kt") }
-        return requireNotNull(files).associate { it.name to it.readText() }
+        return sourcesUnder(requireNotNull(dir) { "cannot find $familyDir from ${File(".").absolutePath}" })
     }
 
     @Test
@@ -74,6 +81,34 @@ class FamilyScreensSourceTest {
                 "and are not on the exact-text allow list: $offenders",
             offenders.isEmpty(),
         )
+    }
+
+    @Test
+    fun `the scan reads subpackages too, and flags a bad file that sits two levels down`() {
+        val root = java.nio.file.Files.createTempDirectory("family-scan").toFile()
+        try {
+            File(root, "JoinFamilyScreen.kt").writeText("// a top-level file\n")
+            val deep = File(root, "sangat/room").also { it.mkdirs() }
+            File(deep, "PasteKeyScreen.kt").writeText("var adminKey by rememberSaveable { mutableStateOf(\"\") }\n")
+            File(deep, "Notes.txt").writeText("var other by rememberSaveable { }")
+
+            val sources = sourcesUnder(root)
+            val offenders = saveableOffenders(sources, allowedLines)
+
+            assertEquals(setOf("JoinFamilyScreen.kt", "sangat/room/PasteKeyScreen.kt"), sources.keys)
+            assertEquals(1, offenders.size)
+            assertTrue(offenders.single(), offenders.single().startsWith("sangat/room/PasteKeyScreen.kt: var adminKey by rememberSaveable"))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the real family package is scanned from the top, with the screens in it`() {
+        val keys = familySources().keys
+
+        assertTrue(keys.containsAll(listOf("JoinFamilyScreen.kt", "ManageFamilyScreen.kt", "FamilyScreen.kt", "FamilyViewModel.kt")))
+        assertTrue("keys are paths below the package, with forward slashes", keys.none { '\\' in it })
     }
 
     @Test
