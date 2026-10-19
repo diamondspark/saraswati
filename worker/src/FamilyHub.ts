@@ -262,15 +262,18 @@ const STRIPPED_NAME_CHARACTERS = /(?![\u200C\u200D])[\p{Cc}\p{Cf}]/gu;
 /**
  * The name to store, or null when nothing is left of it. Stripped characters
  * go first, then surrounding whitespace, then the cap, counted in characters
- * rather than UTF-16 units so an emoji is never cut in half. A name made only
- * of joiners and whitespace counts as empty.
+ * rather than UTF-16 units so an emoji is never cut in half. Emptiness is
+ * judged on the final capped name, so a run of joiners that pushes the visible
+ * letters past the cap cannot slip through as an invisible name: a name made
+ * only of joiners and whitespace counts as empty.
  */
 function cleanDeviceName(raw: string): string | null {
   const cleaned = raw.replace(STRIPPED_NAME_CHARACTERS, "").trim();
-  if (cleaned.replace(/[\u200C\u200D\s]/g, "") === "") {
-    return null;
-  }
-  return Array.from(cleaned).slice(0, MAX_DEVICE_NAME_LENGTH).join("").trim();
+  const capped = Array.from(cleaned)
+    .slice(0, MAX_DEVICE_NAME_LENGTH)
+    .join("")
+    .trim();
+  return capped.replace(/[\u200C\u200D\s]/g, "") === "" ? null : capped;
 }
 
 function isDeviceRole(value: unknown): value is DeviceRole {
@@ -450,6 +453,46 @@ export class FamilyHub extends DurableObject<Env> {
     return json({ token, expiresAt: new Date(expiresAtMs).toISOString() });
   }
 
+  /**
+   * Spends a pairing token and creates its pending device in one transaction.
+   * The UPDATE only matches a token that is still unused and unexpired, so a
+   * token already spent (or one that lapsed) since the caller looked at it
+   * changes no row, and then no device is created either. True means this call
+   * won the token.
+   */
+  private claimPairingToken(
+    tokenHash: string,
+    now: number,
+    device: {
+      deviceId: string;
+      deviceName: string | null;
+      claimSecretHash: string;
+      role: DeviceRole;
+    },
+  ): boolean {
+    return this.ctx.storage.transactionSync(() => {
+      const spend = this.ctx.storage.sql.exec(
+        "UPDATE pairing_tokens SET usedAt = ? WHERE tokenHash = ? AND usedAt IS NULL AND expiresAt >= ?",
+        now,
+        tokenHash,
+        now,
+      );
+      spend.toArray();
+      if (spend.rowsWritten === 0) {
+        return false;
+      }
+      this.ctx.storage.sql.exec(
+        "INSERT INTO roster (deviceId, deviceName, status, sessionTokenHash, pendingSessionToken, approvedAt, claimSecretHash, role, claimedAt) VALUES (?, ?, 'pending', NULL, NULL, NULL, ?, ?, ?)",
+        device.deviceId,
+        device.deviceName,
+        device.claimSecretHash,
+        device.role,
+        now,
+      );
+      return true;
+    });
+  }
+
   private async handlePairingClaim(request: Request): Promise<Response> {
     const body = await readJsonBody(request);
     const token = typeof body.token === "string" ? body.token : "";
@@ -508,20 +551,19 @@ export class FamilyHub extends DurableObject<Env> {
 
     const deviceId = crypto.randomUUID();
     const claimSecret = randomHex(32);
-    const claimedAt = Date.now();
-    this.ctx.storage.sql.exec(
-      "INSERT INTO roster (deviceId, deviceName, status, sessionTokenHash, pendingSessionToken, approvedAt, claimSecretHash, role, claimedAt) VALUES (?, ?, 'pending', NULL, NULL, NULL, ?, ?, ?)",
+    // Hashed before the write below, so nothing is awaited between the last
+    // check and the write that depends on it.
+    const claimSecretHash = await sha256Hex(claimSecret);
+    const spent = this.claimPairingToken(tokenHash, Date.now(), {
       deviceId,
       deviceName,
-      await sha256Hex(claimSecret),
+      claimSecretHash,
       role,
-      claimedAt,
-    );
-    this.ctx.storage.sql.exec(
-      "UPDATE pairing_tokens SET usedAt = ? WHERE tokenHash = ?",
-      claimedAt,
-      tokenHash,
-    );
+    });
+    if (!spent) {
+      // Lost a race for the same token between the check and the write.
+      return json({ error: "gone" }, 410);
+    }
 
     return json({ deviceId, status: "pending", claimSecret });
   }
@@ -690,6 +732,33 @@ export class FamilyHub extends DurableObject<Env> {
       return throttled;
     }
 
+    const refusal = this.approvalRefusal(deviceId);
+    if (refusal) {
+      return refusal;
+    }
+
+    // The owner is never shown the phone's credential. The plaintext waits in
+    // pendingSessionToken only until the phone collects it through
+    // /pairing/status and first uses it; the lookup key is its hash. Hashed
+    // before the write, so nothing is awaited between the last check and it.
+    const sessionToken = randomHex(32);
+    const approved = this.commitApproval(
+      deviceId,
+      await sha256Hex(sessionToken),
+      sessionToken,
+      Date.now(),
+    );
+    if (!approved) {
+      // The row changed (revoked, approved, or lapsed) since the check above;
+      // answer for what it is now.
+      return this.approvalRefusal(deviceId) ?? json({ error: "not found" }, 404);
+    }
+
+    return json({ deviceId, status: "approved" });
+  }
+
+  /** The 404 or 410 that stops an approval, or null when it may go ahead. */
+  private approvalRefusal(deviceId: string): Response | null {
     const rows = this.ctx.storage.sql
       .exec<RosterApprovalRow>(
         "SELECT deviceId, status, claimedAt FROM roster WHERE deviceId = ?",
@@ -706,21 +775,31 @@ export class FamilyHub extends DurableObject<Env> {
     if (claimedAt === null || Date.now() - claimedAt > PENDING_APPROVAL_TTL_MS) {
       return json({ error: "expired" }, 410);
     }
+    return null;
+  }
 
-    // The owner is never shown the phone's credential. The plaintext waits in
-    // pendingSessionToken only until the phone collects it through
-    // /pairing/status and first uses it; the lookup key is its hash.
-    const sessionToken = randomHex(32);
-    const approvedAtMs = Date.now();
-    this.ctx.storage.sql.exec(
-      "UPDATE roster SET status = 'approved', sessionTokenHash = ?, pendingSessionToken = ?, approvedAt = ? WHERE deviceId = ?",
-      await sha256Hex(sessionToken),
+  /**
+   * The write that approves a device. It only matches a row that is still
+   * pending and still inside the hour, so a device revoked, already approved
+   * or lapsed since the caller's check is left exactly as it is (a revoked
+   * row is never brought back). True means this call approved it.
+   */
+  private commitApproval(
+    deviceId: string,
+    sessionTokenHash: string,
+    sessionToken: string,
+    now: number,
+  ): boolean {
+    const update = this.ctx.storage.sql.exec(
+      "UPDATE roster SET status = 'approved', sessionTokenHash = ?, pendingSessionToken = ?, approvedAt = ? WHERE deviceId = ? AND status = 'pending' AND claimedAt IS NOT NULL AND claimedAt >= ?",
+      sessionTokenHash,
       sessionToken,
-      approvedAtMs,
+      now,
       deviceId,
+      now - PENDING_APPROVAL_TTL_MS,
     );
-
-    return json({ deviceId, status: "approved" });
+    update.toArray();
+    return update.rowsWritten > 0;
   }
 
   private async handleRosterRevoke(

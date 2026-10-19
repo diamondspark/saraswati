@@ -370,6 +370,9 @@ describe("deviceName on POST /pairing/claim", () => {
     ["only bidi overrides", "\u202E\u202D\u2066\u2069"],
     ["only invisible format characters", "\u200B\u200C\u200D\u2060\uFEFF"],
     ["only ZWJ and ZWNJ", "\u200D\u200C \u200D"],
+    ["64 ZWJ and then a letter, which the cap cuts down to 64 ZWJ", "\u200D".repeat(64) + "A"],
+    ["70 ZWNJ and then a letter", "\u200C".repeat(70) + "A"],
+    ["joiners and spaces that fill the cap before the first letter", "\u200D ".repeat(40) + "A"],
     ["only bidi controls", "\u200E\u200F\u061C\u202A\u202E\u2066\u2069"],
   ])("answers 400 for %s, without burning the pairing token", async (_label, name) => {
     const stub = getFamilyHubStub();
@@ -380,6 +383,17 @@ describe("deviceName on POST /pairing/claim", () => {
     expect(rejected.status).toBe(400);
     const retry = await claimWithToken(stub, token, { deviceName: "Fine" });
     expect(retry.status).toBe(200);
+  });
+
+  it("keeps a name whose visible letters are inside the cap", async () => {
+    const stub = getFamilyHubStub();
+    const name = "\u200D".repeat(63) + "A";
+
+    const response = await claimNamed(stub, name);
+
+    expect(response.status).toBe(200);
+    const { deviceId } = (await response.json()) as { deviceId: string };
+    expect(await storedName(stub, deviceId)).toBe(name);
   });
 
   it("still accepts a claim that sends no deviceName at all", async () => {

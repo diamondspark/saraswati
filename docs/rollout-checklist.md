@@ -22,20 +22,27 @@ Owner only. Do this once.
 
 ### The family hub (Cloudflare Worker)
 
-- [ ] Your Cloudflare account has 2-Step Verification on, and `wrangler login`
-      is done on your own machine.
-- [ ] Your checkout includes commit `3a56ab94` (or anything after it):
-      `git merge-base --is-ancestor 3a56ab94 HEAD && echo ok` prints `ok`.
-      That commit is the newest schema change: the hub now stores only hashes
-      of its tokens, and the Worker carries a small migration runner that
+- [ ] Install the Worker's pinned tools, once: `cd worker && npm ci`. Every
+      `npx wrangler ...` command in this checklist, `wrangler login` included,
+      runs in `worker/` after this step.
+- [ ] Your Cloudflare account has 2-Step Verification on, and you have run
+      `cd worker && npx wrangler login` on your own machine.
+- [ ] Your checkout includes commit `8bf722b1` (or anything after it; it
+      contains the hashed-token migration, approval expiry, body limits and
+      front-Worker routing):
+      `git merge-base --is-ancestor 8bf722b1 HEAD && echo ok` prints `ok`. If
+      you squash-merge, replace this commit with the merge commit. The hub now
+      stores only hashes of its tokens, except a short-lived plaintext
+      `pendingSessionToken` between approval and the device's first
+      authenticated call, and the Worker carries a small migration runner that
       upgrades its own database. So redeploying this commit over a hub that is
       already live migrates it in place; there is no "deploy onto a fresh hub"
       rule any more. One thing the migration cannot save: a phone caught
       halfway through pairing at the moment you redeploy has to pair again
       (revoke its entry first).
-- [ ] Install the Worker's pinned tools, once: `cd worker && npm ci`. Every
-      `npx wrangler ...` command in this checklist runs in `worker/` after
-      this step.
+- [ ] Never roll back. Once the migration has run, an older Worker version
+      cannot read the renamed columns, so if a deploy goes wrong, fix forward
+      and redeploy a newer commit instead of redeploying an old one.
 - [ ] Deploy: `cd worker && npx wrangler deploy`. If a hub from an older commit
       is already live, redeploy the Worker so `/pair` and `assetlinks.json` are
       live (needed for the pairing link to open the app). Do this before the
@@ -67,6 +74,10 @@ The guide is plain HTML in `docs/setup-guide/`. A release run copies it to the
 `gh-pages` branch in the same push as the channel manifest, so it needs a
 push and a CI run that only you can do. Nothing publishes it until then.
 
+- [ ] Don't publish the setup guide (cut a release) until the app shows the
+      4-character approval code and tolerates the new approve reply. That is
+      work in the app, not in this repository's docs or Worker, and it has to
+      land first.
 - [ ] Merge this work to `main`, then run the next release
       ("How to release" in the runbook). Its publish job pushes
       `setup-guide/` to `gh-pages` next to `beta.json` or `stable.json`.
@@ -209,8 +220,9 @@ pending entries.
 - [ ] You: in Manage Family, tap create pairing, then send the link to that
       person only, as a private message.
 - [ ] They: open the link on the phone, enter a name you will recognise, pick
-      who the phone is for (see section 6), and tap Send request. The phone
-      claims the link and then waits for your approval.
+      **Adult** on the Join screen (even for a grandparent's phone; see
+      section 6), and tap Send request. The phone claims the link and then
+      waits for your approval.
 - [ ] You: watch Manage Family while they do this. Approve only when exactly
       one new pending entry appeared while you watched. If none appeared, or
       more than one, do not approve: revoke every entry you do not recognise
@@ -233,14 +245,17 @@ see "If something goes wrong".
 
 ### 6. Role: adult or grandparent
 
-- [ ] They pick who the phone is for on the Join screen, before they send the
-      request. The pick travels with the request, and you see it next to the
-      pending entry when you approve. The exact screen wording is not final in
-      the build yet, so confirm it against the app.
+- [ ] They pick **Adult** on the Join screen, before they send the request,
+      whoever the phone is for; the setup guide tells them to. The pick
+      travels with the request, and you see it next to the pending entry when
+      you approve. The exact screen wording is not final in the build yet, so
+      confirm it against the app.
 - [ ] They sign in to YouTube inside Saraswati with their own hands. Never ask
       for or send a password.
 - [ ] **Adult:** the normal app. Nothing more to do.
-- [ ] **Grandparent (Saral):** the phone turns into the station tiles. The
+- [ ] **Grandparent (Saral):** after they sign in, you switch the phone to
+      grandparent in Manage Family (below) and it turns into the station
+      tiles. The
       favourite-singers step is not built yet (deferred in Task 9: the build
       has no taste-profile call), so there is nothing to pick here.
 - [ ] Grandparent: the station tiles you set in Manage Family show up and look
@@ -311,10 +326,13 @@ shows name, version, last seen and local time, not authorization slots.
   try again in a minute. Wait a minute and stop tapping refresh.
 - **The free Cloudflare plan has a daily request quota, and anyone can burn
   it.** It is not only a misbehaving phone: anyone who knows the address can
-  send requests, and revoking a phone does not stop them. Unauthenticated and
-  unknown requests are now answered by the front Worker, which still costs
-  Worker requests but no longer costs Durable Object time. If the quota is gone
-  the hub is simply unavailable until it resets; nothing is exposed.
+  send requests, and revoking a phone does not stop them. The front Worker
+  answers only a request with no Authorization header at all, and a request
+  for a route that does not exist, without waking the Durable Object. `/ping`,
+  `/pairing/claim`, `/pairing/status` and any request that carries some
+  Bearer, even a made-up one, still wake it. Every request still costs a
+  Worker request. If the quota is gone the hub is simply unavailable until it
+  resets; nothing is exposed.
 - **One phone per pairing link**, valid for 15 minutes. A phone that has
   claimed a link waits at most 1 hour for approval; after that its entry can
   only be revoked.
