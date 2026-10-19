@@ -158,7 +158,7 @@ fun SaralScreen(
     // Back does nothing here. It must not finish the screen or surface anything behind it.
     BackHandler {}
 
-    val playback = remember(playerConnection) { playerConnection?.let(::PlayerConnectionPlayback) }
+    val playback = remember(playerConnection) { playerConnection?.let { PlayerConnectionPlayback(it) } }
     DisposableEffect(playback) {
         viewModel.bindPlayback(playback)
         onDispose { viewModel.bindPlayback(null) }
@@ -181,7 +181,7 @@ fun SaralScreen(
     }
 
     if (signingIn) {
-        SaralSignIn(onClose = viewModel::onSignInClosed)
+        SaralSignIn(onClose = viewModel::onSignInClosed, onFinishing = viewModel::onSignInFinishing)
         return
     }
 

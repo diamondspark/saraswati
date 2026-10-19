@@ -295,9 +295,17 @@ class SaralViewModel
         private val _signingIn = MutableStateFlow(false)
         val signingIn: StateFlow<Boolean> = _signingIn.asStateFlow()
 
+        // True while the sign-in sheet is saving the account (LoginContent's finalizeLogin). The cookie it writes
+        // turns signedIn on partway through, and closing the sheet then would cancel the rest of finalizeLogin
+        // (it clears the WebView's copy of the session and restarts the app).
+        private val finishingSignIn = MutableStateFlow(false)
+
         init {
             viewModelScope.launch { playerState.collect(::onPlayerState) }
-            viewModelScope.launch { signedIn.collect { if (it) _signingIn.value = false } }
+            viewModelScope.launch {
+                combine(signedIn, finishingSignIn) { signed, finishing -> signed && !finishing }
+                    .collect { if (it) _signingIn.value = false }
+            }
             viewModelScope.launch { refresher.refresh() }
         }
 
@@ -392,11 +400,20 @@ class SaralViewModel
         }
 
         fun onSignInTapped() {
-            if (!signedIn.value) _signingIn.value = true
+            if (!signedIn.value) {
+                finishingSignIn.value = false
+                _signingIn.value = true
+            }
         }
 
         fun onSignInClosed() {
+            finishingSignIn.value = false
             _signingIn.value = false
+        }
+
+        /** The sign-in sheet started ([active]) or stopped saving the account. */
+        fun onSignInFinishing(active: Boolean) {
+            finishingSignIn.value = active
         }
 
         private fun endVoice(result: VoiceNotice) {

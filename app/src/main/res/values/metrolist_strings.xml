@@ -1144,7 +1144,7 @@
     <string name="saral_voice_not_found" translatable="false">गाना नहीं मिला, फिर से बोलें</string>
     <string name="saral_voice_not_heard" translatable="false">समझ नहीं आया, फिर से बोलें</string>
     <string name="saral_voice_offline" translatable="false">इंटरनेट के बिना खोज नहीं हो सकती</string>
-    <string name="saral_voice_failed" translatable="false">बोलकर खोजना अभी नहीं हो सका</string>
+    <string name="saral_voice_failed" translatable="false">अभी खोज नहीं हो सकी</string>
     <string name="saral_voice_unavailable" translatable="false">इस फ़ोन पर बोलकर खोजना उपलब्ध नहीं है</string>
     <!-- SARASWATI: fix wave A (M5) — the crash screen on a Saral phone: one plain line and one button, no
          trace, no Share. NEW (not in the approved mockup); needs a native-speaker read. -->

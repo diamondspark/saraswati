@@ -199,13 +199,16 @@ one. If the phone just keeps waiting, see "If something goes wrong".
       right.
 - [ ] Grandparent: they start a station and pause it with no help. This is the
       design's own test for Saral.
-- [ ] Grandparent: do every other in-app step first, signing in to YouTube
-      included. Saral replaces the whole app with no Settings and no other
+- [ ] Grandparent: Saral replaces the whole app with no Settings and no other
       tabs, the moment the owner approves the phone, and nothing on that phone
-      switches it off. The easy order is to pair the phone as Adult, finish
-      the sign-in, then have the owner set it to grandparent in Manage Family.
-      To bring the full app back later, the owner sets the phone to Adult
-      there; the phone follows the next time it is opened.
+      switches it off. A grandparent phone that is not signed in to YouTube can
+      now sign in from inside Saral: it shows a sign-in tile, and the tile
+      opens the same Google sign-in the full app uses. Do that with them, on
+      their phone, with their own hands (never ask for or send a password). The
+      easier order is still to pair the phone as Adult, finish the sign-in,
+      then have the owner set it to grandparent in Manage Family. To bring the
+      full app back later, the owner sets the phone to Adult there; the phone
+      follows the next time it is opened.
 
 ### 7. Car (only if they use Android Auto)
 

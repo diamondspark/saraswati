@@ -8,8 +8,10 @@
 // neither ever waits for the network: [snapshot] is a plain function that
 // returns at once with whatever is cached, possibly nothing yet.
 //
-// Writers are the phone's own launches and resumes (SaralViewModel) and the
-// owner's station edits (FamilyViewModel). An empty list from the hub means
+// Writers: StationsRefresher, which MainActivity runs on every launch and
+// resume of every paired phone (Saral, adult and owner alike) and which
+// SaralViewModel also runs when the Saral screen opens; and the owner's own
+// station edits (FamilyViewModel). An empty list from the hub means
 // "no stations set", not "delete the ones you have", so it is ignored: tiles
 // that were working keep working if the hub is reset or misreports.
 //

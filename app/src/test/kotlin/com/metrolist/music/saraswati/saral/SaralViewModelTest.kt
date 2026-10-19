@@ -811,4 +811,59 @@ class SaralViewModelTest {
 
         assertFalse(vm.signingIn.value)
     }
+
+    // SARASWATI: fix wave B2 — finalizeLogin writes the signed-in cookie partway through; the sheet must
+    // stay up until it has finished clearing the WebView's copy and restarting the app.
+    @Test
+    fun `the sign-in screen stays open when the cookie lands while the sheet is still saving the account`() {
+        signIn = FakeSignIn(initial = false)
+        val vm = newVm()
+        vm.onSignInTapped()
+        vm.onSignInFinishing(true)
+
+        signIn.set(true)
+
+        assertTrue(vm.signedIn.value)
+        assertTrue("closing now would cancel finalizeLogin", vm.signingIn.value)
+    }
+
+    @Test
+    fun `once the sheet has finished saving and the phone is signed in, the sign-in screen closes`() {
+        signIn = FakeSignIn(initial = false)
+        val vm = newVm()
+        vm.onSignInTapped()
+        vm.onSignInFinishing(true)
+        signIn.set(true)
+
+        vm.onSignInFinishing(false)
+
+        assertFalse(vm.signingIn.value)
+    }
+
+    @Test
+    fun `finishing the save without being signed in leaves the sheet open`() {
+        signIn = FakeSignIn(initial = false)
+        val vm = newVm()
+        vm.onSignInTapped()
+
+        vm.onSignInFinishing(true)
+        vm.onSignInFinishing(false)
+
+        assertTrue(vm.signingIn.value)
+    }
+
+    @Test
+    fun `closing the sheet by hand forgets that it was saving`() {
+        signIn = FakeSignIn(initial = false)
+        val vm = newVm()
+        vm.onSignInTapped()
+        vm.onSignInFinishing(true)
+        vm.onSignInClosed()
+        assertFalse(vm.signingIn.value)
+
+        vm.onSignInTapped()
+        signIn.set(true)
+
+        assertFalse("a new sheet is not held open by the last one", vm.signingIn.value)
+    }
 }

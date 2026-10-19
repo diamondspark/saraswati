@@ -165,4 +165,39 @@ class SaralQueueWatchTest {
 
         assertFalse(PlaybackFailures.isOffline(a))
     }
+
+    // SARASWATI: fix wave B2 — the ids were grown with `_ids.value += …`, a read-modify-write that two
+    // threads (the preload on one, a page fetch on another) can interleave and so lose an id.
+    @Test
+    fun `ids added from several threads at once are all kept`() {
+        val watch = QueueWatch()
+        val threads = 8
+        val perThread = 400
+        val pages =
+            List(threads) { t ->
+                watch.wrap(
+                    FakeQueue(
+                        initial = { status() },
+                        page = { List(1) { item("t$t-${pageCounter.incrementAndGet()}") } },
+                    ),
+                )
+            }
+        val barrier = java.util.concurrent.CyclicBarrier(threads)
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(threads)
+        try {
+            pages
+                .map { queue ->
+                    pool.submit {
+                        barrier.await()
+                        repeat(perThread) { runBlocking { queue.nextPage() } }
+                    }
+                }.forEach { it.get(30, java.util.concurrent.TimeUnit.SECONDS) }
+        } finally {
+            pool.shutdownNow()
+        }
+
+        assertEquals(threads * perThread, watch.ids.value.size)
+    }
+
+    private val pageCounter = java.util.concurrent.atomic.AtomicInteger()
 }
