@@ -7,8 +7,8 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { RoomStateSchema } from "../src/gen/listentogether_pb";
 import { Sangat } from "../src/sangat/Sangat";
-import { IDLE_TIMEOUT_MS, RATE_LIMIT_MESSAGES_PER_SECOND } from "../src/sangat/limits";
-import { recordMessage } from "../src/sangat/liveness";
+import { IDLE_TIMEOUT_MS, RATE_LIMIT_MESSAGES_PER_SECOND, RATE_LIMIT_STRIKES_TO_CLOSE } from "../src/sangat/limits";
+import { floodedTooLong, recordMessage } from "../src/sangat/liveness";
 import type { Attachment } from "../src/sangat/types";
 import {
   closeAllClients,
@@ -106,6 +106,55 @@ describe("recordMessage (the per-connection rate limit)", () => {
   });
 });
 
+describe("floodedTooLong (refused messages in consecutive windows)", () => {
+  const fresh = (): Attachment => ({ userId: "user_1_1", deviceId: "d" });
+  // Sends 61 messages at `at` (the last is refused) and reports whether the socket is now past the limit.
+  const flood = (att: Attachment, at: number) => {
+    for (let i = 0; i < 61; i++) recordMessage(att, at);
+    return floodedTooLong(att);
+  };
+
+  it("is false until the 5th window in a row has had a message refused", () => {
+    const att = fresh();
+    expect(RATE_LIMIT_STRIKES_TO_CLOSE).toBe(5);
+    const verdicts = [0, 1, 2, 3, 4].map((window) => flood(att, 1_000_000 + window * 1000));
+    expect(verdicts).toEqual([false, false, false, false, true]);
+  });
+
+  it("counts a window once, however many messages it refuses", () => {
+    const att = fresh();
+    for (let i = 0; i < 500; i++) recordMessage(att, 1_000_000 + i);
+    expect(floodedTooLong(att)).toBe(false);
+    expect(att.rateStrikes).toBe(1);
+  });
+
+  it("a window with no refusal starts the count again", () => {
+    const att = fresh();
+    for (let window = 0; window < 4; window++) flood(att, 1_000_000 + window * 1000);
+    for (let i = 0; i < 10; i++) recordMessage(att, 1_004_000 + i);
+    expect(flood(att, 1_005_000)).toBe(false);
+    expect(att.rateStrikes).toBe(1);
+  });
+
+  it("a quiet window between flooded ones starts the count again", () => {
+    const att = fresh();
+    for (let window = 0; window < 4; window++) flood(att, 1_000_000 + window * 1000);
+    expect(flood(att, 1_004_000 + 2500)).toBe(false);
+    expect(att.rateStrikes).toBe(1);
+  });
+
+  it("starts over if the clock went backwards, and survives a structured clone", () => {
+    const att = fresh();
+    for (let window = 0; window < 3; window++) flood(att, 1_000_000 + window * 1000);
+    const revived: Attachment = structuredClone(att);
+    expect(flood(revived, 1_003_000)).toBe(false);
+    expect(flood(revived, 1_004_000)).toBe(true);
+    const rewound = structuredClone(att);
+    expect(flood(rewound, 500_000)).toBe(false);
+    expect(rewound.rateStrikes).toBe(1);
+  });
+});
+
 describe("the 60 messages per second limit on a live socket", () => {
   async function burst(client: SangatClient, count: number): Promise<void> {
     // Encoded first and sent in one synchronous loop, so the burst lands inside a single window.
@@ -198,7 +247,10 @@ describe("idle sockets", () => {
     const [stamp] = await attachments(hub);
     expect(stamp.lastSeen).toBeGreaterThanOrEqual(before);
     expect(stamp.lastSeen).toBeLessThanOrEqual(Date.now());
-    expect(await getAlarm(hub)).toBe((stamp.lastSeen as number) + IDLE_TIMEOUT_MS);
+    // Set when the socket connected; the ping since then moved the deadline later, not the alarm.
+    const alarm = (await getAlarm(hub)) as number;
+    expect(alarm).toBeGreaterThanOrEqual(before + IDLE_TIMEOUT_MS);
+    expect(alarm).toBeLessThanOrEqual((stamp.lastSeen as number) + IDLE_TIMEOUT_MS);
     expect(IDLE_TIMEOUT_MS).toBe(75_000);
   });
 
@@ -231,7 +283,37 @@ describe("idle sockets", () => {
     const newest = Math.min(
       ...(await attachments(hub)).map((a) => a.lastSeen as number),
     );
-    expect(await getAlarm(hub)).toBe(newest + IDLE_TIMEOUT_MS);
+    // The next deadline is now later; the alarm is never pushed later, only ever kept or pulled in.
+    expect(await getAlarm(hub)).toBeLessThanOrEqual(newest + IDLE_TIMEOUT_MS);
+  });
+
+  it("an alarm already earlier than the next deadline is not rewritten, and re-arms itself when it wakes", async () => {
+    const hub = hubStub();
+    const { host, guests } = await openFamily(hub, ["a", "b"]);
+    const [bharat] = guests;
+    const hostSeen = Date.now() - 40 * SECOND;
+    await setLastSeen(hub, host.userId, hostSeen);
+    await setLastSeen(hub, bharat.userId, Date.now() - 20 * SECOND);
+    // A deadline earlier than the alarm pulls it in.
+    await bharat.client.send("ping");
+    await bharat.client.next("pong");
+    expect(await getAlarm(hub)).toBe(hostSeen + IDLE_TIMEOUT_MS);
+
+    await host.client.send("ping");
+    await host.client.next("pong");
+
+    // Everyone has spoken since, so the next real deadline is later than the alarm, which stays.
+    const seen = (await attachments(hub)).map((a) => a.lastSeen as number);
+    expect(Math.min(...seen) + IDLE_TIMEOUT_MS).toBeGreaterThan(hostSeen + IDLE_TIMEOUT_MS);
+    expect(await getAlarm(hub)).toBe(hostSeen + IDLE_TIMEOUT_MS);
+
+    // Waking early closes nobody and points the alarm at the deadline that counts.
+    expect(await runDurableObjectAlarm(hub)).toBe(true);
+    expect(await host.client.quiet(100)).toEqual([]);
+    const after = (await attachments(hub)).map((a) => a.lastSeen as number);
+    expect(await getAlarm(hub)).toBe(Math.min(...after) + IDLE_TIMEOUT_MS);
+    await bharat.client.send("ping", { sequence: 7 });
+    expect((await bharat.client.next("pong")).payload.sequence).toBe("7");
   });
 
   it("a socket silent for more than 75 s is closed with 1001 'idle' and marked disconnected, with the grace running", async () => {

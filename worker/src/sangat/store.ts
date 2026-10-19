@@ -9,7 +9,7 @@ import {
   type RoomState,
   type TrackInfo,
 } from "../gen/listentogether_pb";
-import { EMPTY_ROOM_CLEANUP_MS, MAX_ROOM_STATE_BYTES, RECONNECT_GRACE_MS } from "./limits";
+import { EMPTY_ROOM_CLEANUP_MS, MAX_QUEUE_STATE_BYTES, MAX_ROOM_STATE_BYTES, RECONNECT_GRACE_MS } from "./limits";
 import { SANGAT_TABLES } from "./schema";
 
 export interface Room {
@@ -180,7 +180,26 @@ export class Store {
    * row holds about 2 MB). Then nothing is written and the answer is false.
    */
   trySaveRoom(room: Room): boolean {
+    return this.writeRoom(room, toBinary(RoomStateSchema, room.state));
+  }
+
+  /**
+   * For changes that can add to the queue. They stop at MAX_QUEUE_STATE_BYTES, below
+   * the cap, so that a member joining or reconnecting always has room; a change that
+   * leaves the state no bigger than it was is never refused for size.
+   */
+  trySaveRoomGrowth(room: Room): boolean {
     const state = toBinary(RoomStateSchema, room.state);
+    if (state.byteLength > MAX_QUEUE_STATE_BYTES) {
+      const stored = this.sql
+        .exec<{ n: number }>("SELECT length(state) AS n FROM sangat_rooms WHERE code = ?", room.code)
+        .toArray()[0];
+      if (!stored || state.byteLength > stored.n) return false;
+    }
+    return this.writeRoom(room, state);
+  }
+
+  private writeRoom(room: Room, state: Uint8Array): boolean {
     if (state.byteLength > MAX_ROOM_STATE_BYTES) return false;
     this.sql.exec(
       `UPDATE sangat_rooms

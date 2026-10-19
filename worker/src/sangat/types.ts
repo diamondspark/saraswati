@@ -15,6 +15,9 @@ export interface Attachment {
   /** Start of the current rate-limit window (ms) and the messages counted in it. */
   rateStart?: number;
   rateCount?: number;
+  /** A message was refused in the current window; and how many windows in a row have had one. */
+  rateStruck?: boolean;
+  rateStrikes?: number;
   /** Tombstone: the server has closed this socket and it is waiting out the close handshake. It no longer counts as live. */
   closed?: boolean;
 }

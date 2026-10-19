@@ -19,10 +19,14 @@ import {
   TrackInfoSchema,
 } from "../src/gen/listentogether_pb";
 import {
+  MAX_PENDING_BYTES_PER_SOCKET,
+  MAX_PENDING_BYTES_TOTAL,
   MAX_ROOM_STATE_BYTES,
   MAX_ROOMS_PER_DEVICE,
   MAX_SOCKETS_PER_DEVICE,
   MAX_PENDING_MESSAGES_PER_SOCKET,
+  QUEUE_STATE_HEADROOM_BYTES,
+  RATE_LIMIT_STRIKES_TO_CLOSE,
 } from "../src/sangat/limits";
 import { createSangatTables } from "../src/sangat/schema";
 import { Sangat } from "../src/sangat/Sangat";
@@ -142,6 +146,79 @@ describe("a socket the server has closed", () => {
     expect(await sql(hub, (db) => db.exec("SELECT COUNT(*) AS n FROM sangat_pending_joins").one().n)).toBe(0);
   });
 
+  it("a message still being decoded when its device is revoked does not act: no room is created", async () => {
+    const hub = hubStub();
+    const device = await seedDevice(hub, "a");
+    const client = await SangatClient.connect(hub, device.token);
+    await client.send("ping");
+    await client.next("pong");
+
+    // Its own decode takes a while; the revoke lands in the middle of it.
+    client.sendRaw(
+      await slowFrame("create_room", toBinary(CreateRoomPayloadSchema, create(CreateRoomPayloadSchema, { username: "Asha" })), 400_000),
+    );
+    await sleep(40);
+    const sangat = await liveSangat(hub);
+    await runInDurableObject(hub, () => sangat.closeDevice(device.deviceId, 4001, "revoked"));
+    expect(await client.closed).toEqual({ code: 4001, reason: "revoked" });
+    await sleep(1000);
+
+    expect(await sql(hub, (db) => db.exec("SELECT COUNT(*) AS n FROM sangat_rooms").one().n)).toBe(0);
+    expect(await sql(hub, (db) => db.exec("SELECT COUNT(*) AS n FROM sangat_members WHERE deviceId = ?", device.deviceId).one().n)).toBe(0);
+  });
+
+  it("closeDevice closes the sockets before it touches storage: an unreadable room cannot leave a revoked phone connected", async () => {
+    const hub = hubStub();
+    const { devices, host, guests } = await openFamily(hub, ["a", "b"]);
+    await sql(hub, (db) =>
+      db.exec("UPDATE sangat_rooms SET state = ? WHERE code = ?", new Uint8Array([0xff, 0xff, 0xff, 0xff]).buffer, host.code),
+    );
+    const sangat = await liveSangat(hub);
+
+    const outcome = await runInDurableObject(hub, (_instance, state) => {
+      let threw = false;
+      try {
+        sangat.closeDevice(devices[1].deviceId, 4001, "revoked");
+      } catch {
+        threw = true;
+      }
+      const stamps = state
+        .getWebSockets()
+        .map((ws) => ws.deserializeAttachment() as { deviceId: string; closed?: boolean })
+        .map((att) => [att.deviceId, att.closed ?? false] as const);
+      // The unreadable room would make every later close event throw; clear it away.
+      state.storage.sql.exec("DELETE FROM sangat_members");
+      state.storage.sql.exec("DELETE FROM sangat_rooms");
+      return { threw, stamps };
+    });
+
+    expect(outcome.threw).toBe(false);
+    expect(outcome.stamps).toEqual(expect.arrayContaining([[devices[1].deviceId, true], [devices[0].deviceId, false]]));
+    expect(await guests[0].client.closed).toEqual({ code: 4001, reason: "revoked" });
+  });
+
+  it("closeAll closes every socket even when clearing the rooms fails", async () => {
+    const hub = hubStub();
+    const { host, guests } = await openFamily(hub, ["a", "b"]);
+    await sql(hub, (db) => db.exec("DROP TABLE sangat_suggestions"));
+    const sangat = await liveSangat(hub);
+
+    const threw = await runInDurableObject(hub, (_instance, state) => {
+      let failed = false;
+      try {
+        sangat.closeAll(4003, "sangat disabled");
+      } catch {
+        failed = true;
+      }
+      createSangatTables(state.storage.sql);
+      return failed;
+    });
+
+    expect(threw).toBe(false);
+    expect(await host.client.closed).toEqual({ code: 4003, reason: "sangat disabled" });
+    expect(await guests[0].client.closed).toEqual({ code: 4003, reason: "sangat disabled" });
+  });
+
   it("closeDevice and closeAll write the tombstone on the sockets they close", async () => {
     const hub = hubStub();
     const a = await seedDevice(hub, "a");
@@ -192,7 +269,9 @@ describe("a hub that restarted under live rooms", () => {
     expect(rooms).toEqual([]);
     const row = await sql(hub, (db) => db.exec("SELECT * FROM sangat_members WHERE userId = ?", host.userId).one());
     expect(row.connected).toBe(0);
-    expect(await getAlarm(hub)).toBe((row.disconnectedAt as number) + GRACE);
+    // An alarm that is already earlier is left in place; it only has to come no later than the grace.
+    expect(await getAlarm(hub)).toBeLessThanOrEqual((row.disconnectedAt as number) + GRACE);
+    expect(await getAlarm(hub)).not.toBeNull();
   });
 
   it("setCarMode does the same before it answers", async () => {
@@ -205,6 +284,32 @@ describe("a hub that restarted under live rooms", () => {
 
     expect((await sql(hub, (db) => db.exec("SELECT connected FROM sangat_members WHERE userId = ?", host.userId).one())).connected).toBe(0);
     expect(await getAlarm(hub)).not.toBeNull();
+  });
+
+  it("a reconcile that fails is tried again on the next call", async () => {
+    const { hub, host } = await evictedHub();
+    const original = (await sql(hub, (db) => db.exec("SELECT state FROM sangat_rooms WHERE code = ?", host.code).one())).state as ArrayBuffer;
+    await sql(hub, (db) =>
+      db.exec("UPDATE sangat_rooms SET state = ? WHERE code = ?", new Uint8Array([0xff, 0xff, 0xff, 0xff]).buffer, host.code),
+    );
+
+    const result = await runInDurableObject(hub, (_instance, state) => {
+      const sangat = new Sangat(state);
+      let first = "ok";
+      try {
+        sangat.liveRooms();
+      } catch {
+        first = "threw";
+      }
+      state.storage.sql.exec("UPDATE sangat_rooms SET state = ? WHERE code = ?", original, host.code);
+      const second = sangat.liveRooms();
+      const connected = state.storage.sql.exec<{ connected: number }>("SELECT connected FROM sangat_members").toArray();
+      return { first, second, connected: connected.map((row) => row.connected) };
+    });
+
+    expect(result.first).toBe("threw");
+    expect(result.second).toEqual([]);
+    expect(result.connected).toEqual([0, 0]);
   });
 
   it("a new connection finds it done, without anyone sending a message", async () => {
@@ -276,10 +381,15 @@ describe("per-device caps", () => {
   });
 });
 
+const frameBytes = (type: string): ArrayBuffer => {
+  const frame = toBinary(EnvelopeSchema, create(EnvelopeSchema, { type, payload: new Uint8Array() }));
+  return frame.buffer.slice(frame.byteOffset, frame.byteOffset + frame.byteLength) as ArrayBuffer;
+};
+
 describe("backpressure", () => {
   // A stand-in socket: the real ones cannot be made to fall behind on demand.
-  function fakeSocket(deviceId: string) {
-    let attachment: Record<string, unknown> = { userId: "user_1_1", deviceId, lastSeen: Date.now() };
+  function fakeSocket(deviceId: string, userId = "user_1_1") {
+    let attachment: Record<string, unknown> = { userId, deviceId, lastSeen: Date.now() };
     const closes: [number, string][] = [];
     const ws = {
       readyState: 1,
@@ -290,10 +400,21 @@ describe("backpressure", () => {
       send: () => undefined,
       close: (code: number, reason: string) => {
         closes.push([code, reason]);
+        ws.readyState = 3;
       },
     };
-    return { ws: ws as unknown as WebSocket, closes, resetRate: () => delete attachment.rateCount };
+    return {
+      ws: ws as unknown as WebSocket,
+      closes,
+      resetRate: () => delete attachment.rateCount,
+      // Makes the rate-limit window look over, the next one following straight on.
+      endWindow: () => {
+        attachment.rateStart = Date.now() - 1100;
+      },
+    };
   }
+
+  const junk = (bytes: number) => new ArrayBuffer(bytes);
 
   it("closes a socket with 1008 'backpressure' once 64 of its messages are waiting", async () => {
     const hub = hubStub();
@@ -319,6 +440,103 @@ describe("backpressure", () => {
     });
 
     expect(closes).toEqual([[1008, "backpressure"]]);
+  });
+
+  it("closes a socket with 1008 'backpressure' once 2 MB of its messages are waiting", async () => {
+    const hub = hubStub();
+    expect(MAX_PENDING_BYTES_PER_SOCKET).toBe(2 * 1024 * 1024);
+
+    const result = await runInDurableObject(hub, async (_instance, state) => {
+      const sangat = new Sangat(state);
+      const { ws, closes } = fakeSocket("sg-device-fake");
+      const jobs: Promise<void>[] = [];
+      for (let i = 0; i < 5; i++) jobs.push(sangat.onMessage(ws, junk(400_000)));
+      const withinBudget = [...closes];
+      jobs.push(sangat.onMessage(ws, junk(400_000)));
+      const afterCap = [...closes];
+      await Promise.all(jobs);
+      // What was waiting has been handled, so the budget is whole again for the next socket.
+      const other = fakeSocket("sg-device-fake", "user_2_2");
+      const more = [0, 1, 2, 3, 4].map(() => sangat.onMessage(other.ws, junk(400_000)));
+      await Promise.all(more);
+      return { withinBudget, afterCap, otherCloses: other.closes };
+    });
+
+    expect(result.withinBudget).toEqual([]);
+    expect(result.afterCap).toEqual([[1008, "backpressure"]]);
+    expect(result.otherCloses).toEqual([]);
+  });
+
+  it("closes a socket with 1008 'backpressure' once 8 MB are waiting across all sockets, whoever sent them", async () => {
+    const hub = hubStub();
+    expect(MAX_PENDING_BYTES_TOTAL).toBe(8 * 1024 * 1024);
+
+    const result = await runInDurableObject(hub, async (_instance, state) => {
+      const sangat = new Sangat(state);
+      const jobs: Promise<void>[] = [];
+      // Four sockets each hold 2,000,000 bytes: inside their own 2 MB, 8,000,000 of 8 MB together.
+      const holders = [1, 2, 3, 4].map((n) => fakeSocket(`sg-device-fake${n}`, `user_${n}_${n}`));
+      for (const holder of holders) {
+        for (let i = 0; i < 5; i++) jobs.push(sangat.onMessage(holder.ws, junk(400_000)));
+      }
+      const latecomer = fakeSocket("sg-device-fake5", "user_5_5");
+      jobs.push(sangat.onMessage(latecomer.ws, junk(400_000)));
+      const afterCap = { holders: holders.map((h) => [...h.closes]), latecomer: [...latecomer.closes] };
+      await Promise.all(jobs);
+      const next = fakeSocket("sg-device-fake6", "user_6_6");
+      await sangat.onMessage(next.ws, junk(400_000));
+      return { afterCap, nextCloses: next.closes };
+    });
+
+    expect(result.afterCap.holders).toEqual([[], [], [], []]);
+    expect(result.afterCap.latecomer).toEqual([[1008, "backpressure"]]);
+    expect(result.nextCloses).toEqual([]);
+  });
+
+  it("closes a socket with 1008 'rate limited' after 5 consecutive windows of refused messages", async () => {
+    const hub = hubStub();
+    expect(RATE_LIMIT_STRIKES_TO_CLOSE).toBe(5);
+    const ping = frameBytes("ping");
+
+    const result = await runInDurableObject(hub, async (_instance, state) => {
+      const sangat = new Sangat(state);
+      const { ws, closes, endWindow } = fakeSocket("sg-device-fake");
+      const afterWindow: [number, string][][] = [];
+      for (let window = 1; window <= RATE_LIMIT_STRIKES_TO_CLOSE; window++) {
+        const jobs: Promise<void>[] = [];
+        for (let i = 0; i < 70; i++) jobs.push(sangat.onMessage(ws, ping));
+        afterWindow.push([...closes]);
+        await Promise.all(jobs);
+        endWindow();
+      }
+      return afterWindow;
+    });
+
+    expect(result.slice(0, 4)).toEqual([[], [], [], []]);
+    expect(result[4]).toEqual([[1008, "rate limited"]]);
+  });
+
+  it("a window without a refusal between flooded ones starts the count again", async () => {
+    const hub = hubStub();
+    const ping = frameBytes("ping");
+
+    const closes = await runInDurableObject(hub, async (_instance, state) => {
+      const sangat = new Sangat(state);
+      const { ws, closes, endWindow } = fakeSocket("sg-device-fake");
+      const flood = async (count: number) => {
+        const jobs: Promise<void>[] = [];
+        for (let i = 0; i < count; i++) jobs.push(sangat.onMessage(ws, ping));
+        await Promise.all(jobs);
+        endWindow();
+      };
+      for (let round = 0; round < 3; round++) {
+        for (let i = 0; i < RATE_LIMIT_STRIKES_TO_CLOSE - 1; i++) await flood(70);
+        await flood(10); // a clean window
+      }
+      return closes;
+    });
+
+    expect(closes).toEqual([]);
   });
 
   it("counts only messages still waiting: a socket that keeps up is never cut off", async () => {
@@ -398,13 +616,15 @@ describe("RoomState size", () => {
     });
   }
 
-  it("a queue change that would pass 1,500,000 bytes answers queue_full and changes nothing", async () => {
+  it("a queue change that would pass 1,483,616 bytes answers queue_full and changes nothing", async () => {
     const hub = hubStub();
     const { host } = await openFamily(hub, ["a"]);
     await host.client.send("playback_action", { action: "change_track", track_info: { id: "t0", title: "Now" } });
     await host.client.next("sync_playback");
-    const count = await fill(hub, host.code, 1500);
+    // Queue growth stops QUEUE_STATE_HEADROOM_BYTES under the cap; the state starts 1,500 bytes under that.
+    const count = await fill(hub, host.code, QUEUE_STATE_HEADROOM_BYTES + 1500);
     expect(MAX_ROOM_STATE_BYTES).toBe(1_500_000);
+    expect(QUEUE_STATE_HEADROOM_BYTES).toBe(16_384);
     expect(count).toBeLessThanOrEqual(1000);
 
     await host.client.send("playback_action", {
@@ -419,6 +639,38 @@ describe("RoomState size", () => {
     expect((await host.client.next("sync_playback")).payload.action).toBe("queue_add");
     const saved = await sql(hub, (db) => db.exec("SELECT state FROM sangat_rooms").one());
     expect((saved.state as ArrayBuffer).byteLength).toBeLessThanOrEqual(MAX_ROOM_STATE_BYTES);
+  });
+
+  it("inside the headroom, queue growth is refused but approve_join, reconnect and pause still fit", async () => {
+    const hub = hubStub();
+    const { devices, host, guests } = await openFamily(hub, ["a", "b"]);
+    const [bharat] = guests;
+    await host.client.send("playback_action", { action: "change_track", track_info: { id: "t0", title: "Now" } });
+    await host.client.next("sync_playback");
+    await bharat.client.next("sync_playback");
+    await fill(hub, host.code, 4000);
+    const stored = () => sql(hub, (db) => db.exec("SELECT length(state) AS n FROM sangat_rooms").one().n);
+    expect(await stored()).toBeGreaterThan(MAX_ROOM_STATE_BYTES - QUEUE_STATE_HEADROOM_BYTES);
+
+    await host.client.send("playback_action", { action: "queue_add", track_info: { id: "small", title: "Small" } });
+    expect((await host.client.next("error")).payload.code).toBe("queue_full");
+    await host.client.send("playback_action", { action: "pause", position: 1000 });
+    expect((await host.client.next("sync_playback")).payload.action).toBe("pause");
+    await bharat.client.next("sync_playback");
+
+    const newcomer = await SangatClient.connect(hub, (await seedDevice(hub, "c")).token);
+    await newcomer.send("join_room", { room_code: host.code, username: "Charu" });
+    const request = await host.client.next("join_request");
+    await host.client.send("approve_join", { user_id: request.payload.user_id });
+    await newcomer.next("join_approved");
+
+    bharat.client.close();
+    await host.client.next("user_joined");
+    await host.client.next("user_disconnected");
+    const back = await SangatClient.connect(hub, devices[1].token);
+    await back.send("reconnect", { session_token: bharat.token });
+    expect((await back.next("reconnected")).payload.room_code).toBe(host.code);
+    expect(await stored()).toBeLessThanOrEqual(MAX_ROOM_STATE_BYTES);
   });
 
   it("approving a suggestion that would pass the cap answers queue_full and keeps the suggestion", async () => {

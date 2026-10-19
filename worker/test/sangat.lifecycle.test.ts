@@ -54,8 +54,8 @@ const getAlarm = (hub: Hub) => runInDurableObject(hub, (_instance, state) => sta
 
 /**
  * The stored deadline (a member's grace or a room's cleanup) is `stored`, and the
- * alarm is the earlier of that and the moment the quietest open socket would
- * count as idle.
+ * alarm is no later than the earlier of that and the moment the quietest open
+ * socket would count as idle.
  */
 async function expectAlarm(hub: Hub, stored: number | null) {
   const { actual, idle } = await runInDurableObject(hub, (_instance, state) => {
@@ -70,7 +70,14 @@ async function expectAlarm(hub: Hub, stored: number | null) {
   });
   expect(actual).toBe(stored);
   const wanted = stored === null ? idle : idle === null ? stored : Math.min(stored, idle);
-  expect(await getAlarm(hub)).toBe(wanted);
+  // The alarm is never later than the earliest deadline. One that is already earlier
+  // is left alone (a spurious early wake only re-arms), so it need not be equal.
+  const alarm = await getAlarm(hub);
+  if (wanted === null) expect(alarm).toBeNull();
+  else {
+    expect(alarm).not.toBeNull();
+    expect(alarm).toBeLessThanOrEqual(wanted);
+  }
 }
 
 const track = (n: number) => ({

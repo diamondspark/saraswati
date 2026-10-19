@@ -25,6 +25,8 @@ import {
   CLOSE_GOING_AWAY,
   CLOSE_POLICY_VIOLATION,
   CLOSE_REASON_IDLE,
+  MAX_PENDING_BYTES_PER_SOCKET,
+  MAX_PENDING_BYTES_TOTAL,
   MAX_PENDING_MESSAGES_PER_SOCKET,
   MAX_READ_MESSAGE_BYTES,
   MAX_SOCKETS_PER_DEVICE,
@@ -32,7 +34,7 @@ import {
   RATE_LIMITED_MESSAGE,
   REQUEST_SYNC_MIN_INTERVAL_MS,
 } from "./limits";
-import { idleDeadline, recordMessage } from "./liveness";
+import { floodedTooLong, idleDeadline, recordMessage } from "./liveness";
 import { handleBufferReady, handlePlaybackAction, handleRequestSync } from "./playback";
 import { fail, hostIsConnected, message, removeFromRoom } from "./roomOps";
 import {
@@ -110,8 +112,11 @@ export class Sangat {
   // The alarm time as last set from here; undefined until first read from storage.
   private alarmAt: number | null | undefined;
   private readonly lastSyncAt = new Map<string, number>();
-  // Messages each socket has in the queue, counted from arrival until handled.
+  // Messages each socket has in the queue, counted from arrival until handled, and the
+  // bytes they hold: per socket and in all.
   private readonly waiting = new WeakMap<WebSocket, number>();
+  private readonly waitingBytes = new WeakMap<WebSocket, number>();
+  private totalWaitingBytes = 0;
   // Socket side effects a handler asked for; they run only once its changes are committed.
   private effects: (() => void)[] = [];
 
@@ -177,25 +182,37 @@ export class Sangat {
         } catch {
           // the socket closed under us
         }
+        // A burst is answered; a socket that keeps it up for several windows in a row is cut off.
+        if (floodedTooLong(att)) this.cutOff(ws, att, "rate limited");
         return Promise.resolve();
       }
     }
 
-    // A socket that has this many messages waiting is not keeping up. It is
-    // closed and its member disconnected, which also frees the queue of it.
+    // A socket that has too many messages waiting, or too many bytes of them, is not
+    // keeping up. So does the hub as a whole: 128 MB is all the memory there is. The
+    // socket is closed and its member disconnected, which also frees the queue of it.
+    // A string is counted at its worst case of 3 bytes per UTF-16 unit.
+    const bytes = typeof data === "string" ? data.length * 3 : data.byteLength;
     const waiting = this.waiting.get(ws) ?? 0;
-    if (waiting >= MAX_PENDING_MESSAGES_PER_SOCKET) {
-      if (att) this.closeSocket(ws, att, CLOSE_POLICY_VIOLATION, "backpressure");
-      else safeClose(ws, CLOSE_POLICY_VIOLATION, "backpressure");
-      this.onClose(ws).catch((error) => console.error("sangat: disconnect failed", errorName(error)));
+    const waitingBytes = this.waitingBytes.get(ws) ?? 0;
+    if (
+      waiting >= MAX_PENDING_MESSAGES_PER_SOCKET ||
+      waitingBytes + bytes > MAX_PENDING_BYTES_PER_SOCKET ||
+      this.totalWaitingBytes + bytes > MAX_PENDING_BYTES_TOTAL
+    ) {
+      this.cutOff(ws, att, "backpressure");
       return Promise.resolve();
     }
     this.waiting.set(ws, waiting + 1);
+    this.waitingBytes.set(ws, waitingBytes + bytes);
+    this.totalWaitingBytes += bytes;
     return this.enqueue(async () => {
       try {
         await this.handleMessage(ws, data, receivedAt);
       } finally {
         this.waiting.set(ws, (this.waiting.get(ws) ?? 1) - 1);
+        this.waitingBytes.set(ws, (this.waitingBytes.get(ws) ?? bytes) - bytes);
+        this.totalWaitingBytes -= bytes;
       }
     });
   }
@@ -279,35 +296,49 @@ export class Sangat {
   /**
    * Cuts a device off at once: its sockets close with `code`, it leaves every
    * room it was in (so its reconnect tokens die with its seats), and the rooms
-   * it leaves behind are told. The storage changes are done when this returns.
+   * it leaves behind are told.
+   *
+   * The sockets go first. Tombstoned, they make everything already queued from them
+   * inert, so a revoked phone loses its authority even if the storage work below
+   * fails (a room whose state cannot be read, say). Then its members stay marked
+   * connected, and the close event and the grace expiry clean them up.
    */
   closeDevice(deviceId: string, code: number, reason: string): void {
-    const now = Date.now();
-    const outs = this.store.transaction(() => {
-      this.store.deletePendingJoinsOfDevice(deviceId);
-      const result: Out[] = [];
-      for (const member of this.store.membersOfDevice(deviceId)) {
-        const room = this.store.getRoom(member.roomCode);
-        if (!room || room.emptySince !== null) this.store.deleteMember(member.userId);
-        else result.push(...removeFromRoom(this.store, room, member, now));
-      }
-      return result;
-    });
     for (const ws of this.ctx.getWebSockets()) {
       const att = this.attachmentOf(ws);
       if (att?.deviceId === deviceId) this.closeSocket(ws, att, code, reason);
     }
+    const now = Date.now();
+    let outs: Out[] = [];
+    try {
+      outs = this.store.transaction(() => {
+        this.store.deletePendingJoinsOfDevice(deviceId);
+        const result: Out[] = [];
+        for (const member of this.store.membersOfDevice(deviceId)) {
+          const room = this.store.getRoom(member.roomCode);
+          if (!room || room.emptySince !== null) this.store.deleteMember(member.userId);
+          else result.push(...removeFromRoom(this.store, room, member, now));
+        }
+        return result;
+      });
+    } catch (error) {
+      console.error("sangat: removing a closed device from its rooms failed", errorName(error));
+    }
     this.announce(outs);
   }
 
-  /** Closes every socket with `code` and deletes every room. */
+  /** Closes every socket with `code` and deletes every room. The sockets go first, as in closeDevice. */
   closeAll(code: number, reason: string): void {
     for (const ws of this.ctx.getWebSockets()) {
       const att = this.attachmentOf(ws);
       if (att) this.closeSocket(ws, att, code, reason);
       else safeClose(ws, code, reason);
     }
-    this.store.wipe();
+    try {
+      this.store.transaction(() => this.store.wipe());
+    } catch (error) {
+      console.error("sangat: clearing the rooms failed", errorName(error));
+    }
     this.lastSyncAt.clear();
     this.announce([]);
   }
@@ -444,6 +475,13 @@ export class Sangat {
     safeClose(ws, code, reason);
   }
 
+  /** Closes a socket that misbehaves (1008) and disconnects its member. */
+  private cutOff(ws: WebSocket, att: Attachment | null, reason: string): void {
+    if (att) this.closeSocket(ws, att, CLOSE_POLICY_VIOLATION, reason);
+    else safeClose(ws, CLOSE_POLICY_VIOLATION, reason);
+    this.onClose(ws).catch((error) => console.error("sangat: disconnect failed", errorName(error)));
+  }
+
   /**
    * A message from a socket the server has already closed is not handled, and the
    * socket is closed again if the close has not taken hold. True when it was dropped.
@@ -510,8 +548,15 @@ export class Sangat {
    */
   private reconcileNow(): void {
     if (this.reconciled) return;
+    let outs: Out[];
+    try {
+      outs = this.store.transaction(() => disconnectOrphans(this.runtime, this.liveUserIds()));
+    } catch (error) {
+      // Not marked done, so the next way in tries again. What was asked of the hub goes on.
+      console.error("sangat: reconciling after a restart failed", errorName(error));
+      return;
+    }
     this.reconciled = true;
-    const outs = this.store.transaction(() => disconnectOrphans(this.runtime, this.liveUserIds()));
     this.announce(outs);
   }
 
@@ -550,8 +595,9 @@ export class Sangat {
   // The alarm
 
   /**
-   * Points the one alarm at the earliest deadline, or clears it. Deadlines are
-   * the expiries in storage and the moment the quietest socket counts as idle.
+   * Keeps the one alarm at or before the earliest deadline, and clears it when there
+   * is none. Deadlines are the expiries in storage and the moment the quietest socket
+   * counts as idle.
    */
   private async scheduleAlarm(failedAt?: number): Promise<void> {
     let stored = this.store.nextDeadline();
@@ -561,9 +607,15 @@ export class Sangat {
     const idle = this.nextIdleDeadline();
     const wanted = stored === null ? idle : idle === null ? stored : Math.min(stored, idle);
     if (this.alarmAt === undefined) this.alarmAt = await this.ctx.storage.getAlarm();
-    if (wanted === this.alarmAt) return;
-    if (wanted === null) await this.ctx.storage.deleteAlarm();
-    else await this.ctx.storage.setAlarm(wanted);
+    if (wanted === null) {
+      if (this.alarmAt === null) return;
+      await this.ctx.storage.deleteAlarm();
+    } else {
+      // An alarm already at or before the deadline stays: moving it later would be a
+      // write for every message, and an early wake only finds nothing due and re-arms.
+      if (this.alarmAt !== null && this.alarmAt <= wanted) return;
+      await this.ctx.storage.setAlarm(wanted);
+    }
     this.alarmAt = wanted;
   }
 }

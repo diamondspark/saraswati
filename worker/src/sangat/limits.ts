@@ -33,8 +33,18 @@ export const MAX_SOCKETS_PER_DEVICE = 4;
 export const MAX_ROOMS_PER_DEVICE = 2;
 // Messages one socket may have waiting in the queue before it is cut off.
 export const MAX_PENDING_MESSAGES_PER_SOCKET = 64;
+// Bytes waiting in the queue: 64 messages of 512 KB each would be 32 MB for one socket, and
+// 4 sockets together would pass the Worker's 128 MB. A socket over either budget is cut off.
+export const MAX_PENDING_BYTES_PER_SOCKET = 2 * 1024 * 1024;
+export const MAX_PENDING_BYTES_TOTAL = 8 * 1024 * 1024;
+// A socket with a message refused by the rate limit in this many windows in a row is cut off.
+export const RATE_LIMIT_STRIKES_TO_CLOSE = 5;
 // A room's serialized RoomState is one SQLite row; a row holds about 2 MB.
 export const MAX_ROOM_STATE_BYTES = 1_500_000;
+// Queue growth stops this far below the cap, so that the changes that cannot be refused
+// (a member joining, a reconnect) always have room.
+export const QUEUE_STATE_HEADROOM_BYTES = 16_384;
+export const MAX_QUEUE_STATE_BYTES = MAX_ROOM_STATE_BYTES - QUEUE_STATE_HEADROOM_BYTES;
 // When a room could not be swept, the alarm waits this long before trying again.
 export const ALARM_RETRY_MS = 60_000;
 

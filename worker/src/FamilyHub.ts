@@ -330,6 +330,12 @@ export class FamilyHub extends DurableObject<Env> {
    * an approved roster row's own session token. `null` means
    * unauthenticated. Tasks 4 and 5 reuse this rather than re-checking auth
    * their own way.
+   *
+   * It must stay free of real awaits (it is async only for its callers' sake).
+   * A revoke runs between two events of the Durable Object; if this yielded to
+   * anything that opens the input gate (a fetch, a timer, a stream), a revoke
+   * could land between a device being authenticated and its socket being
+   * accepted, and /ws would hand a socket to a device that was just cut off.
    */
   private async authenticate(
     request: Request,

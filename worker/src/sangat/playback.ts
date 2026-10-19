@@ -183,8 +183,12 @@ export const handlePlaybackAction: Handler = (rt, conn, payload) => {
   state.revision += 1n;
   p.revision = state.revision;
   p.serverTime = nowMs;
-  // Nothing is stored for a queue that would not fit in the room's row.
-  if (!store.trySaveRoom(room)) return [fail(me, "queue_full", "Queue is full")];
+  // Nothing is stored for a queue that would not fit in the room's row. Actions that can
+  // add to the queue stop short of the cap; the others (pause, volume) may use all of it.
+  const grows = p.action === "change_track" || p.action === "queue_add" || p.action === "sync_queue";
+  if (!(grows ? store.trySaveRoomGrowth(room) : store.trySaveRoom(room))) {
+    return [fail(me, "queue_full", "Queue is full")];
+  }
   return toAll(connectedIds(store, room.code), "sync_playback", toBinary(PlaybackActionPayloadSchema, p));
 };
 
