@@ -42,8 +42,11 @@ import com.metrolist.music.constants.DiscordButton1UrlKey
 import com.metrolist.music.constants.DiscordButton2UrlKey
 import com.metrolist.music.constants.DiscordNameKey
 import com.metrolist.music.constants.DiscordUsernameKey
+import com.metrolist.music.constants.FamilyDeviceIdKey
 import com.metrolist.music.constants.FamilyStationsCacheKey
+import com.metrolist.music.constants.FamilyStationsSavedKey
 import com.metrolist.music.constants.GrandparentRoleKey
+import com.metrolist.music.constants.IsFamilyOwnerKey
 import com.metrolist.music.constants.ListenTogetherServerUrlKey
 import com.metrolist.music.constants.ListenTogetherSessionTimestampKey
 import com.metrolist.music.constants.MaxImageCacheSizeKey
@@ -134,6 +137,18 @@ object BackupPolicy {
                 // cache is hub data, refreshed from the hub, not a backup item.
                 GrandparentRoleKey,
                 FamilyStationsCacheKey,
+                // SARASWATI: Task 7/8 fix round 1 — this phone's own hub state,
+                // none of it a credential by name but all of it identity. A
+                // restore must not plant or clear the owner flag (Manage
+                // Family's gate), must not swap the hub device id out from
+                // under the live session token (every health report and the
+                // hub's own checks pair the two), and the "stations were
+                // saved" marker decides whether an empty hub list shows the
+                // starting defaults. mergeRestoreOntoLive keeps this phone's
+                // live values for all three.
+                IsFamilyOwnerKey,
+                FamilyDeviceIdKey,
+                FamilyStationsSavedKey,
             )
 
     // Preference keys the coverage test's wider regex flags as

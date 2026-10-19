@@ -315,4 +315,95 @@ class JoinFamilyViewModelTest {
 
         assertTrue("an unconfirmed pick must not lock the phone into Saral", roles.writes.isEmpty())
     }
+    // --- Fix round 1 ------------------------------------------------------
+
+    @Test
+    fun `a second link tapped while the join screen is open replaces the first on the next start`() {
+        val second = "f".repeat(64)
+        inbox.offer(TEST_TOKEN)
+        vm.start()
+        assertEquals(JoinUiState.Ready(TEST_TOKEN), vm.state.value)
+
+        inbox.offer(second)
+        vm.start()
+
+        assertEquals(JoinUiState.Ready(second), vm.state.value)
+        assertNull(inbox.take())
+    }
+
+    @Test
+    fun `start is safe to repeat and changes nothing when no new link arrived`() {
+        inbox.offer(TEST_TOKEN)
+        vm.start()
+
+        vm.start()
+        vm.start()
+
+        assertEquals(JoinUiState.Ready(TEST_TOKEN), vm.state.value)
+        assertTrue(hub.calls.isEmpty())
+    }
+
+    @Test
+    fun `a link that arrives while waiting for approval is dropped, not left for later`() {
+        store.claim = PendingClaim("device-9", "stored-secret")
+        vm.start()
+        assertEquals(JoinUiState.Waiting, vm.state.value)
+
+        inbox.offer(TEST_TOKEN)
+        vm.start()
+
+        assertEquals(JoinUiState.Waiting, vm.state.value)
+        assertNull(inbox.take())
+    }
+
+    @Test
+    fun `starting again after approval keeps the approved screen`() {
+        hub.scriptStatus(PairingStatus.Approved("tok"))
+        vm.submitInput(link)
+        vm.claim("Mummy's Pixel", DeviceRole.ADULT)
+        awaitState { it is JoinUiState.Approved }
+
+        inbox.offer(TEST_TOKEN)
+        vm.start()
+
+        assertEquals(JoinUiState.Approved(DeviceRole.ADULT), vm.state.value)
+        assertNull(inbox.take())
+    }
+
+    @Test
+    fun `the poll interval keeps a phone inside the hub's twelve polls a minute`() {
+        assertTrue(
+            "${JoinFamilyViewModel.POLL_INTERVAL_MS} ms between polls is more than 12 a minute",
+            60_000 / JoinFamilyViewModel.POLL_INTERVAL_MS <= 12,
+        )
+    }
+
+    @Test
+    fun `each 429 makes the wait before the next poll longer`() {
+        val interval = 25L
+        hub.scriptStatus(hubFailure(429), hubFailure(429), hubFailure(429), PairingStatus.Approved("tok"))
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        vm =
+            JoinFamilyViewModel(
+                hub,
+                store,
+                HubConfig(TEST_HUB_URL),
+                inbox,
+                GrandparentRoleSync(hub, store, roles),
+                scope,
+                pollIntervalMs = interval,
+            )
+        vm.submitInput(link)
+
+        vm.claim("Mummy's Pixel", DeviceRole.ADULT)
+        awaitState { it is JoinUiState.Approved }
+
+        val gapsMs = hub.statusCallNanos.zipWithNext { a, b -> (b - a) / 1_000_000 }
+        assertEquals(3, gapsMs.size)
+        // After the first 429 the wait doubles (2x), after the second it doubles again (4x). The
+        // bounds are lower bounds only, with a few ms of slack for timer rounding.
+        assertTrue("gap after 1st 429 was ${gapsMs[0]} ms", gapsMs[0] >= 2 * interval - 5)
+        assertTrue("gap after 2nd 429 was ${gapsMs[1]} ms", gapsMs[1] >= 4 * interval - 5)
+        assertTrue("gap after 3rd 429 was ${gapsMs[2]} ms", gapsMs[2] >= 8 * interval - 5)
+    }
 }

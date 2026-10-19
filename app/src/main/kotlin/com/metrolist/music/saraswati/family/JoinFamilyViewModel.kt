@@ -11,8 +11,8 @@
 // The poll interval is 6 s: the hub allows 12 status polls a minute per
 // device and answers 429 beyond that, so the loop stays well inside it and
 // backs off further on a 429. The claim is stored the moment the hub issues
-// it, so closing the app while waiting resumes the wait instead of burning
-// the owner's one-time link.
+// it, so reopening Join after the app was closed resumes the wait instead of
+// burning the owner's one-time link. Nothing polls while Join is not open.
 //
 // Task 9: once approved, the first getMe() both reports the role and caches it
 // (GrandparentRoleSync), which is what turns Saral on for a grandparent phone.
@@ -85,10 +85,17 @@ class JoinFamilyViewModel
         @Volatile private var chosenRole = DeviceRole.ADULT
         private var pollJob: Job? = null
 
-        /** Call when the join screen opens: resumes a stored claim, or picks up a link that arrived as a deep link. */
+        /**
+         * Call when the join screen opens and each time it resumes: resumes a stored claim, or
+         * picks up a link that arrived as a deep link. Safe to repeat. Once the wait has started
+         * or finished a newly arrived link is dropped, not kept for a later visit.
+         */
         fun start() {
             viewModelScope.launch {
-                if (pollJob?.isActive == true) return@launch
+                if (pollJob?.isActive == true || _state.value is JoinUiState.Approved) {
+                    inbox.take()
+                    return@launch
+                }
                 if (alreadyPaired()) {
                     inbox.take()
                     _state.value = JoinUiState.AlreadyPaired

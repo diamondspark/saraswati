@@ -9,7 +9,9 @@
 //
 // The role cards follow the approved onboarding mockup: "Adult" and
 // "दादा-दादी · नाना-नानी" (grandparent). The pairing token is never kept in
-// saved instance state; only the text the person typed or pasted is.
+// saved instance state: not the token in the view model, and not the link or
+// token pasted into the field either, which is plain remember. Only the phone's
+// display name and the role card picked are saved across process death.
 package com.metrolist.music.saraswati.family
 
 import android.content.ClipboardManager
@@ -47,9 +49,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -61,6 +63,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.metrolist.music.LocalPlayerAwareWindowInsets
@@ -75,7 +79,9 @@ fun JoinFamilyScreen(
     viewModel: JoinFamilyViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    LaunchedEffect(Unit) { viewModel.start() }
+    // On open and on every return to this screen, so a second link tapped while it is
+    // already open is picked up (start() is safe to repeat).
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.start() }
 
     Box(Modifier.fillMaxSize()) {
         Column(
@@ -146,7 +152,7 @@ private fun PasteLink(
     onSubmit: (String) -> Unit,
 ) {
     val context = LocalContext.current
-    var text by rememberSaveable { mutableStateOf("") }
+    var text by remember { mutableStateOf("") }
 
     Text(stringResource(R.string.family_join_heading), style = MaterialTheme.typography.headlineSmall)
     Text(

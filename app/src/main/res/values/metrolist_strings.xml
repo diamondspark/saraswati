@@ -1053,7 +1053,7 @@
     <string name="family_join_send">Send request</string>
     <string name="family_join_sending">Sending…</string>
     <string name="family_join_waiting_title">Request sent</string>
-    <string name="family_join_waiting_desc">Waiting for the family owner to approve this phone. You can close the app; it keeps waiting.</string>
+    <string name="family_join_waiting_desc">Waiting for the family owner to approve this phone. Keep this screen open, or come back to Join later to check.</string>
     <string name="family_join_done_title">All set</string>
     <string name="family_join_done_adult">This phone is part of the family now. Find it under Family.</string>
     <string name="family_join_done_grandparent">The owner set this phone up for grandparents.</string>

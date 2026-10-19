@@ -143,6 +143,9 @@ class FamilyViewModelTest {
         assertEquals(listOf("approveDevice($TEST_ADMIN_KEY,d1)"), hub.callsTo("approveDevice"))
         assertEquals("approved", vm.roster.value.single().status)
         assertNull(vm.error.value)
+        // The session token the hub returns belongs to the claiming phone; the owner's keeps none.
+        assertNull(store.session)
+        assertNull(store.claim)
     }
 
     @Test

@@ -27,6 +27,9 @@ fun hubFailure(status: Int): Throwable = HubException(status, "hub answered HTTP
 
 class FakeHub : HubApi {
     val calls = CopyOnWriteArrayList<String>()
+
+    /** When each pairingStatus call arrived, so a test can measure the gaps between polls. */
+    val statusCallNanos = CopyOnWriteArrayList<Long>()
     private val failures = HashMap<String, Throwable>()
     private val statusScript = java.util.concurrent.ConcurrentLinkedQueue<Result<PairingStatus>>()
 
@@ -99,6 +102,7 @@ class FakeHub : HubApi {
         claimSecret: String,
     ): Result<PairingStatus> {
         calls.add("pairingStatus($deviceId,$claimSecret)")
+        statusCallNanos.add(System.nanoTime())
         failures["pairingStatus"]?.let { return Result.failure(it) }
         return statusScript.poll() ?: Result.success(PairingStatus.Pending)
     }
