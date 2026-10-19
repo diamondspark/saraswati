@@ -399,6 +399,10 @@ jobs:
           # https://diamondspark.github.io/saraswati/setup-guide/. Stash it
           # outside the work tree first: checking out gh-pages below replaces
           # every file from this checkout.
+          [ -d docs/setup-guide ] || {
+            echo "docs/setup-guide is missing from this checkout; refusing to publish a release without the setup guide." >&2
+            exit 1
+          }
           cp -R docs/setup-guide "$RUNNER_TEMP/setup-guide"
           git fetch origin gh-pages 2>/dev/null || true
           if git show-ref --verify --quiet refs/remotes/origin/gh-pages; then
