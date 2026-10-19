@@ -13,16 +13,19 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
@@ -33,12 +36,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
@@ -64,17 +69,36 @@ class CrashActivity : ComponentActivity() {
         cleanupOldCrashFiles()
 
         val crashLog = intent.getStringExtra(CrashHandler.EXTRA_CRASH_LOG) ?: getString(R.string.crash_no_log)
+        // SARASWATI: fix wave A (M5) — set by CrashHandler from SaralActive. This process cannot read
+        // that flag itself, and the Share button opens a chooser to any app: not for a grandparent.
+        saral = intent.getBooleanExtra(CrashHandler.EXTRA_SARAL, false)
 
         setContent {
             val darkTheme = isSystemInDarkTheme()
             MetrolistTheme(darkTheme = darkTheme) {
-                CrashScreen(
-                    crashLog = crashLog,
-                    onClose = { finishAffinity() },
-                    onShare = { shareCrashLog(crashLog) }
-                )
+                if (saral) {
+                    SaralCrashScreen(onRestart = ::restartApp)
+                } else {
+                    CrashScreen(
+                        crashLog = crashLog,
+                        onClose = { finishAffinity() },
+                        onShare = { shareCrashLog(crashLog) }
+                    )
+                }
             }
         }
+    }
+
+    private var saral = false
+
+    // SARASWATI: fix wave A (M5) — the way back for a Saral phone: start the app again. The role is
+    // cached on the phone, so it comes back as Saral.
+    private fun restartApp() {
+        packageManager.getLaunchIntentForPackage(packageName)?.let {
+            it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+            startActivity(it)
+        }
+        finishAffinity()
     }
     
     // SARASWATI (audit A11-3): delete crash files left in the shared cache
@@ -96,6 +120,8 @@ class CrashActivity : ComponentActivity() {
     }
 
     private fun shareCrashLog(crashLog: String) {
+        // SARASWATI: fix wave A (M5) — belt and braces: nothing on the Saral screen calls this.
+        if (saral) return
         try {
             // Create crash log file
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
@@ -226,6 +252,39 @@ fun CrashScreen(
             
             // Bottom spacing for FAB
             Spacer(modifier = Modifier.height(88.dp))
+        }
+    }
+}
+
+// SARASWATI: fix wave A (M5) — what a Saral phone shows after a crash: one plain Hindi line and one
+// big button. No title bar, no stack trace, no Share, nothing that leaves the app.
+@Composable
+fun SaralCrashScreen(onRestart: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(32.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = stringResource(R.string.saral_crash_message),
+            style = MaterialTheme.typography.headlineLarge.copy(fontSize = 32.sp, lineHeight = 44.sp),
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(48.dp))
+        Button(
+            onClick = onRestart,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 80.dp)
+        ) {
+            Text(
+                text = stringResource(R.string.saral_crash_restart),
+                style = MaterialTheme.typography.headlineSmall.copy(fontSize = 26.sp)
+            )
         }
     }
 }

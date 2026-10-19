@@ -91,4 +91,11 @@ class SaralStringsTest {
             assertTrue("missing $needed", needed in names)
         }
     }
+
+    // SARASWATI: fix wave B2 — the "voice search failed" line says what failed (the search), plainly.
+    // Needs a native-speaker read like the other lines that are not in the approved mockup.
+    @Test
+    fun `the voice failure line is the short one`() {
+        assertEquals("अभी खोज नहीं हो सकी", saralStrings().associate { it.first to it.third }["saral_voice_failed"])
+    }
 }

@@ -60,6 +60,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -82,6 +86,8 @@ fun JoinFamilyScreen(
     // On open and on every return to this screen, so a second link tapped while it is
     // already open is picked up (start() is safe to repeat).
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.start() }
+    // The approval poll runs only while this screen is on show (the view model also gives up after 15 minutes).
+    LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { viewModel.stop() }
 
     Box(Modifier.fillMaxSize()) {
         Column(
@@ -111,7 +117,8 @@ fun JoinFamilyScreen(
                         onSend = viewModel::claim,
                     )
                 current is JoinUiState.Failed -> PasteLink(error = current.error, onSubmit = viewModel::submitInput)
-                current is JoinUiState.Waiting -> Waiting()
+                current is JoinUiState.Waiting -> Waiting(code = current.code)
+                current is JoinUiState.StillWaiting -> StillWaiting(code = current.code, onCheckAgain = viewModel::checkAgain)
                 current is JoinUiState.Approved -> Approved(role = current.role, onDone = { navController.popBackStack() })
                 current is JoinUiState.AlreadyPaired ->
                     Message(
@@ -258,7 +265,7 @@ private fun RoleCard(
 }
 
 @Composable
-private fun Waiting() {
+private fun Waiting(code: String) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(top = 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -266,6 +273,7 @@ private fun Waiting() {
     ) {
         CircularProgressIndicator(modifier = Modifier.size(40.dp))
         Text(stringResource(R.string.family_join_waiting_title), style = MaterialTheme.typography.headlineSmall)
+        CodeLine(code)
         Text(
             stringResource(R.string.family_join_waiting_desc),
             style = MaterialTheme.typography.bodyMedium,
@@ -273,6 +281,46 @@ private fun Waiting() {
             textAlign = TextAlign.Center,
         )
     }
+}
+
+/** The 15-minute cap was reached and nothing is polling; the person decides whether to look again. */
+@Composable
+private fun StillWaiting(
+    code: String,
+    onCheckAgain: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(top = 48.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text(stringResource(R.string.family_join_still_waiting_title), style = MaterialTheme.typography.headlineSmall)
+        CodeLine(code)
+        Text(
+            stringResource(R.string.family_join_still_waiting_desc),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        Button(onClick = onCheckAgain) { Text(stringResource(R.string.family_join_check_again)) }
+    }
+}
+
+/**
+ * The four characters the owner sees next to this request: large, monospace, and read out one character at
+ * a time by a screen reader, so "0A3B" is not heard as a word. Saying them aloud to the owner is the check.
+ */
+@Composable
+private fun CodeLine(code: String) {
+    val spoken = stringResource(R.string.family_join_code, code.toList().joinToString(" "))
+    Text(
+        text = stringResource(R.string.family_join_code, code),
+        style = MaterialTheme.typography.displayMedium,
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.semantics { contentDescription = spoken },
+    )
 }
 
 @Composable

@@ -474,3 +474,11 @@ android {
         }
     }
 }
+
+// SARASWATI: fix wave B3 — hands the strict mode of FestivalCalendarTest to the test JVM:
+// -Psaraswati.strictFestivalTable=true makes "the festival table is running out" a failure instead of a skip.
+// Only the weekly festival-table workflow and a deliberate manual run pass it; saraswati-ci and the release
+// verify job never do (docs/release-runbook.md, "Before every release").
+tasks.withType<Test>().configureEach {
+    providers.gradleProperty("saraswati.strictFestivalTable").orNull?.let { systemProperty("saraswati.strictFestivalTable", it) }
+}

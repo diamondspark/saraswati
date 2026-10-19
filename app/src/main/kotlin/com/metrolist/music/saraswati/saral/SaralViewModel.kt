@@ -184,9 +184,13 @@ internal object SaralStatusRules {
         player: SaralPlayerState,
         notice: VoiceNotice?,
         problem: PlaybackProblem? = null,
+        searching: Festival? = null,
     ): SaralStatus {
         if (notice != null) return SaralStatus.Voice(notice)
         (problem ?: player.problem)?.let { return SaralStatus.Problem(it) }
+        // SARASWATI: fix wave B2 (M1) — looking for a festival radio's first song is "starting" whatever the
+        // player holds: a queue Saral started before is still playing, and must not be reported as the festival's.
+        if (searching != null) return SaralStatus.Starting(SaralSubject.Festival(searching))
         if (request == null) {
             // Nothing was asked of Saral: report whatever the player holds, if anything.
             val title = player.title?.takeIf { player.mediaId != null } ?: return SaralStatus.Idle
@@ -261,6 +265,10 @@ class SaralViewModel
         // A failure Saral met itself (as opposed to one the player reports); cleared by the next thing the person does.
         private val problem = MutableStateFlow<PlaybackProblem?>(null)
 
+        // The festival whose radio's first song is being looked for. Nothing has been asked of the player yet, so
+        // this is not a request: whatever the player holds is still the previous request's (or nobody's).
+        private val searchingFestival = MutableStateFlow<Festival?>(null)
+
         /**
          * Today's festival, if it is one. Counted from the phone's own day, and started afresh each time the screen comes
          * back (collection stops a few seconds after it leaves), so a phone that slept through midnight is right on waking.
@@ -279,8 +287,9 @@ class SaralViewModel
                 .stateIn(viewModelScope, SharingStarted.Eagerly, SaralPlayerState())
 
         val status: StateFlow<SaralStatus> =
-            combine(request, playerState, notice, problem) { asked, player, said, failed -> SaralStatusRules.derive(asked, player, said, failed) }
-                .stateIn(viewModelScope, SharingStarted.Eagerly, SaralStatus.Idle)
+            combine(request, playerState, notice, problem, searchingFestival) { asked, player, said, failed, looking ->
+                SaralStatusRules.derive(asked, player, said, failed, looking)
+            }.stateIn(viewModelScope, SharingStarted.Eagerly, SaralStatus.Idle)
 
         val isPlaying: StateFlow<Boolean> =
             playerState.map { it.playing }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
@@ -295,9 +304,17 @@ class SaralViewModel
         private val _signingIn = MutableStateFlow(false)
         val signingIn: StateFlow<Boolean> = _signingIn.asStateFlow()
 
+        // True while the sign-in sheet is saving the account (LoginContent's finalizeLogin). The cookie it writes
+        // turns signedIn on partway through, and closing the sheet then would cancel the rest of finalizeLogin
+        // (it clears the WebView's copy of the session and restarts the app).
+        private val finishingSignIn = MutableStateFlow(false)
+
         init {
             viewModelScope.launch { playerState.collect(::onPlayerState) }
-            viewModelScope.launch { signedIn.collect { if (it) _signingIn.value = false } }
+            viewModelScope.launch {
+                combine(signedIn, finishingSignIn) { signed, finishing -> signed && !finishing }
+                    .collect { if (it) _signingIn.value = false }
+            }
             viewModelScope.launch { refresher.refresh() }
         }
 
@@ -377,26 +394,51 @@ class SaralViewModel
         fun onFestivalTapped() {
             val today = festival.value ?: return
             clearMessages()
-            begin(SaralRequest.Festival(today))
+            // SARASWATI: fix wave B2 (M1) — the request begins when the seed song is found, not at the tap: until
+            // then the player is still on whatever it was playing, and a request would claim that track.
+            festivalJob?.cancel()
+            searchingFestival.value = today
             festivalJob =
                 viewModelScope.launch {
                     val seed = festivalRadio.seedFor(today)
                     // A search that was replaced may still hand back a (wrapped) failure; it must not speak.
                     coroutineContext.ensureActive()
                     when (seed) {
-                        is FestivalSeed.Found -> whenPlayerReady { it.playRadio(seed.videoId) }
-                        FestivalSeed.NotFound -> problem.value = PlaybackProblem.COULD_NOT_PLAY
-                        is FestivalSeed.Failed -> problem.value = if (seed.offline) PlaybackProblem.OFFLINE else PlaybackProblem.COULD_NOT_PLAY
+                        is FestivalSeed.Found -> {
+                            // The request first and the searching flag off last (after the player has been handed the
+                            // radio, which gives it a fresh queue watch): any other order lets a frame show the old
+                            // request's status, or the old queue's track as the festival's.
+                            startRequest(SaralRequest.Festival(today))
+                            whenPlayerReady { it.playRadio(seed.videoId) }
+                            searchingFestival.value = null
+                        }
+                        FestivalSeed.NotFound -> {
+                            problem.value = PlaybackProblem.COULD_NOT_PLAY
+                            searchingFestival.value = null
+                        }
+                        is FestivalSeed.Failed -> {
+                            problem.value = if (seed.offline) PlaybackProblem.OFFLINE else PlaybackProblem.COULD_NOT_PLAY
+                            searchingFestival.value = null
+                        }
                     }
                 }
         }
 
         fun onSignInTapped() {
-            if (!signedIn.value) _signingIn.value = true
+            if (!signedIn.value) {
+                finishingSignIn.value = false
+                _signingIn.value = true
+            }
         }
 
         fun onSignInClosed() {
+            finishingSignIn.value = false
             _signingIn.value = false
+        }
+
+        /** The sign-in sheet started ([active]) or stopped saving the account. */
+        fun onSignInFinishing(active: Boolean) {
+            finishingSignIn.value = active
         }
 
         private fun endVoice(result: VoiceNotice) {
@@ -457,6 +499,11 @@ class SaralViewModel
         private fun begin(next: SaralRequest) {
             festivalJob?.cancel()
             festivalJob = null
+            searchingFestival.value = null
+            startRequest(next)
+        }
+
+        private fun startRequest(next: SaralRequest) {
             adopted = false
             request.value = next
         }

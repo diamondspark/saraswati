@@ -416,7 +416,7 @@ class SyncUtils @Inject constructor(
             val stored = context.dataStore.data
                 .map { it[InnerTubeCookieKey] }
                 .first()
-            val cookie = stored?.let { SaraswatiVault.cookieVault.open(it) }
+            val cookie = stored?.let { SaraswatiVault.cookieVault.openOrNull(it) }
             cookie?.let { "SAPISID" in parseCookieString(it) } ?: false
         } catch (e: Exception) {
             Timber.e(e, "Error checking login status")

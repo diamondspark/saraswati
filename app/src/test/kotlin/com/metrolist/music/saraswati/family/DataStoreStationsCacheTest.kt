@@ -279,4 +279,82 @@ class DataStoreStationsCacheTest {
         assertTrue("loaded must not be seen with the empty list from before: $seen", seen.none { it.first && it.second.isEmpty() })
         assertEquals(true to listOf(bollywood), seen.last())
     }
+
+    // SARASWATI: fix wave A (M4) — a bad hub entry never becomes a tile that cannot play.
+    private fun station(
+        id: String,
+        seed: String,
+    ) = Station(id, "Station $id", seed, 0)
+
+    @Test
+    fun `a station whose seed is not an eleven character video id is dropped`() =
+        runBlocking {
+            val cache = cache()
+            val bad =
+                listOf(
+                    station("empty", ""),
+                    station("short", "abcdefghij"),
+                    station("long", "abcdefghijkl"),
+                    station("space", "abcde fghij"),
+                    station("punct", "abcde.fghij"),
+                    station("devanagari", "गीतगीतगीतगीतगीत"),
+                    station("newline", "abcdefghij\n"),
+                    station("url", "https://youtu.be/dQw4w9WgXcQ"),
+                )
+
+            cache.replace(listOf(bollywood) + bad + listOf(bhajan))
+
+            assertEquals(listOf(bollywood, bhajan), cache.snapshot())
+        }
+
+    @Test
+    fun `underscore and hyphen are valid in a video id`() =
+        runBlocking {
+            val cache = cache()
+            val odd = station("odd", "a_b-c_D-E_f")
+
+            cache.replace(listOf(odd))
+
+            assertEquals(listOf(odd), cache.snapshot())
+        }
+
+    @Test
+    fun `a list with nothing valid left is ignored like an empty one`() =
+        runBlocking {
+            val cache = cache()
+            cache.replace(listOf(bollywood, bhajan))
+
+            cache.replace(listOf(station("bad", "nope"), station("worse", "")))
+
+            assertEquals(listOf(bollywood, bhajan), cache.snapshot())
+        }
+
+    @Test
+    fun `an invalid station is filtered before the cap and never stored`() =
+        runBlocking {
+            val cache = cache()
+            val valid = (1..6).map { station("ok$it", "video00000$it") }
+
+            cache.replace(listOf(station("bad", "x")) + valid + listOf(station("late", "video000099")))
+
+            assertEquals(valid, cache.snapshot())
+            val restarted = cache()
+            awaitHydrated(restarted)
+            assertEquals(valid, restarted.snapshot())
+        }
+
+    @Test
+    fun `the cache and the car use one video id predicate`() {
+        val sources =
+            java.io.File("src/main/kotlin/com/metrolist/music/saraswati").let { if (it.isDirectory) it else java.io.File("app/$it") }
+        val definitions =
+            sources
+                .walkTopDown()
+                .filter { it.isFile && it.extension == "kt" }
+                .filter { it.readText().contains("[A-Za-z0-9_-]{11}") }
+                .map { it.name }
+                .toList()
+
+        assertEquals("the pattern is defined once, in StationVideo", listOf("StationVideo.kt"), definitions)
+    }
 }

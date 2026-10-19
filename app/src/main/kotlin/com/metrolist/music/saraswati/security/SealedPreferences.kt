@@ -32,7 +32,9 @@ object SealedPreferences {
      * The plaintext behind a stored value. For a sealed key this is null
      * unless [raw] is a value [vault] itself sealed: a plaintext or
      * foreign-sealed value (a restored backup, another phone's) is never
-     * returned.
+     * returned. A sealed value the Keystore cannot open right now (an
+     * unavailable Keystore) also reads as null, but this function never
+     * removes anything: only SecretScrubber deletes, and only on a rejection.
      */
     @Suppress("UNCHECKED_CAST")
     fun <T> unseal(
@@ -41,7 +43,7 @@ object SealedPreferences {
         vault: CookieVault,
     ): T? =
         if (isSealed(key)) {
-            (raw as? String)?.let { vault.open(it, purposeOf(key)) } as T?
+            (raw as? String)?.let { vault.openOrNull(it, purposeOf(key)) } as T?
         } else {
             raw
         }

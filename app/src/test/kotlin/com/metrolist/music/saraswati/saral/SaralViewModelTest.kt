@@ -25,6 +25,7 @@ import com.metrolist.music.saraswati.family.OFFLINE
 import com.metrolist.music.saraswati.family.Station
 import com.metrolist.music.saraswati.family.StationsRefresher
 import com.metrolist.music.saraswati.family.hubFailure
+import com.metrolist.music.saraswati.family.noThrottle
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -132,7 +133,7 @@ class SaralViewModelTest {
 
     private val bollywood = Station("default-bollywood-classics", "Bollywood Classics", "seedBollyw01", 0)
     private val bhajan = Station("default-bhajans-devotional", "Bhajans & Devotional", "seedBhajan01", 2)
-    private val mine = Station("s9", "Mummy's Songs", "seedMummy001", 1)
+    private val mine = Station("s9", "Mummy's Songs", "seedMummy01", 1)
 
     private fun song(
         id: String,
@@ -155,7 +156,7 @@ class SaralViewModelTest {
         scope.cancel()
     }
 
-    private fun newVm() = SaralViewModel(cache, StationsRefresher(hub, family, cache), search, signIn, scope)
+    private fun newVm() = SaralViewModel(cache, StationsRefresher(hub, family, cache, noThrottle()), search, signIn, scope)
 
     private fun SaralViewModel.ready(): SaralViewModel {
         bindPlayback(playback)
@@ -809,5 +810,60 @@ class SaralViewModelTest {
         vm.onSignInTapped()
 
         assertFalse(vm.signingIn.value)
+    }
+
+    // SARASWATI: fix wave B2 — finalizeLogin writes the signed-in cookie partway through; the sheet must
+    // stay up until it has finished clearing the WebView's copy and restarting the app.
+    @Test
+    fun `the sign-in screen stays open when the cookie lands while the sheet is still saving the account`() {
+        signIn = FakeSignIn(initial = false)
+        val vm = newVm()
+        vm.onSignInTapped()
+        vm.onSignInFinishing(true)
+
+        signIn.set(true)
+
+        assertTrue(vm.signedIn.value)
+        assertTrue("closing now would cancel finalizeLogin", vm.signingIn.value)
+    }
+
+    @Test
+    fun `once the sheet has finished saving and the phone is signed in, the sign-in screen closes`() {
+        signIn = FakeSignIn(initial = false)
+        val vm = newVm()
+        vm.onSignInTapped()
+        vm.onSignInFinishing(true)
+        signIn.set(true)
+
+        vm.onSignInFinishing(false)
+
+        assertFalse(vm.signingIn.value)
+    }
+
+    @Test
+    fun `finishing the save without being signed in leaves the sheet open`() {
+        signIn = FakeSignIn(initial = false)
+        val vm = newVm()
+        vm.onSignInTapped()
+
+        vm.onSignInFinishing(true)
+        vm.onSignInFinishing(false)
+
+        assertTrue(vm.signingIn.value)
+    }
+
+    @Test
+    fun `closing the sheet by hand forgets that it was saving`() {
+        signIn = FakeSignIn(initial = false)
+        val vm = newVm()
+        vm.onSignInTapped()
+        vm.onSignInFinishing(true)
+        vm.onSignInClosed()
+        assertFalse(vm.signingIn.value)
+
+        vm.onSignInTapped()
+        signIn.set(true)
+
+        assertFalse("a new sheet is not held open by the last one", vm.signingIn.value)
     }
 }

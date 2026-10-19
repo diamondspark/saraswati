@@ -41,6 +41,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -63,7 +65,10 @@ fun rememberCurrentFestival(): State<Festival?> {
     return remember { clock.changes() }.collectAsStateWithLifecycle(initialValue = clock.current())
 }
 
-/** [enabled] is false while the radio is being found, so a second tap cannot start a second one. */
+/**
+ * [enabled] is false while the radio is being found, so a second tap cannot start a second one, and for a
+ * Listen Together guest. The Play button is spoken as "Play festival music": a bare "Play" says nothing about what.
+ */
 @Composable
 fun FestivalBanner(
     festival: Festival,
@@ -72,6 +77,7 @@ fun FestivalBanner(
     modifier: Modifier = Modifier,
 ) {
     val shape = RoundedCornerShape(18.dp)
+    val playLabel = stringResource(R.string.festival_banner_play_desc)
     Row(
         modifier
             .fillMaxWidth()
@@ -90,7 +96,7 @@ fun FestivalBanner(
             Icon(painter = painterResource(R.drawable.festival_diya), contentDescription = null, tint = BannerAccent, modifier = Modifier.size(34.dp))
         }
         Column(Modifier.weight(1f)) {
-            Text(festival.bannerTitle(), color = BannerText, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(festival.bannerTitle(), color = BannerText, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 3, overflow = TextOverflow.Ellipsis)
             Text(
                 stringResource(R.string.festival_banner_subtitle, festival.name),
                 color = BannerTextDim,
@@ -104,7 +110,8 @@ fun FestivalBanner(
             Modifier
                 .alpha(if (enabled) 1f else 0.6f)
                 .minimumInteractiveComponentSize()
-                .clickable(enabled = enabled, role = Role.Button, onClick = onPlay),
+                .clickable(enabled = enabled, role = Role.Button, onClick = onPlay)
+                .semantics { contentDescription = playLabel },
             contentAlignment = Alignment.Center,
         ) {
             Text(

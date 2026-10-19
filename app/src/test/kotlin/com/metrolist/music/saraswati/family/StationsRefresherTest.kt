@@ -35,12 +35,15 @@ class StationsRefresherTest {
     private val old = Station("s1", "Old", "video000001", 0)
     private val fresh = Station("s2", "Fresh", "video000002", 1)
 
+    // The wall clock the 401 record is kept by (SessionVerdict).
+    private val wall = TestClock(nowMs = 1_000_000)
+
     @Before
     fun setUp() {
         hub = FakeHub()
         family = FakeStore().apply { session = FamilySession("device-1", "the-session-token") }
         cache = FakeStationsCache(listOf(old))
-        refresher = StationsRefresher(hub, family, cache)
+        refresher = StationsRefresher(hub, family, cache, noThrottle(), wall.reading)
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     }
 
@@ -159,6 +162,133 @@ class StationsRefresherTest {
         runBlocking { job.join() }
         hub.stationsGate = null
         refresh()
+
+        assertEquals(2, hub.callsTo("getStations").size)
+    }
+
+    // SARASWATI: fix wave A (M3) — a revoked phone forgets its session so it can join again.
+    @Test
+    fun `the third counted 401 clears the session and device id and leaves the cache`() {
+        hub.failWith("getStations", hubFailure(401))
+
+        repeat(SessionVerdict.STRIKES_TO_CLEAR) {
+            refresh()
+            wall.advance(SessionVerdict.MIN_GAP_MS)
+        }
+
+        assertEquals(listOf("device-1"), family.cleared.toList())
+        assertEquals(null, family.session)
+        assertEquals(listOf(old), cache.snapshot())
+    }
+
+    @Test
+    fun `no other failure clears the session`() {
+        for (failure in listOf(OFFLINE, hubFailure(404), hubFailure(429), hubFailure(500), hubFailure(503))) {
+            hub.failWith("getStations", failure)
+
+            refresh()
+
+            assertEquals(failure.toString(), FamilySession("device-1", "the-session-token"), family.session)
+        }
+        assertTrue(family.cleared.isEmpty())
+    }
+    // --- SARASWATI: fix wave B1 — at most one request a minute on resume ---------------------------------
+
+    private val clock = TestClock(nowMs = 5_000)
+
+    private fun throttledRefresher() = StationsRefresher(hub, family, cache, ResumeThrottle(ResumeThrottle.RESUME_INTERVAL_MS, clock.reading))
+
+    @Test
+    fun `the first refresh after the process starts runs`() {
+        hub.stations = listOf(fresh)
+
+        runBlocking { throttledRefresher().refresh() }
+
+        assertEquals(1, hub.callsTo("getStations").size)
+        assertEquals(listOf(fresh), cache.snapshot())
+    }
+
+    @Test
+    fun `a second refresh inside a minute makes no request and leaves the cache`() {
+        val throttled = throttledRefresher()
+        hub.stations = listOf(fresh)
+        runBlocking { throttled.refresh() }
+        hub.stations = listOf(old)
+        clock.advance(59_999)
+
+        runBlocking { throttled.refresh() }
+
+        assertEquals(1, hub.callsTo("getStations").size)
+        assertEquals(listOf(fresh), cache.snapshot())
+    }
+
+    @Test
+    fun `a minute later it asks again`() {
+        val throttled = throttledRefresher()
+        runBlocking { throttled.refresh() }
+        hub.stations = listOf(fresh)
+        clock.advance(60_000)
+
+        runBlocking { throttled.refresh() }
+
+        assertEquals(2, hub.callsTo("getStations").size)
+        assertEquals(listOf(fresh), cache.snapshot())
+    }
+
+    @Test
+    fun `a failed attempt still counts`() {
+        val throttled = throttledRefresher()
+        hub.failWith("getStations", OFFLINE)
+        runBlocking { throttled.refresh() }
+        hub.heal("getStations")
+        clock.advance(10_000)
+
+        runBlocking { throttled.refresh() }
+
+        assertEquals(1, hub.callsTo("getStations").size)
+    }
+
+    @Test
+    fun `a resume with no session does not use up the window`() {
+        val throttled = throttledRefresher()
+        family.session = null
+        runBlocking { throttled.refresh() }
+        family.session = FamilySession("device-1", "the-session-token")
+        clock.advance(1_000)
+
+        runBlocking { throttled.refresh() }
+
+        assertEquals(1, hub.callsTo("getStations").size)
+    }
+
+    @Test
+    fun `the owner's phone makes no request and does not use up the window`() {
+        val throttled = throttledRefresher()
+        family.session = null
+        family.admin = TEST_ADMIN_KEY
+        runBlocking { throttled.refresh() }
+        assertTrue(hub.callsTo("getStations").isEmpty())
+
+        family.admin = null
+        family.session = FamilySession("device-1", "the-session-token")
+        clock.advance(1_000)
+        runBlocking { throttled.refresh() }
+
+        assertEquals(1, hub.callsTo("getStations").size)
+    }
+
+    @Test
+    fun `a refresh that is refused by the throttle never takes the in-flight lock`() {
+        val throttled = throttledRefresher()
+        runBlocking { throttled.refresh() }
+        clock.advance(1_000)
+        hub.stationsGate = CompletableDeferred()
+
+        // If the refused call held the lock, or waited for the gate, this would time out.
+        runBlocking { withTimeout(5_000) { throttled.refresh() } }
+        hub.stationsGate = null
+        clock.advance(60_000)
+        runBlocking { withTimeout(5_000) { throttled.refresh() } }
 
         assertEquals(2, hub.callsTo("getStations").size)
     }

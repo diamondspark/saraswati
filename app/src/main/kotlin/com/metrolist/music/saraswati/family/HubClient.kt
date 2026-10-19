@@ -28,6 +28,9 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -107,7 +110,9 @@ class HubClient(
     ): Result<ApprovedDevice> {
         if (!isSafeSegment(deviceId)) return invalidDeviceId()
         return send("POST", listOf("roster", deviceId, "approve"), adminKey, "{}") {
-            json.decodeFromString<ApprovedDevice>(it)
+            // The hub sends no session token any more. One that still arrives is dropped here: the owner's
+            // phone must never hold the claiming phone's credential.
+            json.decodeFromString<ApprovedDevice>(it).copy(sessionToken = null)
         }
     }
 
@@ -154,7 +159,7 @@ class HubClient(
     /** [auth] is the owner's admin key or a paired phone's session token; the Worker accepts either. */
     override suspend fun getKillSwitches(auth: String): Result<Map<String, Boolean>> =
         send("GET", listOf("killswitches"), auth, null) {
-            json.decodeFromString(KILL_SWITCHES, it)
+            parseKillSwitches(it)
         }
 
     override suspend fun setKillSwitches(
@@ -162,7 +167,7 @@ class HubClient(
         changes: Map<String, Boolean>,
     ): Result<Map<String, Boolean>> =
         send("PUT", listOf("killswitches"), adminKey, json.encodeToString(KILL_SWITCHES, changes)) {
-            json.decodeFromString(KILL_SWITCHES, it)
+            parseKillSwitches(it)
         }
 
     /**
@@ -238,6 +243,18 @@ class HubClient(
         } catch (e: Exception) {
             Result.failure(HubException(raw.code, "hub answered HTTP ${raw.code} with an unusable body"))
         }
+    }
+
+    /**
+     * The flat `{key: boolean}` map. Keys this build does not know are returned for the caller to ignore,
+     * and an entry that is not a boolean is skipped, so a hub that grows a switch (or sends an odd value
+     * for one) never takes the known switches down with it. Anything but an object is unusable.
+     */
+    private fun parseKillSwitches(body: String): Map<String, Boolean> {
+        val obj = json.parseToJsonElement(body) as? JsonObject ?: throw SerializationException("kill-switches is not an object")
+        return obj.entries
+            .mapNotNull { (key, value) -> (value as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull?.let { key to it } }
+            .toMap()
     }
 
     private fun isSafeSegment(segment: String): Boolean = SAFE_SEGMENT.matches(segment)

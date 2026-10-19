@@ -11,6 +11,12 @@
 // is seen here (classified offline or not), and every track the queue produces
 // is remembered, so "is the track that is playing one of ours" is a lookup
 // instead of a guess. The wrapper passes everything through unchanged.
+//
+// Fix wave B2: the watch outlives the screen. PlayerConnectionPlayback is rebuilt every time
+// the activity is (a rotation), and a watch that lived in it started empty again: the track
+// that was playing was no longer "ours", the status fell back to "starting" and the ring
+// went. [QueueWatchHolder] keeps the watch of the last queue Saral started for the life of
+// the process; a screen that binds again picks up the same one.
 package com.metrolist.music.saraswati.saral
 
 import androidx.media3.common.MediaItem
@@ -19,6 +25,7 @@ import com.metrolist.music.playback.queues.Queue
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlin.coroutines.cancellation.CancellationException
 
 internal class QueueWatch {
@@ -33,7 +40,7 @@ internal class QueueWatch {
     val problem: StateFlow<PlaybackProblem?> = _problem.asStateFlow()
 
     fun wrap(queue: Queue): Queue {
-        queue.preloadItem?.let { _ids.value += it.id }
+        queue.preloadItem?.let { preloaded -> _ids.update { it + preloaded.id } }
         return Watched(queue)
     }
 
@@ -43,7 +50,7 @@ internal class QueueWatch {
     }
 
     private fun seen(items: List<MediaItem>) {
-        if (items.isNotEmpty()) _ids.value += items.map { it.mediaId }
+        if (items.isNotEmpty()) _ids.update { it + items.map { item -> item.mediaId } }
     }
 
     private inner class Watched(
@@ -67,5 +74,22 @@ internal class QueueWatch {
         override fun hasNextPage(): Boolean = inner.hasNextPage()
 
         override suspend fun nextPage(): List<MediaItem> = inner.nextPage().also(::seen)
+    }
+}
+
+/**
+ * The [QueueWatch] of the queue Saral started last. One per process ([process]); a fresh watch
+ * replaces the old one whenever Saral starts something new, never because a screen came back.
+ */
+internal class QueueWatchHolder {
+    private val current = MutableStateFlow(QueueWatch())
+
+    val watch: StateFlow<QueueWatch> = current.asStateFlow()
+
+    /** Saral is about to start a queue: a new watch for it replaces the last one. */
+    fun startNew(): QueueWatch = QueueWatch().also { current.value = it }
+
+    companion object {
+        val process = QueueWatchHolder()
     }
 }

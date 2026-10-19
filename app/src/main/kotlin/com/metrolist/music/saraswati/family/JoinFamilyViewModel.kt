@@ -12,7 +12,14 @@
 // device and answers 429 beyond that, so the loop stays well inside it and
 // backs off further on a 429. The claim is stored the moment the hub issues
 // it, so reopening Join after the app was closed resumes the wait instead of
-// burning the owner's one-time link. Nothing polls while Join is not open.
+// burning the owner's one-time link.
+//
+// Fix wave B1 (final review I3): the poll is bounded. It runs only while the
+// Join screen is resumed: the screen calls stop() on pause and start() on
+// resume, so nothing polls while Join is in the background or left. One waiting
+// session (the time since start() or "Check again") lasts at most 15 minutes;
+// then the state is StillWaiting and the screen offers a button, which asks once
+// at once and begins a new session. Each resume is a new session.
 //
 // Task 9: once approved, the first getMe() both reports the role and caches it
 // (GrandparentRoleSync), which is what turns Saral on for a grandparent phone.
@@ -25,12 +32,14 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -46,8 +55,15 @@ sealed interface JoinUiState {
 
     data object Claiming : JoinUiState
 
-    /** Claimed; waiting for the owner to approve. */
-    data object Waiting : JoinUiState
+    /** Claimed; waiting for the owner to approve. [code] is the four characters the person says to the owner. */
+    data class Waiting(
+        val code: String,
+    ) : JoinUiState
+
+    /** The wait hit its 15-minute cap and nothing is polling; the screen offers a Check again button. */
+    data class StillWaiting(
+        val code: String,
+    ) : JoinUiState
 
     /** Approved and paired. [role] is what the owner set this phone up as. */
     data class Approved(
@@ -72,6 +88,8 @@ class JoinFamilyViewModel
         private val roleSync: GrandparentRoleSync,
         scope: CoroutineScope,
         private val pollIntervalMs: Long,
+        private val maxWaitMs: Long = MAX_WAIT_MS,
+        private val now: () -> Long = { System.nanoTime() / 1_000_000 },
     ) : ViewModel(scope) {
         @Inject
         constructor(hub: HubApi, store: FamilyStore, config: HubConfig, inbox: PairingInbox, roleSync: GrandparentRoleSync) :
@@ -85,6 +103,10 @@ class JoinFamilyViewModel
         @Volatile private var chosenRole = DeviceRole.ADULT
         private var pollJob: Job? = null
 
+        // True between stop() and the next start(): a claim that finishes in that gap keeps its Waiting
+        // state but does not begin polling behind a screen nobody is looking at.
+        @Volatile private var paused = false
+
         /**
          * Call when the join screen opens and each time it resumes: resumes a stored claim, or
          * picks up a link that arrived as a deep link. Safe to repeat. Once the claim is in flight,
@@ -92,8 +114,14 @@ class JoinFamilyViewModel
          * a later visit, and the state is left alone.
          */
         fun start() {
+            paused = false
             viewModelScope.launch {
                 if (pollJob?.isActive == true || _state.value is JoinUiState.Approved || _state.value is JoinUiState.Claiming) {
+                    inbox.take()
+                    return@launch
+                }
+                // A wait that gave up stays given up until the person presses Check again.
+                if (_state.value is JoinUiState.StillWaiting) {
                     inbox.take()
                     return@launch
                 }
@@ -105,14 +133,46 @@ class JoinFamilyViewModel
                 val claim = guarded { store.pendingClaim() }
                 if (claim != null) {
                     inbox.take()
-                    _state.value = JoinUiState.Waiting
-                    poll(claim)
+                    _state.value = JoinUiState.Waiting(ClaimCode.of(claim.deviceId))
+                    // SARASWATI: fix wave B3 — the reads above suspend, and the screen may have been paused in
+                    // that time (stop() found no poll to end); polling now would run behind a screen nobody sees.
+                    if (!paused) poll(claim)
                     return@launch
                 }
                 inbox.take()?.let {
                     token = it
                     _state.value = JoinUiState.Ready(it)
                 }
+            }
+        }
+
+        /**
+         * Call when the join screen is paused (not visible): ends the poll. The state is left as it is, so
+         * the person returns to the same screen, and [start] on the next resume polls again.
+         */
+        fun stop() {
+            paused = true
+            pollJob?.cancel()
+            pollJob = null
+        }
+
+        /** The "Check again" button of [JoinUiState.StillWaiting]: asks the hub now, then waits a fresh 15 minutes. */
+        fun checkAgain() {
+            paused = false
+            viewModelScope.launch {
+                if (_state.value !is JoinUiState.StillWaiting) return@launch
+                if (alreadyPaired()) {
+                    _state.value = JoinUiState.AlreadyPaired
+                    return@launch
+                }
+                val claim = guarded { store.pendingClaim() }
+                if (claim == null) {
+                    _state.value = JoinUiState.Idle
+                    return@launch
+                }
+                _state.value = JoinUiState.Waiting(ClaimCode.of(claim.deviceId))
+                // SARASWATI: fix wave B3 — as in start(): a pause during the reads above means no poll.
+                if (!paused) poll(claim, askAtOnce = true)
             }
         }
 
@@ -139,6 +199,20 @@ class JoinFamilyViewModel
             }
             viewModelScope.launch {
                 _state.value = JoinUiState.Claiming
+                // SARASWATI: fix wave B2 — if the stored session slot cannot even be probed, nothing is known
+                // about this phone, so the link is kept for a retry rather than spent on a claim that might
+                // then be refused because a session turns out to be there.
+                if (guarded { store.hasStoredSession() } == null) {
+                    _state.value = JoinUiState.Failed(FamilyError.UNKNOWN)
+                    return@launch
+                }
+                // SARASWATI: fix wave A (M3) — checked again right before the one-time link is spent: a phone
+                // that is paired by now (or is the owner's) must neither burn the link nor lose its session.
+                if (alreadyPaired()) {
+                    token = null
+                    _state.value = JoinUiState.AlreadyPaired
+                    return@launch
+                }
                 hub
                     .claimPairing(link, name, role)
                     .onSuccess { claimed ->
@@ -147,8 +221,8 @@ class JoinFamilyViewModel
                         chosenRole = role
                         val pending = PendingClaim(claimed.deviceId, claimed.claimSecret)
                         if (guardedWrite { store.savePendingClaim(pending) }) {
-                            _state.value = JoinUiState.Waiting
-                            poll(pending)
+                            _state.value = JoinUiState.Waiting(ClaimCode.of(pending.deviceId))
+                            if (!paused) poll(pending)
                         }
                     }.onFailure { failure ->
                         val error = FamilyError.from(failure)
@@ -158,19 +232,37 @@ class JoinFamilyViewModel
             }
         }
 
-        private fun poll(claim: PendingClaim) {
+        /** One waiting session: polls until approved, refused, stopped, or [maxWaitMs] have passed. */
+        private fun poll(
+            claim: PendingClaim,
+            askAtOnce: Boolean = false,
+        ) {
             pollJob?.cancel()
             pollJob =
                 viewModelScope.launch {
+                    val startedAt = now()
                     var wait = pollIntervalMs
+                    var skipDelay = askAtOnce
                     while (true) {
-                        delay(wait)
+                        val remaining = maxWaitMs - (now() - startedAt)
+                        if (remaining <= 0) {
+                            _state.value = JoinUiState.StillWaiting(ClaimCode.of(claim.deviceId))
+                            return@launch
+                        }
+                        if (skipDelay) {
+                            skipDelay = false
+                        } else {
+                            delay(minOf(wait, remaining))
+                            if (now() - startedAt >= maxWaitMs) continue
+                        }
                         val answer = hub.pairingStatus(claim.deviceId, claim.claimSecret)
                         answer
                             .onSuccess { status ->
                                 wait = pollIntervalMs
                                 if (status is PairingStatus.Approved) {
-                                    approved(claim, status.sessionToken)
+                                    // Once the hub has handed over the session token it must be kept, so leaving the
+                                    // screen at this moment cannot cancel the write.
+                                    withContext(NonCancellable) { approved(claim, status.sessionToken) }
                                     return@launch
                                 }
                             }.onFailure { failure ->
@@ -193,12 +285,19 @@ class JoinFamilyViewModel
             sessionToken: String,
         ) {
             if (!guardedWrite { store.completeClaim(claim.deviceId, sessionToken) }) return
-            // The first authenticated call also lets the hub drop the claim secret.
-            val role = roleSync.refresh() ?: chosenRole
+            // The first authenticated call also lets the hub drop the claim secret. Not throttled: it is what
+            // caches the role, and a resume refresh may have run a moment ago with no session to ask with.
+            val role = roleSync.refresh(force = true) ?: chosenRole
             _state.value = JoinUiState.Approved(role)
         }
 
-        private suspend fun alreadyPaired(): Boolean = guarded { store.session() } != null || guarded { store.adminKey() } != null
+        // SARASWATI: fix wave B2 — the raw session slot is asked first. session() decrypts, and a Keystore that
+        // is unavailable right now (or a hub-side hiccup that shows up as a read error) makes a live session
+        // read as absent: the claim would then spend the one-time link and savePendingClaim would refuse it.
+        private suspend fun alreadyPaired(): Boolean =
+            guarded { store.hasStoredSession() } == true ||
+                guarded { store.session() } != null ||
+                guarded { store.adminKey() } != null
 
         private suspend fun <T> guarded(block: suspend () -> T): T? =
             try {
@@ -224,6 +323,9 @@ class JoinFamilyViewModel
         companion object {
             const val MAX_NAME_LENGTH = 40
             const val POLL_INTERVAL_MS = 6_000L
+
+            /** How long one waiting session polls before it says it is still waiting. */
+            const val MAX_WAIT_MS = 15 * 60_000L
             private const val MAX_BACKOFF_MS = 60_000L
         }
     }

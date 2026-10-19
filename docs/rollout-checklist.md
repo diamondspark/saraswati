@@ -271,7 +271,8 @@ see "If something goes wrong".
       back later, set the phone to Adult there. If a phone that was paired
       straight as grandparent is not signed in, Saral shows one large sign-in
       tile that opens the Google sign-in and returns to Saral; treat that as a
-      fallback, not the plan.
+      fallback, not the plan. Do it with them, on their phone, with their own
+      hands (never ask for or send a password).
 
 ### 7. Car (only if they use Android Auto)
 
@@ -289,7 +290,11 @@ see "If something goes wrong".
 
 - [ ] A song plays, and keeps playing with the screen locked.
 - [ ] In Manage Family health view the phone shows the version you installed and
-      a local time that matches the phone's clock.
+      a local time that matches the phone's clock. A phone reports each time the
+      app opens or comes back to the front, at most once every 5 minutes, so open
+      Saraswati on that phone, wait a few seconds, then tap Refresh in Manage
+      Family. If it still says "No report from this phone yet", wait 5 minutes
+      and open the app again.
 - [ ] "Install unknown apps" is off for Chrome and Saraswati Updates (recheck).
 - [ ] Add the row to the rollout log below.
 
@@ -301,7 +306,9 @@ plays if Saraswati has a problem.
 - [ ] Day 0: calendar reminder set for 30 days from today: ________
 - [ ] Day 30: ask them how it has been. The design doesn't define "confirmed
       stable". A reasonable test: they use it most days, nothing keeps crashing
-      or failing to play, and the health view shows a recent check-in.
+      or failing to play, and the health view shows a recent check-in (a phone
+      reports at launch and on resume, at most every 5 minutes, so "recent"
+      means the last time it was opened).
 - [ ] If stable, uninstall Metrolist (`com.metrolist.music`). This deletes
       anything stored only inside Metrolist, such as downloads; their YouTube
       Music library is in their Google account and is not affected.

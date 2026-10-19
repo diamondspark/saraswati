@@ -1005,6 +1005,9 @@
     <string name="family_join_desc">Open the link your family owner sent you.</string>
     <string name="family_paired_title">Part of the family</string>
     <string name="family_paired_desc">The family owner approved this phone.</string>
+    <string name="family_waiting_title">Waiting for approval · Code %1$s</string>
+    <string name="family_waiting_desc">Say this code to the family owner. They approve this phone from Manage family.</string>
+    <string name="family_waiting_open_join">Open Join</string>
     <string name="family_owner_setup_link">Family owner? Set up this phone</string>
     <string name="family_owner_setup_title">Owner setup</string>
     <string name="family_owner_setup_desc">Paste the admin key you saved when you set up the family hub. The hub checks it, then it is kept encrypted on this phone only.</string>
@@ -1021,6 +1024,12 @@
     <string name="family_pairing_copied">Link copied</string>
     <string name="family_requests_title">Waiting for your approval</string>
     <string name="family_requests_empty">No requests right now. A new phone shows up here a few seconds after it opens the link.</string>
+    <string name="family_requests_hint">Say the code aloud with the person before you approve.</string>
+    <string name="family_request_code">Code %1$s</string>
+    <string name="family_request_age_now">just now</string>
+    <string name="family_request_age_minutes">%1$d min ago</string>
+    <string name="family_request_age_hours">%1$d h ago</string>
+    <string name="family_request_expired">Expired</string>
     <string name="family_approve">Approve</string>
     <string name="family_deny">Deny</string>
     <string name="family_phones_title">Family phones</string>
@@ -1053,6 +1062,10 @@
     <string name="family_join_send">Send request</string>
     <string name="family_join_sending">Sending…</string>
     <string name="family_join_waiting_title">Request sent</string>
+    <string name="family_join_code">Code: %1$s</string>
+    <string name="family_join_still_waiting_title">Still waiting</string>
+    <string name="family_join_still_waiting_desc">The family owner has not approved this phone yet. Check again when they are ready.</string>
+    <string name="family_join_check_again">Check again</string>
     <string name="family_join_waiting_desc">Waiting for the family owner to approve this phone. Keep this screen open, or come back to Join later to check.</string>
     <string name="family_join_done_title">All set</string>
     <string name="family_join_done_adult">This phone is part of the family now. Find it under Family.</string>
@@ -1064,6 +1077,7 @@
     <string name="family_error_unauthorized">The family hub did not accept this phone\'s key.</string>
     <string name="family_error_not_found">The family hub no longer knows this request.</string>
     <string name="family_error_gone">This link has expired or was already used. Ask for a new one.</string>
+    <string name="family_error_expired">This request has expired. Ask them to send a new request.</string>
     <string name="family_error_rate_limited">Too many requests. Wait a minute and try again.</string>
     <string name="family_error_offline">Cannot reach the family hub. Check the connection and try again.</string>
     <string name="family_error_not_configured">This build of the app has no family hub.</string>
@@ -1130,8 +1144,12 @@
     <string name="saral_voice_not_found" translatable="false">गाना नहीं मिला, फिर से बोलें</string>
     <string name="saral_voice_not_heard" translatable="false">समझ नहीं आया, फिर से बोलें</string>
     <string name="saral_voice_offline" translatable="false">इंटरनेट के बिना खोज नहीं हो सकती</string>
-    <string name="saral_voice_failed" translatable="false">बोलकर खोजना अभी नहीं हो सका</string>
+    <string name="saral_voice_failed" translatable="false">अभी खोज नहीं हो सकी</string>
     <string name="saral_voice_unavailable" translatable="false">इस फ़ोन पर बोलकर खोजना उपलब्ध नहीं है</string>
+    <!-- SARASWATI: fix wave A (M5) — the crash screen on a Saral phone: one plain line and one button, no
+         trace, no Share. NEW (not in the approved mockup); needs a native-speaker read. -->
+    <string name="saral_crash_message" translatable="false">कुछ गड़बड़ हो गई</string>
+    <string name="saral_crash_restart" translatable="false">फिर से शुरू करें</string>
 
     <!-- SARASWATI: Task 10 — festival banner (Home, English like the rest of the app) and ribbon (Saral, Hindi,
          never translated). The Hindi greetings are in FestivalCalendar (Diwali's is the approved copy). The Saral
@@ -1139,6 +1157,7 @@
          native-speaker read. -->
     <string name="festival_banner_subtitle">A radio of %1$s favourites, one tap away</string>
     <string name="festival_radio_failed">Couldn\'t start the festival radio</string>
+    <string name="festival_banner_play_desc">Play festival music</string>
     <string name="saral_festival_listen" translatable="false">सुनें</string>
     <string name="saral_festival_ready" translatable="false">त्योहार के गीत तैयार हैं</string>
     <string name="saral_festival_listen_desc" translatable="false">%1$s के गीत सुनें</string>
@@ -1152,5 +1171,5 @@
 
     <!-- SARASWATI: Task 11 — the car's four tabs. Home, Library and Family reuse existing strings. -->
     <string name="car_tab_stations">Stations</string>
-    <string name="car_family_sangat_soon">Sangat (coming soon)</string>
+    <string name="car_family_sangat_soon">Sangat · Listen together (coming soon)</string>
 </resources>

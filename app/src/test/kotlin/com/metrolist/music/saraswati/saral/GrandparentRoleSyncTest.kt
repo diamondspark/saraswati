@@ -18,6 +18,10 @@ import com.metrolist.music.saraswati.family.FamilySession
 import com.metrolist.music.saraswati.family.OFFLINE
 import com.metrolist.music.saraswati.family.PendingClaim
 import com.metrolist.music.saraswati.family.TEST_ADMIN_KEY
+import com.metrolist.music.saraswati.family.ResumeThrottle
+import com.metrolist.music.saraswati.family.SessionVerdict
+import com.metrolist.music.saraswati.family.TestClock
+import com.metrolist.music.saraswati.family.noThrottle
 import com.metrolist.music.saraswati.family.hubFailure
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -33,15 +37,26 @@ class GrandparentRoleSyncTest {
     private lateinit var roles: FakeRoleStore
     private lateinit var sync: GrandparentRoleSync
 
+    // The wall clock the 401 record is kept by (SessionVerdict); the resume throttle has its own clock below.
+    private val wall = TestClock(nowMs = 1_000_000)
+
     @Before
     fun setUp() {
         hub = FakeHub()
         family = FakeStore().apply { session = FamilySession("device-1", "the-session-token") }
         roles = FakeRoleStore()
-        sync = GrandparentRoleSync(hub, family, roles)
+        sync = GrandparentRoleSync(hub, family, roles, noThrottle(), wall.reading)
     }
 
     private fun refresh() = runBlocking { sync.refresh() }
+
+    /** The hub's 401 as it counts: three of them, each [SessionVerdict.MIN_GAP_MS] after the one before. */
+    private fun refreshThreeCountedTimes() {
+        repeat(SessionVerdict.STRIKES_TO_CLEAR) {
+            refresh()
+            wall.advance(SessionVerdict.MIN_GAP_MS)
+        }
+    }
 
     @Test
     fun `the hub saying grandparent turns Saral on`() {
@@ -84,11 +99,103 @@ class GrandparentRoleSyncTest {
     fun `any hub failure keeps Saral on, including a revoked phone and a server error`() {
         roles.grandparent = true
         for (status in listOf(401, 404, 429, 500, 503)) {
+            family.session = FamilySession("device-1", "the-session-token")
             hub.failWith("getMe", hubFailure(status))
 
             assertNull(refresh())
             assertTrue("HTTP $status must not leave Saral", roles.grandparent)
         }
+    }
+
+    // SARASWATI: fix wave A (M3) — a revoked phone can join again.
+    @Test
+    fun `the third counted 401 clears the session and the device id so Join works again, and leaves Saral as it was`() {
+        roles.grandparent = true
+        hub.failWith("getMe", hubFailure(401))
+
+        refreshThreeCountedTimes()
+
+        assertEquals(listOf("device-1"), family.cleared.toList())
+        assertNull(family.session)
+        assertTrue("the role cache stays untouched", roles.grandparent)
+        assertTrue(roles.writes.isEmpty())
+    }
+
+    @Test
+    fun `a revoked adult phone also leaves the role cache alone`() {
+        roles.grandparent = false
+        hub.failWith("getMe", hubFailure(401))
+
+        refreshThreeCountedTimes()
+
+        assertNull(family.session)
+        assertFalse(roles.grandparent)
+        assertTrue(roles.writes.isEmpty())
+    }
+
+    @Test
+    fun `no other failure clears the session`() {
+        for (failure in listOf(OFFLINE, hubFailure(404), hubFailure(429), hubFailure(500), hubFailure(503), hubFailure(403))) {
+            hub.failWith("getMe", failure)
+
+            assertNull(refresh())
+
+            assertEquals(failure.toString(), FamilySession("device-1", "the-session-token"), family.session)
+        }
+        assertTrue(family.cleared.isEmpty())
+    }
+
+    @Test
+    fun `a storage error while clearing the session does not throw`() {
+        hub.failWith("getMe", hubFailure(401))
+        family.failWrites = java.io.IOException("disk full")
+
+        refreshThreeCountedTimes()
+
+        assertEquals(FamilySession("device-1", "the-session-token"), family.session)
+    }
+
+    // SARASWATI: fix wave A (M2) — the owner's own phone is never Saral.
+    @Test
+    fun `a phone that holds the admin key is never set to grandparent, whatever the hub says`() {
+        family.admin = TEST_ADMIN_KEY
+        hub.meRole = DeviceRole.GRANDPARENT
+
+        assertNull(refresh())
+
+        assertFalse(roles.grandparent)
+        assertTrue(roles.writes.isEmpty())
+        assertTrue("the hub is not even asked", hub.callsTo("getMe").isEmpty())
+    }
+
+    @Test
+    fun `an owner phone with a session the hub calls grandparent is still not locked in`() {
+        family.admin = TEST_ADMIN_KEY
+        family.session = FamilySession("device-1", "the-session-token")
+        hub.meRole = DeviceRole.GRANDPARENT
+
+        refresh()
+
+        assertFalse(roles.grandparent)
+    }
+
+    @Test
+    fun `a stale Saral flag on an owner phone is released`() {
+        family.admin = TEST_ADMIN_KEY
+        roles.grandparent = true
+
+        refresh()
+
+        assertFalse(roles.grandparent)
+        assertEquals(listOf(false), roles.writes.toList())
+    }
+
+    @Test
+    fun `an owner phone whose role store fails does not throw`() {
+        family.admin = TEST_ADMIN_KEY
+        roles.failReads = java.io.IOException("disk")
+
+        assertNull(refresh())
     }
 
     @Test
@@ -178,5 +285,123 @@ class GrandparentRoleSyncTest {
 
         assertEquals(DeviceRole.ADULT, refresh())
         assertFalse(roles.grandparent)
+    }
+    // --- SARASWATI: fix wave B1 — at most one pair of hub calls a minute on resume -------------------
+
+    private val clock = TestClock(nowMs = 5_000)
+
+    private fun throttledSync() = GrandparentRoleSync(hub, family, roles, ResumeThrottle(ResumeThrottle.RESUME_INTERVAL_MS, clock.reading))
+
+    private fun GrandparentRoleSync.refreshNow(force: Boolean = false) = runBlocking { refresh(force) }
+
+    @Test
+    fun `the first refresh after the process starts runs`() {
+        hub.meRole = DeviceRole.GRANDPARENT
+
+        assertEquals(DeviceRole.GRANDPARENT, throttledSync().refreshNow())
+
+        assertEquals(1, hub.callsTo("getMe").size)
+    }
+
+    @Test
+    fun `a second refresh inside a minute makes no hub call and changes nothing`() {
+        val throttled = throttledSync()
+        hub.meRole = DeviceRole.GRANDPARENT
+        throttled.refreshNow()
+        hub.meRole = DeviceRole.ADULT
+        clock.advance(59_999)
+
+        assertNull(throttled.refreshNow())
+
+        assertEquals(1, hub.callsTo("getMe").size)
+        assertTrue("the cached role is as the first answer left it", roles.grandparent)
+    }
+
+    @Test
+    fun `a minute later it asks again`() {
+        val throttled = throttledSync()
+        hub.meRole = DeviceRole.GRANDPARENT
+        throttled.refreshNow()
+        hub.meRole = DeviceRole.ADULT
+        clock.advance(60_000)
+
+        assertEquals(DeviceRole.ADULT, throttled.refreshNow())
+
+        assertEquals(2, hub.callsTo("getMe").size)
+        assertFalse(roles.grandparent)
+    }
+
+    @Test
+    fun `a failed attempt still counts, so a struggling hub is not hammered on every resume`() {
+        val throttled = throttledSync()
+        hub.failWith("getMe", OFFLINE)
+        throttled.refreshNow()
+        hub.heal("getMe")
+        clock.advance(10_000)
+
+        assertNull(throttled.refreshNow())
+
+        assertEquals(1, hub.callsTo("getMe").size)
+    }
+
+    @Test
+    fun `a forced refresh, as after an approval, ignores the throttle`() {
+        val throttled = throttledSync()
+        throttled.refreshNow()
+
+        assertEquals(DeviceRole.ADULT, throttled.refreshNow(force = true))
+
+        assertEquals(2, hub.callsTo("getMe").size)
+    }
+
+    @Test
+    fun `a forced refresh does not use up the window of the next resume`() {
+        val throttled = throttledSync()
+        throttled.refreshNow(force = true)
+
+        throttled.refreshNow()
+
+        assertEquals(2, hub.callsTo("getMe").size)
+    }
+
+    @Test
+    fun `a resume with no session to ask with does not use up the window`() {
+        val throttled = throttledSync()
+        family.session = null
+        throttled.refreshNow()
+        family.session = FamilySession("device-1", "the-session-token")
+        clock.advance(1_000)
+
+        throttled.refreshNow()
+
+        assertEquals("the phone was approved a second later and is asked straight away", 1, hub.callsTo("getMe").size)
+    }
+
+    @Test
+    fun `the owner's phone makes no hub call and does not use up the window`() {
+        val throttled = throttledSync()
+        family.admin = TEST_ADMIN_KEY
+        throttled.refreshNow()
+        assertTrue(hub.callsTo("getMe").isEmpty())
+
+        family.admin = null
+        clock.advance(1_000)
+        throttled.refreshNow()
+
+        assertEquals(1, hub.callsTo("getMe").size)
+    }
+
+    @Test
+    fun `the owner's phone is still released from a stale Saral flag while resumes are throttled`() {
+        val throttled = throttledSync()
+        family.admin = TEST_ADMIN_KEY
+        roles.grandparent = true
+
+        throttled.refreshNow()
+        roles.grandparent = true
+        clock.advance(1_000)
+        throttled.refreshNow()
+
+        assertFalse("a local check, never throttled", roles.grandparent)
     }
 }

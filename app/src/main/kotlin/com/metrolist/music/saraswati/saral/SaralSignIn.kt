@@ -12,6 +12,10 @@
 // dropped by MainActivity as they are for all of Saral. A finished sign-in
 // restarts the app (LoginContent's own doing), which comes back to the tiles,
 // now signed in.
+//
+// Fix wave B2: the sheet reports when it is saving the account (onFinishing), and Saral does
+// not close it for the signed-in flip while it is: the cookie is written before the sheet
+// has cleared its own copy and restarted the app.
 package com.metrolist.music.saraswati.saral
 
 import androidx.activity.compose.BackHandler
@@ -30,14 +34,17 @@ import com.metrolist.music.constants.AppBarHeight
 import com.metrolist.music.ui.screens.LoginContent
 
 @Composable
-internal fun SaralSignIn(onClose: () -> Unit) {
+internal fun SaralSignIn(
+    onClose: () -> Unit,
+    onFinishing: (Boolean) -> Unit,
+) {
     // Registered before the login's own handler, so that one wins while the sign-in page can go back a page.
     BackHandler(onBack = onClose)
     CompositionLocalProvider(
         LocalPlayerAwareWindowInsets provides WindowInsets.systemBars.add(WindowInsets(top = AppBarHeight)),
     ) {
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-            LoginContent(onBack = onClose, onBackLongPress = onClose)
+            LoginContent(onBack = onClose, onBackLongPress = onClose, onCompleting = onFinishing)
         }
     }
 }

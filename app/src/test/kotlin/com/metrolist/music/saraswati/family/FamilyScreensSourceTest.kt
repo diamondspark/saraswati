@@ -56,10 +56,17 @@ class FamilyScreensSourceTest {
                 .map { "$file: $it" }
         }
 
+    // SARASWATI: fix wave B1 — every .kt file under the family package, subpackages included (Phase 4
+    // adds some), keyed by its path below [dir]: "JoinFamilyScreen.kt", "sangat/SangatScreen.kt".
+    private fun sourcesUnder(dir: File): Map<String, String> =
+        dir
+            .walkTopDown()
+            .filter { it.isFile && it.extension == "kt" }
+            .associate { it.relativeTo(dir).invariantSeparatorsPath to it.readText() }
+
     private fun familySources(): Map<String, String> {
         val dir = listOf(File(familyDir), File("app/$familyDir")).firstOrNull { it.isDirectory }
-        val files = requireNotNull(dir) { "cannot find $familyDir from ${File(".").absolutePath}" }.listFiles { f -> f.name.endsWith(".kt") }
-        return requireNotNull(files).associate { it.name to it.readText() }
+        return sourcesUnder(requireNotNull(dir) { "cannot find $familyDir from ${File(".").absolutePath}" })
     }
 
     @Test
@@ -74,6 +81,34 @@ class FamilyScreensSourceTest {
                 "and are not on the exact-text allow list: $offenders",
             offenders.isEmpty(),
         )
+    }
+
+    @Test
+    fun `the scan reads subpackages too, and flags a bad file that sits two levels down`() {
+        val root = java.nio.file.Files.createTempDirectory("family-scan").toFile()
+        try {
+            File(root, "JoinFamilyScreen.kt").writeText("// a top-level file\n")
+            val deep = File(root, "sangat/room").also { it.mkdirs() }
+            File(deep, "PasteKeyScreen.kt").writeText("var adminKey by rememberSaveable { mutableStateOf(\"\") }\n")
+            File(deep, "Notes.txt").writeText("var other by rememberSaveable { }")
+
+            val sources = sourcesUnder(root)
+            val offenders = saveableOffenders(sources, allowedLines)
+
+            assertEquals(setOf("JoinFamilyScreen.kt", "sangat/room/PasteKeyScreen.kt"), sources.keys)
+            assertEquals(1, offenders.size)
+            assertTrue(offenders.single(), offenders.single().startsWith("sangat/room/PasteKeyScreen.kt: var adminKey by rememberSaveable"))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the real family package is scanned from the top, with the screens in it`() {
+        val keys = familySources().keys
+
+        assertTrue(keys.containsAll(listOf("JoinFamilyScreen.kt", "ManageFamilyScreen.kt", "FamilyScreen.kt", "FamilyViewModel.kt")))
+        assertTrue("keys are paths below the package, with forward slashes", keys.none { '\\' in it })
     }
 
     @Test
@@ -165,5 +200,141 @@ class FamilyScreensSourceTest {
         assertFalse(waiting!!, waiting.contains("keeps waiting", ignoreCase = true))
         assertFalse(waiting, waiting.contains("close the app", ignoreCase = true))
         assertTrue(waiting, waiting.contains("Keep this screen open"))
+    }
+
+    // SARASWATI: fix wave A (M2) — a phone waiting to be approved is not the owner's.
+    @Test
+    fun `the owner setup link is hidden while a claim is pending`() {
+        val screen = source("$familyDir/FamilyScreen.kt")
+
+        assertTrue("the screen reads the pending-claim state", "viewModel.hasPendingClaim" in screen)
+        val guard = screen.indexOf("if (!hasPendingClaim)")
+        val link = screen.indexOf("R.string.family_owner_setup_link")
+        assertTrue("the link sits inside the guard", guard in 0 until link)
+        assertEquals("the owner setup link is offered in one place only", 1, Regex("""family_owner_setup_link""").findAll(screen).count())
+        assertEquals("and so is the route to owner setup", 1, Regex("""FamilyRoutes\.MANAGE""").findAll(screen.substringAfter("else ->")).count())
+    }
+
+    // SARASWATI: fix wave A (M7) — the admin key does not stay on the clipboard once it was saved.
+    @Test
+    fun `saving the admin key clears the clipboard through ClipboardHygiene`() {
+        val screen = source("$familyDir/ManageFamilyScreen.kt")
+
+        assertTrue(
+            Regex("""viewModel\.saveAdminKey\(key\)\s*\{\s*saved\s*->\s*ClipboardHygiene\.clearIfHolds\(clipboard,\s*saved\)\s*\}""").containsMatchIn(screen),
+        )
+        assertEquals("the hygiene helper is the only thing that clears the clipboard", 0, Regex("""clearPrimaryClip""").findAll(screen).count())
+    }
+    // --- SARASWATI: fix wave B1 — the four-character code, the age and the expiry -----------------------
+
+    private fun string(name: String): String {
+        val strings = source("src/main/res/values/metrolist_strings.xml")
+        return requireNotNull(Regex("""<string name="$name"[^>]*>(.*?)</string>""").find(strings)) { "string $name is missing" }.groupValues[1]
+    }
+
+    @Test
+    fun `the code, age, expiry and hint strings say what the person expects`() {
+        assertEquals("Code: %1\$s", string("family_join_code"))
+        assertEquals("Code %1\$s", string("family_request_code"))
+        assertEquals("2 min ago", String.format(string("family_request_age_minutes"), 2))
+        assertEquals("3 h ago", String.format(string("family_request_age_hours"), 3))
+        assertEquals("just now", string("family_request_age_now"))
+        assertEquals("Expired", string("family_request_expired"))
+        assertEquals("Say the code aloud with the person before you approve.", string("family_requests_hint"))
+        assertEquals("This request has expired. Ask them to send a new request.", string("family_error_expired"))
+    }
+
+    @Test
+    fun `the expired error has its own message`() {
+        assertTrue("FamilyError.EXPIRED has a message", "FamilyError.EXPIRED -> R.string.family_error_expired" in source("$familyDir/FamilyUi.kt"))
+    }
+
+    @Test
+    fun `the join waiting screen shows the code large, in a monospace face`() {
+        val join = source("$familyDir/JoinFamilyScreen.kt")
+        val waiting = join.substringAfter("private fun Waiting(").substringBefore("@Composable")
+        val codeLine = join.substringAfter("private fun CodeLine(").substringBefore("@Composable")
+
+        assertTrue("Waiting takes the code", waiting.startsWith("code: String)"))
+        assertTrue("and shows it", "CodeLine(code)" in waiting)
+        assertTrue("the code uses the Code: string", "R.string.family_join_code" in codeLine)
+        assertTrue("monospace", "FontFamily.Monospace" in codeLine)
+        assertTrue("large", "MaterialTheme.typography.displayMedium" in codeLine)
+        assertTrue("the screen passes the state's code", "current is JoinUiState.Waiting -> Waiting(code = current.code" in join)
+    }
+
+    @Test
+    fun `a pending row shows the code and age, and approving is disabled once it expired`() {
+        val manage = source("$familyDir/ManageFamilyScreen.kt")
+        val row = manage.substringAfter("private fun PendingRow(").substringBefore("@Composable")
+
+        assertTrue("the row derives its state from the entry and the clock", "entry.pendingRequest(now)" in row)
+        assertTrue("code shown", "R.string.family_request_code" in row)
+        assertTrue("age shown", "R.string.family_request_age_minutes" in row && "R.string.family_request_age_hours" in row)
+        assertTrue("expiry shown", "R.string.family_request_expired" in row)
+        assertTrue(
+            "Approve is enabled only when the request can still be approved",
+            Regex("""Button\(onClick = onApprove,\s*enabled = request\.canApprove,""").containsMatchIn(row),
+        )
+        assertEquals("exactly one button is gated by the request", 1, Regex("""enabled\s*=""").findAll(row).count())
+        assertTrue("Deny stays", Regex("""OutlinedButton\(onClick = onDeny,\s*modifier""").containsMatchIn(row))
+    }
+
+    @Test
+    fun `the requests card tells the owner to say the code aloud`() {
+        val manage = source("$familyDir/ManageFamilyScreen.kt")
+
+        assertTrue("R.string.family_requests_hint" in manage)
+        assertEquals(1, Regex("""R\.string\.family_requests_hint""").findAll(manage).count())
+        assertTrue("each row gets the screen's clock", "PendingRow(" in manage && "now = now" in manage.substringAfter("pending.forEach"))
+    }
+    // --- SARASWATI: fix wave B1 — a bounded Join poll and the Family tab's waiting state -----------------
+
+    @Test
+    fun `the join screen stops the poll when it is paused and starts it when it resumes`() {
+        val join = source("$familyDir/JoinFamilyScreen.kt")
+
+        assertTrue(join.contains("LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { viewModel.stop() }"))
+        assertTrue(join.contains("LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.start() }"))
+    }
+
+    @Test
+    fun `the join screen offers Check again once the wait gave up`() {
+        val join = source("$familyDir/JoinFamilyScreen.kt")
+        val still = join.substringAfter("private fun StillWaiting(").substringBefore("/**")
+
+        assertTrue("the screen shows it for the state", "current is JoinUiState.StillWaiting -> StillWaiting(code = current.code, onCheckAgain = viewModel::checkAgain)" in join)
+        assertTrue(Regex("""Button\(onClick = onCheckAgain\)\s*\{\s*Text\(stringResource\(R\.string\.family_join_check_again\)\)""").containsMatchIn(still))
+        assertTrue("CodeLine(code)" in still)
+        assertEquals("Still waiting", string("family_join_still_waiting_title"))
+        assertEquals("Check again", string("family_join_check_again"))
+    }
+
+    @Test
+    fun `the join view model header says when it polls, and nothing in it is false`() {
+        val header =
+            source("$familyDir/JoinFamilyViewModel.kt")
+                .substringBefore("package ")
+                .replace(Regex("""\s*//\s*"""), " ")
+
+        assertFalse("the old claim", header.contains("Nothing polls while Join is not open"))
+        assertTrue(header.contains("stop() on pause"))
+        assertTrue(header.contains("15 minutes"))
+        assertTrue(header.contains("Check again"))
+    }
+
+    @Test
+    fun `the family tab shows the waiting state with the code and an Open Join button instead of the plain entry`() {
+        val screen = source("$familyDir/FamilyScreen.kt")
+        val elseBranch = screen.substringAfter("else -> {")
+
+        assertTrue("the screen reads the code", "viewModel.pendingClaimCode" in screen)
+        assertTrue("the waiting title carries the code", "stringResource(R.string.family_waiting_title, code)" in elseBranch)
+        assertTrue("the button opens Join", Regex("""onClick = \{ navController\.navigate\(FamilyRoutes\.JOIN\) \}\s*\)\s*\{\s*Text\(stringResource\(R\.string\.family_waiting_open_join\)\)""").containsMatchIn(elseBranch))
+        val waiting = elseBranch.indexOf("family_waiting_title")
+        val plain = elseBranch.indexOf("family_join_title")
+        assertTrue("the plain Join entry is the other branch", waiting in 0 until plain)
+        assertEquals("Waiting for approval · Code %1\$s", string("family_waiting_title"))
+        assertEquals("Open Join", string("family_waiting_open_join"))
     }
 }

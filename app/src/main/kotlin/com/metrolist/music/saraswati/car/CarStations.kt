@@ -26,11 +26,11 @@ import androidx.media3.common.MediaMetadata
 import com.metrolist.music.playback.MusicService
 import com.metrolist.music.saraswati.family.Station
 import com.metrolist.music.saraswati.family.StationIcons
+import com.metrolist.music.saraswati.family.StationVideo
 import com.metrolist.music.saraswati.saral.SaralLabels
 
 internal object CarStations {
-    private val VIDEO_ID = Regex("^[A-Za-z0-9_-]{11}$")
-    private val STATION_ID = Regex("^${Regex.escape(MusicService.CAR_STATIONS)}/(\\d{1,3})/([A-Za-z0-9_-]{11})$")
+    private val STATION_ID = Regex("^${Regex.escape(MusicService.CAR_STATIONS)}/(\\d{1,3})/(${StationVideo.ID_PATTERN})$")
 
     fun mediaId(
         position: Int,
@@ -41,7 +41,7 @@ internal object CarStations {
     fun seedFrom(mediaId: String): String? = STATION_ID.matchEntire(mediaId)?.groupValues?.get(2)
 
     /** The stations the car can play, in the owner's order. */
-    fun playable(stations: List<Station>): List<Station> = stations.filter { VIDEO_ID.matches(it.seedVideoId) }
+    fun playable(stations: List<Station>): List<Station> = stations.filter { StationVideo.isVideoId(it.seedVideoId) }
 
     fun items(
         resources: CarResources,
