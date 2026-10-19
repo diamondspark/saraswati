@@ -30,6 +30,12 @@ import com.metrolist.music.constants.ListenTogetherAutoApproveSuggestionsKey
 import com.metrolist.music.constants.ListenTogetherIsHostKey
 import com.metrolist.music.constants.ListenTogetherRoomCodeKey
 import com.metrolist.music.constants.ListenTogetherServerUrlKey
+import com.metrolist.music.saraswati.family.FamilyFeature
+import com.metrolist.music.saraswati.family.FamilyFeatureGate
+import com.metrolist.music.saraswati.family.HubIdentity
+import com.metrolist.music.saraswati.family.sangat.SangatApprovalPolicy
+import com.metrolist.music.saraswati.family.sangat.SangatCarMode
+import com.metrolist.music.saraswati.family.sangat.SangatReconnectPolicy
 import com.metrolist.music.constants.ListenTogetherSessionTimestampKey
 import com.metrolist.music.constants.ListenTogetherSessionTokenKey
 import com.metrolist.music.constants.ListenTogetherUserIdKey
@@ -62,6 +68,7 @@ import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.coroutines.cancellation.CancellationException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -226,6 +233,11 @@ class ListenTogetherClient
     @Inject
     constructor(
         private val context: Context,
+        // SARASWATI: Phase 4 Task 9 — the hub session that authenticates the socket, the Sangat kill-switch,
+        // and car mode (which makes the host's phone approve joins and suggestions by itself).
+        private val identity: HubIdentity,
+        private val featureGate: FamilyFeatureGate,
+        private val carMode: SangatCarMode,
     ) {
         companion object {
             private const val TAG = "ListenTogether"
@@ -316,6 +328,10 @@ class ListenTogetherClient
             setInstance(this)
             ensureNotificationChannel()
             observeAppLifecycle()
+            // SARASWATI: Phase 4 Task 9 — car mode ends with the hosting.
+            scope.launch {
+                _role.collect { if (it != RoomRole.HOST) carMode.end() }
+            }
             scope.launch {
                 for (event in eventQueue) {
                     _events.emit(event)
@@ -573,7 +589,8 @@ class ListenTogetherClient
         private val pingSequence = AtomicLong(0L)
         private val lastPlaybackRevision = AtomicLong(0L)
 
-        private var webSocket: WebSocket? = null
+        @Volatile private var webSocket: WebSocket? = null
+        private val connectGeneration = AtomicInteger(0)
         private var pingJob: Job? = null
         private var reconnectAttempts = 0
         private var backgroundDisconnectJob: Job? = null
@@ -632,10 +649,9 @@ class ListenTogetherClient
             }
         }
 
-        private fun getServerUrl(): String {
-            val configuredUrl = context.dataStore.get(ListenTogetherServerUrlKey, DEFAULT_SERVER_URL)
-            return normalizeServerUrl(configuredUrl)
-        }
+        // SARASWATI: Phase 4 Task 9 — always the family hub; the stored server URL (restorable, editable in
+        // an old build's settings) is never read, so nothing can point the hub bearer at another host.
+        private fun getServerUrl(): String = DEFAULT_SERVER_URL
 
         /**
          * Calculate exponential backoff delay with jitter
@@ -686,12 +702,50 @@ class ListenTogetherClient
             evaluateBackgroundDisconnectPolicy("connect")
             log(LogLevel.INFO, "Connecting to server", getServerUrl())
 
+            // SARASWATI: Phase 4 Task 9 — the upgrade carries this phone's hub session, so the token is read
+            // first (off the caller's thread). No session, Sangat switched off or no hub address: no socket.
+            val generation = connectGeneration.get()
+            scope.launch { openSocket(generation) }
+        }
+
+        private suspend fun openSocket(generation: Int) {
+            val url = getServerUrl()
+            var refusal: String? = null
+            var token: String? = null
+            try {
+                if (url.isEmpty()) {
+                    refusal = "Sangat is not set up in this build."
+                } else if (!featureGate.isEnabled(FamilyFeature.SANGAT)) {
+                    refusal = "Sangat is switched off."
+                } else {
+                    token = identity.sessionToken()
+                    if (token == null) refusal = "Pair this phone with your family to use Sangat."
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                refusal = "Could not start the Sangat connection."
+            }
+            // disconnect() or another refusal got here first.
+            if (generation != connectGeneration.get()) return
+            if (refusal != null || token == null) {
+                failTerminally(refusal ?: "Could not start the Sangat connection.")
+                return
+            }
+
             val request =
-                Request
-                    .Builder()
-                    .url(getServerUrl())
-                    .header("User-Agent", context.packageName)
-                    .build()
+                try {
+                    Request
+                        .Builder()
+                        .url(url)
+                        .header("User-Agent", context.packageName)
+                        .header("Authorization", "Bearer $token")
+                        .build()
+                } catch (e: IllegalArgumentException) {
+                    // Not logged with its message: OkHttp quotes the header value that it rejected.
+                    failTerminally("Could not start the Sangat connection.")
+                    return
+                }
 
             webSocket =
                 client.newWebSocket(
@@ -740,7 +794,7 @@ class ListenTogetherClient
                             reason: String,
                         ) {
                             log(LogLevel.INFO, "Connection closed", "Code: $code, Reason: $reason")
-                            handleDisconnect()
+                            handleDisconnect(code)
                         }
 
                         override fun onFailure(
@@ -749,7 +803,7 @@ class ListenTogetherClient
                             response: Response?,
                         ) {
                             log(LogLevel.ERROR, "Connection failure", t.message)
-                            handleConnectionFailure(t)
+                            handleConnectionFailure(t, response?.code)
                         }
                     },
                 )
@@ -785,6 +839,7 @@ class ListenTogetherClient
             pingJob = null
             serverClock.reset()
             lastPlaybackRevision.set(0L)
+            connectGeneration.incrementAndGet()
             webSocket?.close(1000, "User disconnected")
             webSocket = null
             _connectionState.value = ConnectionState.DISCONNECTED
@@ -1009,7 +1064,12 @@ class ListenTogetherClient
             }
         }
 
-        private fun handleDisconnect() {
+        private fun handleDisconnect(closeCode: Int? = null) {
+            if (!SangatReconnectPolicy.shouldReconnect(null, closeCode)) {
+                log(LogLevel.WARNING, "Server closed the connection for good", "Code: $closeCode")
+                failTerminally(terminalMessage(null, closeCode))
+                return
+            }
             pingJob?.cancel()
             pingJob = null
             serverClock.reset()
@@ -1030,7 +1090,51 @@ class ListenTogetherClient
             evaluateBackgroundDisconnectPolicy("socket_disconnected")
         }
 
-        private fun handleConnectionFailure(t: Throwable) {
+        // SARASWATI: Phase 4 Task 9 — a refusal the hub will repeat (no or revoked session, Sangat off) ends
+        // the connection for good: no retry, no half-kept room, one ConnectionError.
+        private fun failTerminally(message: String) {
+            connectGeneration.incrementAndGet()
+            pingJob?.cancel()
+            pingJob = null
+            webSocket = null
+            serverClock.reset()
+            releaseWakeLock()
+            sessionToken = null
+            storedRoomCode = null
+            storedUsername = null
+            pendingAction = null
+            _roomState.value = null
+            _role.value = RoomRole.NONE
+            _userId.value = null
+            _pendingJoinRequests.value = emptyList()
+            _bufferingUsers.value = emptyList()
+            lastPlaybackRevision.set(0L)
+            clearPersistedSession()
+            reconnectAttempts = 0
+            _connectionState.value = ConnectionState.ERROR
+            emitEvent(ListenTogetherEvent.ConnectionError(message))
+            evaluateBackgroundDisconnectPolicy("connection_terminal")
+        }
+
+        private fun terminalMessage(
+            httpCode: Int?,
+            closeCode: Int?,
+        ): String =
+            when {
+                closeCode == SangatReconnectPolicy.CLOSE_DEVICE_REVOKED || httpCode == 401 ->
+                    "This phone is no longer signed in to the family hub."
+                else -> "Sangat is switched off."
+            }
+
+        private fun handleConnectionFailure(
+            t: Throwable,
+            httpCode: Int? = null,
+        ) {
+            if (!SangatReconnectPolicy.shouldReconnect(httpCode, null)) {
+                log(LogLevel.WARNING, "Hub refused the connection for good", "HTTP $httpCode")
+                failTerminally(terminalMessage(httpCode, null))
+                return
+            }
             pingJob?.cancel()
             pingJob = null
 
@@ -1048,7 +1152,7 @@ class ListenTogetherClient
                 reconnectAttempts++
                 _connectionState.value = ConnectionState.RECONNECTING
 
-                val delayMs = calculateBackoffDelay(reconnectAttempts)
+                val delayMs = maxOf(calculateBackoffDelay(reconnectAttempts), SangatReconnectPolicy.minimumBackoffMs(httpCode))
                 val delaySeconds = delayMs / 1000
 
                 log(
@@ -1160,7 +1264,9 @@ class ListenTogetherClient
                         log(LogLevel.INFO, "Join request received", "User: ${payload.username}")
 
                         // Check if auto-approval is enabled
-                        val autoApprovalEnabled = context.dataStore.get(ListenTogetherAutoApprovalKey, false)
+                        // SARASWATI: Phase 4 Task 9 — a host who is driving cannot tap Approve.
+                        val autoApprovalEnabled =
+                            SangatApprovalPolicy.autoApprove(context.dataStore.get(ListenTogetherAutoApprovalKey, false), carMode.active.value)
 
                         if (_role.value == RoomRole.HOST) {
                             if (autoApprovalEnabled) {
@@ -1419,7 +1525,12 @@ class ListenTogetherClient
                             log(LogLevel.INFO, "Suggestion received", "${payload.fromUsername}: ${payload.trackInfo.title}")
 
                             // Check if auto-approval of suggestions is enabled
-                            val autoApproveSuggestionsEnabled = context.dataStore.get(ListenTogetherAutoApproveSuggestionsKey, false)
+                            // SARASWATI: Phase 4 Task 9 — as for joins.
+                            val autoApproveSuggestionsEnabled =
+                                SangatApprovalPolicy.autoApprove(
+                                    context.dataStore.get(ListenTogetherAutoApproveSuggestionsKey, false),
+                                    carMode.active.value,
+                                )
 
                             if (autoApproveSuggestionsEnabled) {
                                 // Automatically approve the suggestion

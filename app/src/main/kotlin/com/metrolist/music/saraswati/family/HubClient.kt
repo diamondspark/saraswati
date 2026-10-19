@@ -23,6 +23,7 @@
 //    a hostile roster entry cannot rewrite the path ("..", "/", "?").
 package com.metrolist.music.saraswati.family
 
+import com.metrolist.music.saraswati.family.sangat.SangatHubApi
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.MapSerializer
@@ -47,7 +48,8 @@ import kotlin.coroutines.resumeWithException
 class HubClient(
     private val baseUrl: String,
     client: OkHttpClient,
-) : HubApi {
+) : HubApi,
+    SangatHubApi {
     // Shares the caller's connection pool, dispatcher and timeouts; only the
     // redirect policy is pinned here.
     private val http: OkHttpClient =
@@ -200,13 +202,13 @@ class HubClient(
     // fakes stay as they were. Same contract as above: a Result, never a throw.
 
     /** Rooms whose host is connected. [sessionToken] is a paired phone's (the Worker also takes the admin key). 503 means Sangat is off. */
-    suspend fun getLiveSangat(sessionToken: String): Result<List<LiveSangatRoom>> =
+    override suspend fun getLiveSangat(sessionToken: String): Result<List<LiveSangatRoom>> =
         send("GET", listOf("sangat", "live"), sessionToken, null) {
             json.decodeFromString<LiveSangatEnvelope>(it).rooms
         }
 
     /** The host's phone saying it is driving. 404 is an unknown room, 403 a caller that is not the room's host device. */
-    suspend fun setSangatCarMode(
+    override suspend fun setSangatCarMode(
         sessionToken: String,
         roomCode: String,
         carMode: Boolean,
@@ -257,18 +259,7 @@ class HubClient(
      * Where the Sangat WebSocket lives: the hub's base URL with https:// turned into wss://, plus /ws. A base that
      * is not https (or not set, as in the foss flavor) gives "", never a ws:// address, so nothing can be sent in the clear.
      */
-    fun sangatWebSocketUrl(): String {
-        val base = baseUrl.trim().toHttpUrlOrNull()?.takeIf { it.isHttps } ?: return ""
-        val https =
-            base
-                .newBuilder()
-                .query(null)
-                .fragment(null)
-                .addPathSegment("ws")
-                .build()
-                .toString()
-        return "wss://" + https.removePrefix("https://")
-    }
+    fun sangatWebSocketUrl(): String = sangatWebSocketUrl(baseUrl)
 
     private suspend fun <T> send(
         method: String,
@@ -377,16 +368,30 @@ class HubClient(
         return peeked.string()
     }
 
-    private companion object {
-        val json = Json { ignoreUnknownKeys = true }
-        val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
-        val KILL_SWITCHES = MapSerializer(String.serializer(), Boolean.serializer())
+    companion object {
+        /** The same address from a base URL alone, for code that has no HubClient (the Sangat server list). */
+        fun sangatWebSocketUrl(baseUrl: String): String {
+            val base = baseUrl.trim().toHttpUrlOrNull()?.takeIf { it.isHttps } ?: return ""
+            val https =
+                base
+                    .newBuilder()
+                    .query(null)
+                    .fragment(null)
+                    .addPathSegment("ws")
+                    .build()
+                    .toString()
+            return "wss://" + https.removePrefix("https://")
+        }
+
+        private val json = Json { ignoreUnknownKeys = true }
+        private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+        private val KILL_SWITCHES = MapSerializer(String.serializer(), Boolean.serializer())
 
         // The Worker mints device ids with crypto.randomUUID(); this admits
         // that and nothing that could change a URL's structure.
-        val SAFE_SEGMENT = Regex("[A-Za-z0-9_-]{1,128}")
+        private val SAFE_SEGMENT = Regex("[A-Za-z0-9_-]{1,128}")
 
         // The biggest legitimate answer is a roster or health list, a few KB.
-        const val MAX_RESPONSE_BYTES = 1L shl 20
+        private const val MAX_RESPONSE_BYTES = 1L shl 20
     }
 }

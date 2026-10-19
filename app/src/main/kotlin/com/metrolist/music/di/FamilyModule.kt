@@ -18,6 +18,8 @@ import com.metrolist.music.saraswati.family.HubApi
 import com.metrolist.music.saraswati.family.HubClient
 import com.metrolist.music.saraswati.family.HubConfig
 import com.metrolist.music.saraswati.family.HubIdentity
+import com.metrolist.music.saraswati.family.sangat.SangatCarMode
+import com.metrolist.music.saraswati.family.sangat.SangatLiveWatcher
 import com.metrolist.music.saraswati.security.SaraswatiVault
 import com.metrolist.music.utils.dataStore
 import dagger.Module
@@ -69,6 +71,22 @@ object FamilyModule {
         hub: HubApi,
         identity: HubIdentity,
     ): FamilyFeatureGate = FamilyFeatureGate(hub, identity, context.dataStore, CoroutineScope(SupervisorJob() + Dispatchers.IO))
+
+    // SARASWATI: Phase 4 Task 9 — Sangat's live-room watcher and car mode.
+    @Provides
+    @Singleton
+    fun provideSangatCarMode(
+        hub: HubClient,
+        identity: HubIdentity,
+    ): SangatCarMode = SangatCarMode(hub, identity)
+
+    @Provides
+    @Singleton
+    fun provideSangatLiveWatcher(
+        hub: HubClient,
+        identity: HubIdentity,
+        gate: FamilyFeatureGate,
+    ): SangatLiveWatcher = SangatLiveWatcher(hub, identity, gate)
 
     @Provides
     @Singleton
