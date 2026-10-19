@@ -238,12 +238,25 @@ class FakeStore(
 
 val OFFLINE: Throwable = IOException("no route to host")
 
-/** Mirrors DataStoreStationsCache's contract: synchronous snapshot; an empty list never replaces a good one. */
+/**
+ * Mirrors DataStoreStationsCache's contract: synchronous snapshot; an empty list never replaces a good one;
+ * [loaded] is false until storage has been read ([finishLoading]) or a list has been saved.
+ */
 class FakeStationsCache(
     initial: List<Station> = emptyList(),
+    loadedAtStart: Boolean = true,
 ) : StationsCache {
     private val state = MutableStateFlow(initial)
     override val stations: StateFlow<List<Station>> = state.asStateFlow()
+
+    private val loadedState = MutableStateFlow(loadedAtStart)
+    override val loaded: StateFlow<Boolean> = loadedState.asStateFlow()
+
+    /** Storage finished reading: [stored] (possibly nothing) is the list, and the cache is loaded. */
+    fun finishLoading(stored: List<Station> = emptyList()) {
+        state.value = stored
+        loadedState.value = true
+    }
 
     val replaced = CopyOnWriteArrayList<List<Station>>()
     var failWrites: Throwable? = null
@@ -251,7 +264,10 @@ class FakeStationsCache(
     override suspend fun replace(stations: List<Station>) {
         failWrites?.let { throw it }
         replaced.add(stations)
-        if (stations.isNotEmpty()) state.value = stations
+        if (stations.isNotEmpty()) {
+            state.value = stations
+            loadedState.value = true
+        }
     }
 }
 

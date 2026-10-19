@@ -8,6 +8,10 @@
 // the snapshot is synchronous and never waits for storage or the network, a
 // list survives a restart, an empty hub answer never wipes a good list, and
 // damaged storage reads as "nothing cached", not a crash.
+//
+// Task 11: the cache also says whether it has loaded. The car can ask for its
+// Stations folder before storage has been read, and an empty list then must
+// not be mistaken for "the family has no stations".
 package com.metrolist.music.saraswati.family
 
 import androidx.datastore.core.DataStore
@@ -21,12 +25,16 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -169,4 +177,106 @@ class DataStoreStationsCacheTest {
 
             assertEquals(listOf(bollywood), withTimeout(5_000) { cache.stations.first { it.isNotEmpty() } })
         }
+
+    // --- Task 11: loaded or not ---------------------------------------------------------------------------
+
+    /** Storage that hands over its data only once [release] is completed. */
+    private fun gated(release: CompletableDeferred<Unit>) =
+        object : DataStore<Preferences> {
+            override val data: Flow<Preferences> = dataStore.data.onEach { release.await() }
+
+            override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences) = dataStore.updateData(transform)
+        }
+
+    @Test
+    fun `a cache whose storage has not answered is empty and not loaded`() {
+        val release = CompletableDeferred<Unit>()
+        val cache = cache(gated(release))
+
+        assertTrue(cache.snapshot().isEmpty())
+        assertFalse(cache.loaded.value)
+
+        release.complete(Unit)
+        awaitHydrated(cache)
+    }
+
+    @Test
+    fun `storage that answers with a list makes the cache loaded, with that list`() {
+        runBlocking { cache().replace(listOf(bollywood, bhajan)) }
+
+        val restarted = cache()
+        awaitHydrated(restarted)
+
+        assertTrue(restarted.loaded.value)
+        assertEquals(listOf(bollywood, bhajan), restarted.snapshot())
+    }
+
+    @Test
+    fun `storage that answers with nothing makes the cache loaded and empty, which is not the same as not loaded`() {
+        val release = CompletableDeferred<Unit>()
+        val cache = cache(gated(release))
+        assertFalse(cache.loaded.value)
+
+        release.complete(Unit)
+        awaitHydrated(cache)
+
+        assertTrue(cache.loaded.value)
+        assertTrue(cache.snapshot().isEmpty())
+    }
+
+    @Test
+    fun `damaged storage makes the cache loaded and empty`() {
+        runBlocking { dataStore.edit { it[FamilyStationsCacheKey] = "{not json" } }
+
+        val cache = cache()
+        awaitHydrated(cache)
+
+        assertTrue(cache.loaded.value)
+        assertTrue(cache.snapshot().isEmpty())
+    }
+
+    @Test
+    fun `a list saved while storage is still loading makes the cache loaded at once`() {
+        val release = CompletableDeferred<Unit>()
+        val cache = cache(gated(release))
+
+        runBlocking { cache.replace(listOf(bhajan)) }
+
+        assertTrue(cache.loaded.value)
+        assertEquals(listOf(bhajan), cache.snapshot())
+        release.complete(Unit)
+        awaitHydrated(cache)
+        assertEquals(listOf(bhajan), cache.snapshot())
+    }
+
+    @Test
+    fun `an empty answer from the hub does not make a cache loaded`() {
+        val release = CompletableDeferred<Unit>()
+        val cache = cache(gated(release))
+
+        runBlocking { cache.replace(emptyList()) }
+
+        assertFalse(cache.loaded.value)
+        release.complete(Unit)
+        awaitHydrated(cache)
+    }
+
+    @Test
+    fun `nobody ever sees loaded beside a list from before`() {
+        runBlocking { cache().replace(listOf(bollywood)) }
+        val release = CompletableDeferred<Unit>()
+        val cache = cache(gated(release))
+        val seen = java.util.concurrent.CopyOnWriteArrayList<Pair<Boolean, List<Station>>>()
+        val watcher =
+            scope.launch(Dispatchers.Unconfined) {
+                combine(cache.loaded, cache.stations) { loaded, list -> loaded to list }.toList(seen)
+            }
+
+        release.complete(Unit)
+        awaitHydrated(cache)
+        watcher.cancel()
+
+        assertTrue("loaded must not be seen with the empty list from before: $seen", seen.none { it.first && it.second.isEmpty() })
+        assertEquals(true to listOf(bollywood), seen.last())
+    }
 }

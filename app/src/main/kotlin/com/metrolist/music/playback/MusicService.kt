@@ -283,6 +283,10 @@ class MusicService :
     @Inject
     lateinit var mediaLibrarySessionCallback: MediaLibrarySessionCallback
 
+    // SARASWATI: Task 11 — read here only to tell the car's Stations tab to ask again once it loads or changes.
+    @Inject
+    lateinit var stationsCache: com.metrolist.music.saraswati.family.StationsCache
+
     @Inject
     lateinit var equalizerService: EqualizerService
 
@@ -717,6 +721,14 @@ class MusicService :
                     ),
                 ).setBitmapLoader(CoilBitmapLoader(this, scope))
                 .build()
+        // SARASWATI: Task 11 — the car's Stations tab is answered from the cache at once, which may not
+        // have loaded yet when the car first asks. Tell the car to ask again whenever the cache loads or
+        // the stations it would show change; with no car subscribed this does nothing.
+        scope.launch {
+            com.metrolist.music.saraswati.car.carStationsChanges(stationsCache).collect { count ->
+                mediaSession?.notifyChildrenChanged(MusicService.CAR_STATIONS, count, null)
+            }
+        }
         player.repeatMode = startupPrefs!![RepeatModeKey] ?: REPEAT_MODE_OFF
 
         if (startupPrefs!![RememberShuffleAndRepeatKey] ?: true) {
@@ -5050,6 +5062,12 @@ class MusicService :
         const val ALBUM = "album"
         const val PLAYLIST = "playlist"
         const val YOUTUBE_PLAYLIST = "youtube_playlist"
+
+        // SARASWATI: Task 11 — the car's four top-level tabs (Home, Library, Stations, Family).
+        const val CAR_HOME = "car_home"
+        const val CAR_LIBRARY = "car_library"
+        const val CAR_STATIONS = "car_stations"
+        const val CAR_FAMILY = "car_family"
         const val SEARCH = "search"
         const val SHUFFLE_ACTION = "__shuffle__"
 

@@ -1149,4 +1149,8 @@
     <string name="saral_festival_raksha_bandhan" translatable="false">रक्षाबंधन</string>
     <string name="saral_festival_janmashtami" translatable="false">जन्माष्टमी</string>
     <string name="saral_festival_generic" translatable="false">त्योहार</string>
+
+    <!-- SARASWATI: Task 11 — the car's four tabs. Home, Library and Family reuse existing strings. -->
+    <string name="car_tab_stations">Stations</string>
+    <string name="car_family_sangat_soon">Sangat (coming soon)</string>
 </resources>
