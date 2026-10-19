@@ -10,8 +10,8 @@ import { SCENARIOS, type ScenarioName } from "./scenarios.ts";
 // How long the whole room must stay silent before the next step is sent. The
 // goldens were checked identical against metroserver at 100 ms and at 500 ms;
 // the default leaves the hub (storage writes, gzip) headroom beyond that. Raise
-// it with TRACE_QUIET_MS=<ms> npm run test:traces if a loaded machine makes a
-// reply land in the next step (vitest.traces.config.ts forwards it as a binding).
+// it with TRACE_QUIET_MS=<ms> npx vitest run if a loaded machine makes a reply
+// land in the next step (vitest.config.ts forwards it as a binding).
 const DEFAULT_QUIET_MS = 250;
 const HUB_ORIGIN = "https://hub.example";
 const DEVICE_PREFIX = "trace-device-";

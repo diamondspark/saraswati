@@ -1,4 +1,4 @@
-import { configDefaults, defineConfig } from "vitest/config";
+import { defineConfig } from "vitest/config";
 import { cloudflareTest } from "@cloudflare/vitest-plugin";
 
 // Fixture-only value for the admin bearer token, injected directly into the
@@ -18,15 +18,13 @@ export default defineConfig({
     cloudflareTest({
       wrangler: { configPath: "./wrangler.toml" },
       miniflare: {
-        bindings: { ADMIN_KEY: TEST_ADMIN_KEY },
+        // TRACE_QUIET_MS is the quiet window between trace steps, read by
+        // test/traces/replay.ts: TRACE_QUIET_MS=<ms> npx vitest run test/sangat.traces.test.ts
+        bindings: { ADMIN_KEY: TEST_ADMIN_KEY, TRACE_QUIET_MS: process.env.TRACE_QUIET_MS ?? "" },
       },
     }),
   ],
   test: {
-    // The metroserver parity traces fail until /ws is complete (Tasks 4 and 5), so
-    // they run on their own: `npm run test:traces`. Delete this exclude, and
-    // vitest.traces.config.ts, once all 19 pass.
-    exclude: [...configDefaults.exclude, "test/sangat.traces.test.ts"],
     setupFiles: ["./test/setup.ts"],
   },
 });

@@ -52,7 +52,7 @@ Phase 4 consumes these Phase 3 deliverables. Task 8 greps for each and adds only
 - **Worker:**
   - Still one DO class `FamilyHub`, one instance `idFromName("family")`, state only in `ctx.storage.sql`, no KV/R2/Queues.
   - Sangat uses the Hibernation API: `ctx.acceptWebSocket`, the `webSocketMessage`/`webSocketClose`/`webSocketError` handlers, and `serializeAttachment` holding `{userId, deviceId}`. Room state must never live only in memory; in-memory maps are caches rebuildable from SQL.
-  - One DO alarm (`ctx.storage.setAlarm`), always set to the earliest pending deadline.
+  - One DO alarm (`ctx.storage.setAlarm`), never later than the earliest pending deadline.
   - No `eval`/`new Function` anywhere (Workers forbid them; this is why protobuf-es, not protobufjs).
   - New npm deps, pinned to exact versions found with `npm view <pkg> version`: `@bufbuild/protobuf` (runtime), `@bufbuild/protoc-gen-es` and `@bufbuild/buf` (dev).
   - `wrangler.toml` is unchanged: the new tables live inside the existing SQLite class, so no migration is needed.

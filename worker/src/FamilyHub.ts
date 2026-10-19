@@ -1,5 +1,17 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "./index";
+import type { HubContext, RouteHandler } from "./hubContext";
+import { isNonEmptyString, json, readJsonBody, readStrictJsonObject } from "./http";
+import {
+  addFamilyPlaylist,
+  deleteFamilyPlaylist,
+  listFamilyPlaylists,
+} from "./routes/familyPlaylists";
+import { listParivaarPlaylists, putParivaarPlaylist } from "./routes/parivaar";
+import { CLOSE_DEVICE_REVOKED, CLOSE_SANGAT_DISABLED } from "./sangat/limits";
+import { Sangat, type LiveRoom } from "./sangat/Sangat";
+import { normalizeRoomCode } from "./sangat/sanitize";
+import { createSangatTables } from "./sangat/schema";
 
 const PAIRING_TOKEN_TTL_MS = 15 * 60 * 1000;
 const MAX_STATIONS = 6;
@@ -29,7 +41,7 @@ const FAMILY_FEATURE_KEYS = [
   "family_playlists",
   "cast_relay",
 ] as const;
-type FamilyFeatureKey = (typeof FAMILY_FEATURE_KEYS)[number];
+export type FamilyFeatureKey = (typeof FAMILY_FEATURE_KEYS)[number];
 
 // What the owner has set a phone up as. Not to be confused with AuthResult's
 // "admin" | "device" `role`, which says who is calling.
@@ -38,7 +50,7 @@ type DeviceRole = (typeof DEVICE_ROLES)[number];
 const DEFAULT_DEVICE_ROLE: DeviceRole = "adult";
 const ROLE_ERROR = `role must be one of: ${DEVICE_ROLES.join(", ")}`;
 
-type AuthResult =
+export type AuthResult =
   | { role: "admin" }
   | { role: "device"; deviceId: string }
   | null;
@@ -139,54 +151,6 @@ function secretsMatch(provided: string, stored: string): boolean {
   return a.byteLength === b.byteLength && crypto.subtle.timingSafeEqual(a, b);
 }
 
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
-}
-
-async function readJsonBody(
-  request: Request,
-): Promise<Record<string, unknown>> {
-  try {
-    const parsed = await request.json();
-    return typeof parsed === "object" && parsed !== null
-      ? (parsed as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
-  }
-}
-
-/**
- * Unlike readJsonBody, which maps anything unparseable to `{}`, this tells
- * "no valid JSON object" (null) apart from an empty object, so a PUT that
- * replaces stored state can reject a malformed body instead of treating it
- * as a no-op.
- */
-async function readStrictJsonObject(
-  request: Request,
-): Promise<Record<string, unknown> | null> {
-  try {
-    const parsed: unknown = await request.json();
-    if (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      !Array.isArray(parsed)
-    ) {
-      return parsed as Record<string, unknown>;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0;
-}
-
 /** Returns the cleaned station list, or null if any part of it is invalid. */
 function parseStations(value: unknown): Station[] | null {
   if (
@@ -261,6 +225,20 @@ function isFamilyFeatureKey(key: string): key is FamilyFeatureKey {
   return (FAMILY_FEATURE_KEYS as readonly string[]).includes(key);
 }
 
+/** A path segment, decoded; one with a broken escape stays as it is and matches no stored id. */
+function decodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
+/** A room as the hub's JSON routes show it: LiveRoom with startedAt as an ISO time. */
+function liveRoomJson(room: LiveRoom) {
+  return { ...room, startedAt: new Date(room.startedAt).toISOString() };
+}
+
 /**
  * Single global Durable Object backing the Saraswati family hub.
  *
@@ -269,8 +247,19 @@ function isFamilyFeatureKey(key: string): key is FamilyFeatureKey {
  * and request handling.
  */
 export class FamilyHub extends DurableObject<Env> {
+  private readonly sangat: Sangat;
+  private readonly hubContext: HubContext;
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    this.sangat = new Sangat(ctx);
+    this.hubContext = {
+      sql: ctx.storage.sql,
+      rateLimit: (key, windowSeconds, max) =>
+        this.rateLimit(key, windowSeconds, max),
+      featureEnabled: (key) => this.readKillSwitches()[key],
+      now: () => Date.now(),
+    };
 
     ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS pairing_tokens (
       token TEXT PRIMARY KEY,
@@ -309,6 +298,22 @@ export class FamilyHub extends DurableObject<Env> {
       windowStart INTEGER,
       count INTEGER
     )`);
+    // Parivaar Mix: each phone's own playlist. family_playlists: the ones the whole family
+    // shares. Times are epoch milliseconds; the routes show them as ISO strings.
+    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS parivaar_playlists (
+      deviceId TEXT PRIMARY KEY,
+      memberName TEXT NOT NULL,
+      playlistId TEXT NOT NULL,
+      updatedAt INTEGER NOT NULL
+    )`);
+    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS family_playlists (
+      id TEXT PRIMARY KEY,
+      playlistId TEXT NOT NULL UNIQUE,
+      title TEXT NOT NULL,
+      addedByDeviceId TEXT NOT NULL,
+      addedAt INTEGER NOT NULL
+    )`);
+    createSangatTables(ctx.storage.sql);
     // INSERT OR IGNORE keeps any key the owner has already flipped; a feature
     // key added to FAMILY_FEATURE_KEYS later seeds itself as enabled.
     for (const key of FAMILY_FEATURE_KEYS) {
@@ -324,6 +329,12 @@ export class FamilyHub extends DurableObject<Env> {
    * an approved roster row's own session token. `null` means
    * unauthenticated. Tasks 4 and 5 reuse this rather than re-checking auth
    * their own way.
+   *
+   * It must stay free of real awaits (it is async only for its callers' sake).
+   * A revoke runs between two events of the Durable Object; if this yielded to
+   * anything that opens the input gate (a fetch, a timer, a stream), a revoke
+   * could land between a device being authenticated and its socket being
+   * accepted, and /ws would hand a socket to a device that was just cut off.
    */
   private async authenticate(
     request: Request,
@@ -723,6 +734,16 @@ export class FamilyHub extends DurableObject<Env> {
       "UPDATE roster SET status = 'revoked', sessionToken = NULL, claimSecret = NULL WHERE deviceId = ?",
       deviceId,
     );
+    // The same turn as the update, with nothing awaited in between: no upgrade can
+    // authenticate the device in the gap. Its sockets close at once (4001) and its seats,
+    // and with them its reconnect tokens, go; waiting for a reconnect would be too late.
+    this.sangat.closeDevice(deviceId, CLOSE_DEVICE_REVOKED, "revoked");
+    // Its Parivaar row goes too (the list hides it anyway). Its family playlists stay: they
+    // belong to the family, and only the admin can remove them now.
+    this.ctx.storage.sql.exec(
+      "DELETE FROM parivaar_playlists WHERE deviceId = ?",
+      deviceId,
+    );
 
     return json({ deviceId, status: "revoked" });
   }
@@ -854,6 +875,11 @@ export class FamilyHub extends DurableObject<Env> {
         );
       }
     });
+    // Switching Sangat off ends it now: every socket closes (4003, which the app does
+    // not retry) and every room goes, so a re-enable starts with none.
+    if (changes.some(([key, enabled]) => key === "sangat" && !enabled)) {
+      this.sangat.closeAll(CLOSE_SANGAT_DISABLED, "sangat disabled");
+    }
 
     return json(this.readKillSwitches());
   }
@@ -927,8 +953,177 @@ export class FamilyHub extends DurableObject<Env> {
     return json({ devices });
   }
 
+  /**
+   * GET /ws: Sangat's WebSocket. Only an approved device may connect, and the
+   * checks run before the upgrade so a stranger, a pending or revoked phone, or
+   * the owner's admin key never gets a socket. Knowing a room code grants nothing.
+   */
+  private async handleSangatSocket(request: Request): Promise<Response> {
+    if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+      return new Response("expected a WebSocket upgrade", { status: 426 });
+    }
+
+    const auth = await this.authenticate(request, this.env);
+    if (auth?.role !== "device") {
+      return json({ error: "unauthorized" }, 401);
+    }
+
+    if (!this.readKillSwitches().sangat) {
+      return json({ error: "feature disabled" }, 503);
+    }
+
+    if (!this.sangat.hasRoomForSocket(auth.deviceId)) {
+      return json({ error: "too many connections" }, 429);
+    }
+
+    return this.sangat.accept(auth.deviceId);
+  }
+
+  /** GET /sangat/live: the rooms whose host is connected. A device or the admin may ask. */
+  private async handleSangatLive(request: Request): Promise<Response> {
+    const auth = await this.authenticate(request, this.env);
+    if (!auth) {
+      return json({ error: "unauthorized" }, 401);
+    }
+
+    const throttled = this.throttleAdmin(auth);
+    if (throttled) {
+      return throttled;
+    }
+
+    if (!this.readKillSwitches().sangat) {
+      return json({ error: "feature disabled" }, 503);
+    }
+
+    return json({ rooms: this.sangat.liveRooms().map(liveRoomJson) });
+  }
+
+  /**
+   * PUT /sangat/car: the host's phone says it is driving. Car mode is set over
+   * HTTP rather than the WebSocket protocol, which has no message for it.
+   */
+  private async handleSangatCar(request: Request): Promise<Response> {
+    const auth = await this.authenticate(request, this.env);
+    if (auth?.role !== "device") {
+      return json({ error: "unauthorized" }, 401);
+    }
+
+    if (!this.readKillSwitches().sangat) {
+      return json({ error: "feature disabled" }, 503);
+    }
+
+    const body = await readStrictJsonObject(request);
+    // The code is read as join_room reads it, so what opens a room opens its car switch.
+    const roomCode = typeof body?.roomCode === "string" ? normalizeRoomCode(body.roomCode) : "";
+    const carMode = body?.carMode;
+    if (roomCode === "" || typeof carMode !== "boolean") {
+      return json({ error: "roomCode and a boolean carMode are required" }, 400);
+    }
+
+    const result = this.sangat.setCarMode(roomCode, auth.deviceId, carMode);
+    if (result === "not_found") {
+      return json({ error: "room not found" }, 404);
+    }
+    if (result === "not_host") {
+      return json({ error: "only the host device can change car mode" }, 403);
+    }
+
+    const room = this.sangat.roomView(roomCode);
+    return room ? json(liveRoomJson(room)) : json({ error: "room not found" }, 404);
+  }
+
+  /**
+   * Runs one of the Parivaar / family-playlist handlers. "device" routes are closed to the
+   * admin bearer, so an admin never reaches them or spends the shared admin budget on them;
+   * "any" routes take a device or the admin, and the admin's call is counted as everywhere
+   * else. The handler does the rest: kill switch, body, per-device write limit.
+   */
+  private async runRoute(
+    request: Request,
+    access: "device" | "any",
+    handler: RouteHandler,
+  ): Promise<Response> {
+    const auth = await this.authenticate(request, this.env);
+    if (!auth || (access === "device" && auth.role !== "device")) {
+      return json({ error: "unauthorized" }, 401);
+    }
+
+    const throttled = this.throttleAdmin(auth);
+    if (throttled) {
+      return throttled;
+    }
+
+    return handler(this.hubContext, request, auth);
+  }
+
+  async webSocketMessage(
+    ws: WebSocket,
+    message: string | ArrayBuffer,
+  ): Promise<void> {
+    await this.sangat.onMessage(ws, message);
+  }
+
+  async webSocketClose(
+    ws: WebSocket,
+    code: number,
+    reason: string,
+  ): Promise<void> {
+    // Finish the closing handshake with a code a close frame may carry.
+    try {
+      ws.close(code === 1000 || (code >= 3000 && code <= 4999) ? code : 1000, reason);
+    } catch {
+      // already closed
+    }
+    await this.sangat.onClose(ws);
+  }
+
+  async webSocketError(ws: WebSocket): Promise<void> {
+    await this.sangat.onClose(ws);
+  }
+
+  async alarm(): Promise<void> {
+    await this.sangat.onAlarm();
+  }
+
   async fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
+
+    if (request.method === "GET" && pathname === "/ws") {
+      return this.handleSangatSocket(request);
+    }
+
+    if (request.method === "GET" && pathname === "/sangat/live") {
+      return this.handleSangatLive(request);
+    }
+
+    if (request.method === "PUT" && pathname === "/sangat/car") {
+      return this.handleSangatCar(request);
+    }
+
+    if (request.method === "PUT" && pathname === "/parivaar/playlist") {
+      return this.runRoute(request, "device", putParivaarPlaylist);
+    }
+
+    if (request.method === "GET" && pathname === "/parivaar/playlists") {
+      return this.runRoute(request, "any", listParivaarPlaylists);
+    }
+
+    if (pathname === "/family-playlists") {
+      if (request.method === "GET") {
+        return this.runRoute(request, "any", listFamilyPlaylists);
+      }
+      if (request.method === "POST") {
+        return this.runRoute(request, "device", addFamilyPlaylist);
+      }
+    }
+
+    const familyPlaylistMatch = /^\/family-playlists\/([^/]+)$/.exec(pathname);
+    if (request.method === "DELETE" && familyPlaylistMatch) {
+      const id = decodeSegment(familyPlaylistMatch[1]);
+      return this.runRoute(request, "any", (ctx, req, auth) =>
+        deleteFamilyPlaylist(ctx, req, auth, id),
+      );
+    }
 
     if (request.method === "GET" && pathname === "/ping") {
       return new Response("ok", { status: 200 });
