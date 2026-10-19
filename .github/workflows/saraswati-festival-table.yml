@@ -45,7 +45,7 @@ jobs:
 
       - name: Festival table (strict)
         run: >-
-          ./gradlew --dependency-verification strict
-          :app:testGmsDebugUnitTest
+          ./gradlew --dependency-verification strict --no-build-cache
+          :app:testGmsDebugUnitTest --rerun
           --tests '*FestivalCalendarTest'
           -Psaraswati.strictFestivalTable=true

@@ -440,7 +440,7 @@ class App :
             // SARASWATI: fix wave B3 — the car's Home tab keeps the last suggestions YouTube gave this account
             // (in memory, in a file, and in a refresh that may be under way); they go with the account. After the
             // auth state is cleared above, so a refresh that starts from here on is anonymous.
-            CarHomeHolder.forget(context)
+            runCatching { CarHomeHolder.forget(context) }
 
             // Clear WebView cookies to prevent auto-relogin
             Timber.d("forgetAccount: Clearing WebView CookieManager")
