@@ -583,6 +583,10 @@ val FamilyStationsCacheKey = stringPreferencesKey("familyStationsCache")
 // keys (FamilyFeatureGate). A cache of hub data, not a setting: a restored backup must not switch a feature
 // off or back on (BackupPolicy). Absent means every feature is on.
 val FamilyFeaturesDisabledKey = stringSetPreferencesKey("familyFeaturesDisabled")
+
+// SARASWATI: Phase 4 Task 11 — the last Parivaar Mix this phone built, as JSON (ParivaarMixStore). Derived from
+// the family's listening, so a restored backup must not plant one (BackupPolicy).
+val ParivaarMixKey = stringPreferencesKey("parivaarMix")
 val AccountNameKey = stringPreferencesKey("accountName")
 val AccountEmailKey = stringPreferencesKey("accountEmail")
 val AccountChannelHandleKey = stringPreferencesKey("accountChannelHandle")

@@ -55,6 +55,7 @@ import com.metrolist.music.constants.ListenTogetherSessionTimestampKey
 import com.metrolist.music.constants.MaxImageCacheSizeKey
 import com.metrolist.music.constants.MaxSongCacheSizeKey
 import com.metrolist.music.constants.OpenRouterBaseUrlKey
+import com.metrolist.music.constants.ParivaarMixKey
 import com.metrolist.music.constants.VisitorDataKey
 import com.metrolist.music.saraswati.security.SecretPreferenceKeys
 import java.io.ByteArrayOutputStream
@@ -142,6 +143,8 @@ object BackupPolicy {
                 FamilyStationsCacheKey,
                 // SARASWATI: Phase 4 Task 8 — the cached kill-switches are hub data too.
                 FamilyFeaturesDisabledKey,
+                // SARASWATI: Phase 4 Task 11 — the built Parivaar Mix is derived from the family's listening.
+                ParivaarMixKey,
                 // SARASWATI: Task 7/8 fix round 1 — this phone's own hub state,
                 // none of it a credential by name but all of it identity. A
                 // restore must not plant or clear the owner flag (Manage
