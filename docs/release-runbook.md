@@ -349,9 +349,10 @@ Summary for Phase 3 rollout:
 3. Fold this into the Phase 3 remote-setup flow, alongside the existing
    "Unknown sources"/Auto Blocker/battery steps, before the family member
    installs Saraswati Updates.
-4. Track authorized-device count against the 20-device cap in the family
-   hub's health view (Phase 3) so there's headroom visibility before a
-   phone upgrade or replacement needs a slot freed up.
+4. Track authorized-device count against the 20-device cap by hand in the
+   rollout log in [`rollout-checklist.md`](rollout-checklist.md) (the family
+   hub can't see Google's device authorizations), so there's headroom
+   visibility before a phone upgrade or replacement needs a slot freed up.
 
 ### If the signing key is lost
 

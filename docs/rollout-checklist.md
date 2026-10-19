@@ -30,8 +30,8 @@ Owner only. Do this once.
       Do not deploy an older commit and upgrade it later.
 - [ ] Deploy: `cd worker && npx wrangler deploy`
 - [ ] Check it is up: `curl https://saraswati-sangat.pandey-mohitk.workers.dev/ping`
-      returns `ok` (this URL comes from the build notes; use the one
-      `wrangler deploy` printed if it differs).
+      returns `ok` (this is the address the app is built to use,
+      `HUB_BASE_URL`; use the one `wrangler deploy` printed if it differs).
 - [ ] Make the admin key, in your own terminal only:
       `openssl rand -hex 32`. Copy the output. Do not paste it into chat, a
       file, a note-to-self message or a screenshot.
