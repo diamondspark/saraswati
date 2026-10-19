@@ -11,6 +11,9 @@ const HEALTH_MAX_REPORTS = 1;
 // whose attempts are spent stays blocked until it would have expired anyway.
 const CLAIM_WINDOW_SECONDS = 15 * 60;
 const CLAIM_MAX_ATTEMPTS = 10;
+// /pairing/status: a phone polls this while it waits for the owner's approval.
+const STATUS_WINDOW_SECONDS = 60;
+const STATUS_MAX_POLLS = 12;
 // Every admin-authenticated request, across all routes, shares one budget.
 const ADMIN_RATE_KEY = "admin";
 const ADMIN_WINDOW_SECONDS = 60;
@@ -56,6 +59,17 @@ interface RosterStatusRow extends Record<string, SqlStorageValue> {
   status: string;
 }
 
+interface DeviceAuthRow extends Record<string, SqlStorageValue> {
+  deviceId: string;
+  claimSecret: string | null;
+}
+
+interface ClaimStatusRow extends Record<string, SqlStorageValue> {
+  status: string;
+  sessionToken: string | null;
+  claimSecret: string | null;
+}
+
 interface RosterIdRow extends Record<string, SqlStorageValue> {
   deviceId: string;
 }
@@ -99,6 +113,18 @@ function randomHex(byteLength: number): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
     "",
   );
+}
+
+/**
+ * Compares two secrets without bailing out at the first differing byte. The
+ * length check is not constant-time, which is fine: the stored secret is
+ * always 64 hex chars, so a length mismatch reveals nothing.
+ */
+function secretsMatch(provided: string, stored: string): boolean {
+  const encoder = new TextEncoder();
+  const a = encoder.encode(provided);
+  const b = encoder.encode(stored);
+  return a.byteLength === b.byteLength && crypto.subtle.timingSafeEqual(a, b);
 }
 
 function json(body: unknown, status = 200): Response {
@@ -240,7 +266,8 @@ export class FamilyHub extends DurableObject<Env> {
       deviceName TEXT,
       status TEXT,
       sessionToken TEXT,
-      approvedAt INTEGER
+      approvedAt INTEGER,
+      claimSecret TEXT
     )`);
     ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS stations (
       id TEXT PRIMARY KEY,
@@ -300,13 +327,22 @@ export class FamilyHub extends DurableObject<Env> {
     }
 
     const rows = this.ctx.storage.sql
-      .exec<RosterRow>(
-        "SELECT deviceId, deviceName, status, sessionToken, approvedAt FROM roster WHERE sessionToken = ? AND status = 'approved'",
+      .exec<DeviceAuthRow>(
+        "SELECT deviceId, claimSecret FROM roster WHERE sessionToken = ? AND status = 'approved'",
         token,
       )
       .toArray();
 
     if (rows.length === 1) {
+      // The phone has now proven it holds its sessionToken, so the claimSecret
+      // that fetched it via /pairing/status has done its job. One write per
+      // device, ever: the guard skips every later authentication.
+      if (rows[0].claimSecret !== null) {
+        this.ctx.storage.sql.exec(
+          "UPDATE roster SET claimSecret = NULL WHERE deviceId = ?",
+          rows[0].deviceId,
+        );
+      }
       return { role: "device", deviceId: rows[0].deviceId };
     }
 
@@ -434,10 +470,12 @@ export class FamilyHub extends DurableObject<Env> {
     }
 
     const deviceId = crypto.randomUUID();
+    const claimSecret = randomHex(32);
     this.ctx.storage.sql.exec(
-      "INSERT INTO roster (deviceId, deviceName, status, sessionToken, approvedAt) VALUES (?, ?, 'pending', NULL, NULL)",
+      "INSERT INTO roster (deviceId, deviceName, status, sessionToken, approvedAt, claimSecret) VALUES (?, ?, 'pending', NULL, NULL, ?)",
       deviceId,
       deviceName,
+      claimSecret,
     );
     this.ctx.storage.sql.exec(
       "UPDATE pairing_tokens SET usedAt = ? WHERE token = ?",
@@ -445,7 +483,61 @@ export class FamilyHub extends DurableObject<Env> {
       token,
     );
 
-    return json({ deviceId, status: "pending" });
+    return json({ deviceId, status: "pending", claimSecret });
+  }
+
+  /**
+   * How a remote phone learns it was approved and collects its own
+   * sessionToken. No bearer: the phone has none yet. The claimSecret handed
+   * out by /pairing/claim is the credential; the deviceId alone is not.
+   */
+  private async handlePairingStatus(request: Request): Promise<Response> {
+    const body = await readStrictJsonObject(request);
+    const deviceId = body?.deviceId;
+    const claimSecret = body?.claimSecret;
+    if (!isNonEmptyString(deviceId) || !isNonEmptyString(claimSecret)) {
+      return json({ error: "deviceId and claimSecret are required" }, 400);
+    }
+
+    const rows = this.ctx.storage.sql
+      .exec<ClaimStatusRow>(
+        "SELECT status, sessionToken, claimSecret FROM roster WHERE deviceId = ?",
+        deviceId,
+      )
+      .toArray();
+
+    // Unknown ids return before the limiter, so guessing ids cannot mint
+    // rate_limits rows (same reasoning as /pairing/claim).
+    if (rows.length === 0) {
+      return json({ error: "not found" }, 404);
+    }
+
+    if (
+      !this.rateLimit(
+        `status:${deviceId}`,
+        STATUS_WINDOW_SECONDS,
+        STATUS_MAX_POLLS,
+      )
+    ) {
+      return json({ error: "too many requests" }, 429);
+    }
+
+    // Every way of being refused answers the same 404, so a caller cannot
+    // tell a wrong secret from a revoked device or one that already
+    // collected its token.
+    const row = rows[0];
+    if (
+      row.claimSecret === null ||
+      !secretsMatch(claimSecret, row.claimSecret) ||
+      (row.status !== "pending" && row.status !== "approved")
+    ) {
+      return json({ error: "not found" }, 404);
+    }
+
+    if (row.status === "approved" && row.sessionToken !== null) {
+      return json({ status: "approved", sessionToken: row.sessionToken });
+    }
+    return json({ status: "pending" });
   }
 
   private async handleRosterList(request: Request): Promise<Response> {
@@ -537,7 +629,7 @@ export class FamilyHub extends DurableObject<Env> {
     }
 
     this.ctx.storage.sql.exec(
-      "UPDATE roster SET status = 'revoked', sessionToken = NULL WHERE deviceId = ?",
+      "UPDATE roster SET status = 'revoked', sessionToken = NULL, claimSecret = NULL WHERE deviceId = ?",
       deviceId,
     );
 
@@ -757,6 +849,10 @@ export class FamilyHub extends DurableObject<Env> {
 
     if (request.method === "POST" && pathname === "/pairing/claim") {
       return this.handlePairingClaim(request);
+    }
+
+    if (request.method === "POST" && pathname === "/pairing/status") {
+      return this.handlePairingStatus(request);
     }
 
     if (request.method === "GET" && pathname === "/roster") {
