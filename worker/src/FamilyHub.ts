@@ -13,7 +13,8 @@ const PENDING_APPROVAL_TTL_MS = 60 * 60 * 1000;
 const MIN_ADMIN_KEY_LENGTH = 32;
 // Names are shown to the owner when approving. Cap them, and strip anything
 // that can reorder, hide or forge what is displayed (control and format
-// characters, which include bidi overrides and zero-width characters).
+// characters, which include bidi overrides and zero-width characters; see
+// STRIPPED_NAME_CHARACTERS for the two joiners that are kept).
 const MAX_DEVICE_NAME_LENGTH = 64;
 const MAX_STATIONS = 6;
 
@@ -251,15 +252,22 @@ function parseHealthReport(
   return { deviceId, versionCode, versionName, timezone };
 }
 
+// Control (Cc) and format (Cf) characters, except the two joiners. Cf holds the
+// bidi controls (U+200E/F, U+202A-E, U+2066-9, U+061C) and zero-width
+// characters, which can reorder or hide what the owner reads. ZWJ (U+200D) and
+// ZWNJ (U+200C) are Cf too, but Devanagari conjuncts and emoji sequences are
+// spelled with them, so they stay.
+const STRIPPED_NAME_CHARACTERS = /(?![\u200C\u200D])[\p{Cc}\p{Cf}]/gu;
+
 /**
- * The name to store, or null when nothing is left of it. Control (Cc) and
- * format (Cf) characters go first, then surrounding whitespace, then the cap,
- * counted in characters rather than UTF-16 units so an emoji is never cut in
- * half.
+ * The name to store, or null when nothing is left of it. Stripped characters
+ * go first, then surrounding whitespace, then the cap, counted in characters
+ * rather than UTF-16 units so an emoji is never cut in half. A name made only
+ * of joiners and whitespace counts as empty.
  */
 function cleanDeviceName(raw: string): string | null {
-  const cleaned = raw.replace(/[\p{Cc}\p{Cf}]/gu, "").trim();
-  if (cleaned === "") {
+  const cleaned = raw.replace(STRIPPED_NAME_CHARACTERS, "").trim();
+  if (cleaned.replace(/[\u200C\u200D\s]/g, "") === "") {
     return null;
   }
   return Array.from(cleaned).slice(0, MAX_DEVICE_NAME_LENGTH).join("").trim();

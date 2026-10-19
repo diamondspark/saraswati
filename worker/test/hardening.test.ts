@@ -283,6 +283,48 @@ describe("deviceName on POST /pairing/claim", () => {
     }
   });
 
+  it("keeps ZWJ and ZWNJ, which Devanagari and emoji need, and the names around them", async () => {
+    const stub = getFamilyHubStub();
+    const names = [
+      "\u0926\u093E\u0926\u0940 \u0915\u093E \u095E\u094B\u0928", // composed form of the Hindi "phone"
+      "\u0926\u093E\u0926\u0940 \u0915\u093E \u092B\u093C\u094B\u0928", // the same with a separate nukta
+      "\u0915\u094D\u200D\u0937", // virama + ZWJ (half form)
+      "\u0915\u094D\u200C\u0937", // virama + ZWNJ (explicit virama)
+      "\u{1F468}\u200D\u{1F469}\u200D\u{1F467} Family phone", // ZWJ emoji sequence
+    ];
+    for (const name of names) {
+      const response = await claimNamed(stub, name);
+      expect(response.status, name).toBe(200);
+      const { deviceId } = (await response.json()) as { deviceId: string };
+      expect(await storedName(stub, deviceId)).toBe(name);
+    }
+  });
+
+  it("still strips every bidi control, even next to ZWJ and ZWNJ", async () => {
+    const stub = getFamilyHubStub();
+    const bidi = [
+      "\u200E",
+      "\u200F",
+      "\u202A",
+      "\u202B",
+      "\u202C",
+      "\u202D",
+      "\u202E",
+      "\u2066",
+      "\u2067",
+      "\u2068",
+      "\u2069",
+      "\u061C",
+    ].join("");
+    const name = `${bidi}\u0915\u094D${bidi}\u200D${bidi}\u0937${bidi}`;
+
+    const response = await claimNamed(stub, name);
+
+    expect(response.status).toBe(200);
+    const { deviceId } = (await response.json()) as { deviceId: string };
+    expect(await storedName(stub, deviceId)).toBe("\u0915\u094D\u200D\u0937");
+  });
+
   it("caps the name at 64 characters, counting characters and not UTF-16 units", async () => {
     const stub = getFamilyHubStub();
 
@@ -302,7 +344,7 @@ describe("deviceName on POST /pairing/claim", () => {
   it("strips control characters, newlines and bidi overrides", async () => {
     const stub = getFamilyHubStub();
     const dirty =
-      "Ma\u0000m\u0007my\n\r\t‮⁦'s​ ‏Pixel‬\u007F\u0085";
+      "Ma\u0000m\u0007my\n\r\t\u202E\u2066's\u200B \u200FPixel\u202C\u007F\u0085";
 
     const response = await claimNamed(stub, dirty);
 
@@ -313,7 +355,7 @@ describe("deviceName on POST /pairing/claim", () => {
 
   it("strips before capping, so hidden characters never use up the 64", async () => {
     const stub = getFamilyHubStub();
-    const name = "‮".repeat(80) + "c".repeat(64);
+    const name = "\u202E".repeat(80) + "c".repeat(64);
 
     const response = await claimNamed(stub, name);
 
@@ -325,8 +367,10 @@ describe("deviceName on POST /pairing/claim", () => {
     ["an empty string", ""],
     ["only spaces", "   "],
     ["only control characters", "\u0000\u0001\n\t"],
-    ["only bidi overrides", "‮‭⁦⁩"],
-    ["only invisible format characters", "​‌‍⁠﻿"],
+    ["only bidi overrides", "\u202E\u202D\u2066\u2069"],
+    ["only invisible format characters", "\u200B\u200C\u200D\u2060\uFEFF"],
+    ["only ZWJ and ZWNJ", "\u200D\u200C \u200D"],
+    ["only bidi controls", "\u200E\u200F\u061C\u202A\u202E\u2066\u2069"],
   ])("answers 400 for %s, without burning the pairing token", async (_label, name) => {
     const stub = getFamilyHubStub();
     const token = await mintPairingToken(stub);
