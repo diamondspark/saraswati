@@ -8,13 +8,25 @@ import { runScenario, type TraceTransport } from "./runner.ts";
 import { SCENARIOS, type ScenarioName } from "./scenarios.ts";
 
 // How long the whole room must stay silent before the next step is sent. The
-// goldens were checked to be identical at 100 ms and at 500 ms against
-// metroserver, so this only has to outlast the hub's own processing.
-const QUIET_MS = 100;
+// goldens were checked identical against metroserver at 100 ms and at 500 ms;
+// the default leaves the hub (storage writes, gzip) headroom beyond that. Raise
+// it with TRACE_QUIET_MS=<ms> npm run test:traces if a loaded machine makes a
+// reply land in the next step (vitest.traces.config.ts forwards it as a binding).
+const DEFAULT_QUIET_MS = 250;
 const HUB_ORIGIN = "https://hub.example";
 const DEVICE_PREFIX = "trace-device-";
 
 type HubStub = ReturnType<typeof hubStub>;
+
+function quietMsFromEnv(): number {
+  const raw = (env as unknown as { TRACE_QUIET_MS?: string }).TRACE_QUIET_MS;
+  if (raw === undefined || raw === "") return DEFAULT_QUIET_MS;
+  const ms = Number(raw);
+  if (!Number.isFinite(ms) || ms < 25) {
+    throw new Error(`TRACE_QUIET_MS must be a number of at least 25, got "${raw}"`);
+  }
+  return ms;
+}
 
 function hubStub() {
   return env.FAMILY_HUB.get(env.FAMILY_HUB.idFromName("family"));
@@ -97,7 +109,7 @@ export async function replayAgainstWorker(scenario: string): Promise<object[]> {
   try {
     const clients = [...new Set(steps.map((step) => step.client))].sort();
     const tokens = await seedDevices(hub, clients);
-    return normalize(await runScenario(steps, hubTransport(hub, tokens), { quietMs: QUIET_MS, lenient: true }));
+    return normalize(await runScenario(steps, hubTransport(hub, tokens), { quietMs: quietMsFromEnv(), lenient: true }));
   } finally {
     await clearTraceState(hub);
   }

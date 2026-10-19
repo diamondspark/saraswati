@@ -7,6 +7,8 @@ export default defineConfig({
   plugins: [
     cloudflareTest({
       wrangler: { configPath: "./wrangler.toml" },
+      // Quiet window between trace steps, read by test/traces/replay.ts.
+      miniflare: { bindings: { TRACE_QUIET_MS: process.env.TRACE_QUIET_MS ?? "" } },
     }),
   ],
   test: {

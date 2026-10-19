@@ -3,6 +3,12 @@
 //   node --experimental-strip-types scripts/record-traces.ts ws://localhost:8080/ws [scenario ...]
 //   node --experimental-strip-types scripts/record-traces.ts ws://localhost:8080/ws --check
 //
+// The host must be localhost, 127.0.0.1 or [::1]; pass --allow-remote to record
+// from anything else. Every requested scenario is recorded into memory first and
+// the goldens are written only if all of them succeeded, so a failed run never
+// leaves a mix of old and new files. A scenario that yields no server messages
+// at all counts as a failure (a wrong URL or a dead server must not become a golden).
+//
 // Each scenario (test/traces/scenarios.ts) is played against the server on fresh
 // sockets, the messages every client receives are normalized
 // (test/traces/normalize.ts) and written to test/traces/<scenario>.golden.json.
@@ -84,14 +90,38 @@ async function record(name: ScenarioName, transport: TraceTransport): Promise<st
   return `${JSON.stringify(normalize(messages), null, 2)}\n`;
 }
 
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+const FLAGS = new Set(["--check", "--allow-remote"]);
+
 async function main(): Promise<number> {
+  const usage = "usage: record-traces.ts <ws://localhost:port/ws> [--check] [--allow-remote] [scenario ...]";
   const [url, ...rest] = process.argv.slice(2) as string[];
-  if (!url || !/^wss?:\/\//.test(url)) {
-    console.error("usage: record-traces.ts <ws://host:port/ws> [--check] [scenario ...]");
+  let target: URL;
+  try {
+    target = new URL(url ?? "");
+  } catch {
+    console.error(usage);
     return 2;
   }
-  const check = rest.includes("--check");
-  const requested = rest.filter((arg) => arg !== "--check");
+  if (target.protocol !== "ws:" && target.protocol !== "wss:") {
+    console.error(usage);
+    return 2;
+  }
+  const flags = rest.filter((arg) => arg.startsWith("--"));
+  const badFlags = flags.filter((flag) => !FLAGS.has(flag));
+  if (badFlags.length > 0) {
+    console.error(`unknown flag: ${badFlags.join(", ")}\n${usage}`);
+    return 2;
+  }
+  if (!LOCAL_HOSTS.has(target.hostname) && !flags.includes("--allow-remote")) {
+    console.error(
+      `refusing to record from ${target.hostname}: goldens must come from a local, disposable metroserver. ` +
+        "Pass --allow-remote if that host really is the reference server.",
+    );
+    return 2;
+  }
+  const check = flags.includes("--check");
+  const requested = rest.filter((arg) => !arg.startsWith("--"));
   const unknown = requested.filter((arg) => !(SCENARIO_NAMES as readonly string[]).includes(arg));
   if (unknown.length > 0) {
     console.error(`unknown scenario: ${unknown.join(", ")}`);
@@ -99,18 +129,27 @@ async function main(): Promise<number> {
   }
   const names = (requested.length > 0 ? requested : [...SCENARIO_NAMES]) as ScenarioName[];
 
-  const transport = nodeTransport(url);
-  let differing = 0;
+  const transport = nodeTransport(target.href);
+  const recorded = new Map<ScenarioName, { text: string; count: number }>();
   for (const name of names) {
-    const recorded = await record(name, transport);
-    const count = (JSON.parse(recorded) as unknown[]).length;
+    const text = await record(name, transport);
+    const count = (JSON.parse(text) as unknown[]).length;
+    if (count === 0) {
+      console.error(`${name}: the server sent no messages at all; is ${target.href} really metroserver?`);
+      return 1;
+    }
+    recorded.set(name, { text, count });
+  }
+
+  let differing = 0;
+  for (const [name, { text, count }] of recorded) {
     if (check) {
       const stored = await readFile(goldenPath(name), "utf8").catch(() => undefined);
-      const same = stored === recorded;
+      const same = stored === text;
       if (!same) differing++;
       console.log(`${same ? "same     " : "DIFFERENT"} ${name} (${count} messages)`);
     } else {
-      await writeFile(goldenPath(name), recorded);
+      await writeFile(goldenPath(name), text);
       console.log(`recorded  ${name} (${count} messages)`);
     }
   }

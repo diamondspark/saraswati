@@ -186,7 +186,12 @@ export async function runScenario(
   try {
     for (const name of names) await open(name);
     await settle();
-    batch = [];
+    // Neither metroserver nor the hub says anything until it is spoken to.
+    if (decodeFailure !== undefined) throw decodeFailure;
+    if (batch.length > 0) {
+      const heard = batch.map((m) => `${m.client}:${m.type}`).join(", ");
+      throw new Error(`unsolicited frames right after connecting: ${heard}`);
+    }
 
     for (const [index, step] of steps.entries()) {
       const state = clients.get(step.client)!;

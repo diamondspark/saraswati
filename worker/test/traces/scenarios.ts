@@ -349,6 +349,10 @@ export const SCENARIOS: Record<ScenarioName, TraceStep[]> = {
     send("A", "request_sync"),
     create("A"),
     send("A", "request_sync"),
+    // Deliberately back to back: request_sync is answered at most once per second
+    // per connection, so these two steps must stay under 1 s apart (the recorder
+    // settles 500 ms and the replay 250 ms between steps) for the second to be
+    // dropped. Any later repeat by the same client needs an explicit `wait`.
     send("A", "request_sync"),
     ...enter("B"),
     send("B", "request_sync"),
