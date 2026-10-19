@@ -1,5 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "./index";
+import { Sangat } from "./sangat/Sangat";
+import { createSangatTables } from "./sangat/schema";
 
 const PAIRING_TOKEN_TTL_MS = 15 * 60 * 1000;
 const MAX_STATIONS = 6;
@@ -269,8 +271,11 @@ function isFamilyFeatureKey(key: string): key is FamilyFeatureKey {
  * and request handling.
  */
 export class FamilyHub extends DurableObject<Env> {
+  private readonly sangat: Sangat;
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    this.sangat = new Sangat(ctx);
 
     ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS pairing_tokens (
       token TEXT PRIMARY KEY,
@@ -309,6 +314,7 @@ export class FamilyHub extends DurableObject<Env> {
       windowStart INTEGER,
       count INTEGER
     )`);
+    createSangatTables(ctx.storage.sql);
     // INSERT OR IGNORE keeps any key the owner has already flipped; a feature
     // key added to FAMILY_FEATURE_KEYS later seeds itself as enabled.
     for (const key of FAMILY_FEATURE_KEYS) {
@@ -927,8 +933,63 @@ export class FamilyHub extends DurableObject<Env> {
     return json({ devices });
   }
 
+  /**
+   * GET /ws: Sangat's WebSocket. Only an approved device may connect, and the
+   * checks run before the upgrade so a stranger, a pending or revoked phone, or
+   * the owner's admin key never gets a socket. Knowing a room code grants nothing.
+   */
+  private async handleSangatSocket(request: Request): Promise<Response> {
+    if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+      return new Response("expected a WebSocket upgrade", { status: 426 });
+    }
+
+    const auth = await this.authenticate(request, this.env);
+    if (auth?.role !== "device") {
+      return json({ error: "unauthorized" }, 401);
+    }
+
+    if (!this.readKillSwitches().sangat) {
+      return json({ error: "feature disabled" }, 503);
+    }
+
+    return this.sangat.accept(auth.deviceId);
+  }
+
+  async webSocketMessage(
+    ws: WebSocket,
+    message: string | ArrayBuffer,
+  ): Promise<void> {
+    await this.sangat.onMessage(ws, message);
+  }
+
+  async webSocketClose(
+    ws: WebSocket,
+    code: number,
+    reason: string,
+  ): Promise<void> {
+    // Finish the closing handshake with a code a close frame may carry.
+    try {
+      ws.close(code === 1000 || (code >= 3000 && code <= 4999) ? code : 1000, reason);
+    } catch {
+      // already closed
+    }
+    await this.sangat.onClose(ws);
+  }
+
+  async webSocketError(ws: WebSocket): Promise<void> {
+    await this.sangat.onClose(ws);
+  }
+
+  async alarm(): Promise<void> {
+    await this.sangat.onAlarm();
+  }
+
   async fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
+
+    if (request.method === "GET" && pathname === "/ws") {
+      return this.handleSangatSocket(request);
+    }
 
     if (request.method === "GET" && pathname === "/ping") {
       return new Response("ok", { status: 200 });

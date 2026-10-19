@@ -28,6 +28,10 @@ export const MAX_QUEUE = 1000;
 export const MAX_PENDING_JOINS = 100;
 export const MAX_PENDING_SUGGESTIONS = 100;
 export const MAX_CLIENTS_PER_ROOM = 100;
+// A client may send up to twice MAX_QUEUE tracks; the server keeps at most MAX_QUEUE (metroserver).
+export const MAX_QUEUE_INPUT = MAX_QUEUE * 2;
+// metroserver allows 10000 rooms; a family hub has a handful of phones.
+export const MAX_ROOMS = 100;
 
 // Message limits (metroserver)
 export const MAX_READ_MESSAGE_BYTES = 524288;
