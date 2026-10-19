@@ -51,6 +51,23 @@
                 <data android:host="metrolist.cc" />
                 <data android:pathPrefix="/listen" />
             </intent-filter>
+
+            <!-- SARASWATI: Task 7 — family pairing link, https://<hub host>/pair#<token>.
+                 The owner's Manage Family screen makes it; a phone that opens it goes to the
+                 join screen. Nothing else on the hub host opens the app: the exact path is
+                 /pair, and MainActivity's handler accepts only that path with a hex token in
+                 the fragment (PairingLink). autoVerify lets the link open straight in the app
+                 once the hub serves /.well-known/assetlinks.json; until then Android asks. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="https" />
+                <data android:host="${hubHost}" />
+                <data android:path="/pair" />
+            </intent-filter>
         </activity>
 
         <!-- Discord Rich Presence OAuth callback: Discord integration dropped -->

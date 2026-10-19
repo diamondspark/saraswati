@@ -37,7 +37,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
-import java.util.TimeZone
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -45,7 +44,7 @@ import kotlin.coroutines.resumeWithException
 class HubClient(
     private val baseUrl: String,
     client: OkHttpClient,
-) {
+) : HubApi {
     // Shares the caller's connection pool, dispatcher and timeouts; only the
     // redirect policy is pinned here.
     private val http: OkHttpClient =
@@ -55,7 +54,7 @@ class HubClient(
             .followSslRedirects(false)
             .build()
 
-    suspend fun createPairing(adminKey: String): Result<PairingToken> =
+    override suspend fun createPairing(adminKey: String): Result<PairingToken> =
         send("POST", listOf("pairing", "create"), adminKey, "{}") {
             json.decodeFromString<PairingToken>(it)
         }
@@ -66,10 +65,10 @@ class HubClient(
      * as; null sends nothing and the Worker defaults to adult. A role the
      * Worker rejects is a 400 that does not spend the pairing token.
      */
-    suspend fun claimPairing(
+    override suspend fun claimPairing(
         token: String,
         deviceName: String,
-        role: DeviceRole? = null,
+        role: DeviceRole?,
     ): Result<ClaimResult> =
         send("POST", listOf("pairing", "claim"), null, json.encodeToString(ClaimRequest(token, deviceName, role))) {
             json.decodeFromString<ClaimResult>(it)
@@ -80,7 +79,7 @@ class HubClient(
      * its own session token. 404 means the claim is gone (unknown, revoked or
      * already collected), not "still waiting".
      */
-    suspend fun pairingStatus(
+    override suspend fun pairingStatus(
         deviceId: String,
         claimSecret: String,
     ): Result<PairingStatus> =
@@ -97,12 +96,12 @@ class HubClient(
             }
         }
 
-    suspend fun getRoster(adminKey: String): Result<List<RosterEntry>> =
+    override suspend fun getRoster(adminKey: String): Result<List<RosterEntry>> =
         send("GET", listOf("roster"), adminKey, null) {
             json.decodeFromString<RosterResponse>(it).devices
         }
 
-    suspend fun approveDevice(
+    override suspend fun approveDevice(
         adminKey: String,
         deviceId: String,
     ): Result<ApprovedDevice> {
@@ -112,7 +111,7 @@ class HubClient(
         }
     }
 
-    suspend fun revokeDevice(
+    override suspend fun revokeDevice(
         adminKey: String,
         deviceId: String,
     ): Result<Unit> {
@@ -121,7 +120,7 @@ class HubClient(
     }
 
     /** The owner flips a phone's role (how a grandparent-mode phone is switched back). 404 is unknown or revoked. */
-    suspend fun setRole(
+    override suspend fun setRole(
         adminKey: String,
         deviceId: String,
         role: DeviceRole,
@@ -133,18 +132,18 @@ class HubClient(
     }
 
     /** A paired phone asking what the owner has set it up as. Device bearer only; the admin key gets a 401. */
-    suspend fun getMe(sessionToken: String): Result<Me> =
+    override suspend fun getMe(sessionToken: String): Result<Me> =
         send("GET", listOf("me"), sessionToken, null) {
             json.decodeFromString<Me>(it)
         }
 
     /** [auth] is the owner's admin key or a paired phone's session token; the Worker accepts either. */
-    suspend fun getStations(auth: String): Result<List<Station>> =
+    override suspend fun getStations(auth: String): Result<List<Station>> =
         send("GET", listOf("stations"), auth, null) {
             json.decodeFromString<StationsEnvelope>(it).stations
         }
 
-    suspend fun setStations(
+    override suspend fun setStations(
         adminKey: String,
         stations: List<Station>,
     ): Result<List<Station>> =
@@ -153,12 +152,12 @@ class HubClient(
         }
 
     /** [auth] is the owner's admin key or a paired phone's session token; the Worker accepts either. */
-    suspend fun getKillSwitches(auth: String): Result<Map<String, Boolean>> =
+    override suspend fun getKillSwitches(auth: String): Result<Map<String, Boolean>> =
         send("GET", listOf("killswitches"), auth, null) {
             json.decodeFromString(KILL_SWITCHES, it)
         }
 
-    suspend fun setKillSwitches(
+    override suspend fun setKillSwitches(
         adminKey: String,
         changes: Map<String, Boolean>,
     ): Result<Map<String, Boolean>> =
@@ -172,12 +171,12 @@ class HubClient(
      * [timezone] is this phone's own, so the owner sees each device's local
      * time as the device reports it.
      */
-    suspend fun reportHealth(
+    override suspend fun reportHealth(
         sessionToken: String,
         deviceId: String,
         versionCode: Int,
         versionName: String,
-        timezone: String = TimeZone.getDefault().id,
+        timezone: String,
     ): Result<Unit> =
         send(
             "POST",
@@ -186,7 +185,7 @@ class HubClient(
             json.encodeToString(HealthReportRequest(deviceId, versionCode, versionName, timezone)),
         ) { }
 
-    suspend fun getHealth(adminKey: String): Result<List<DeviceHealth>> =
+    override suspend fun getHealth(adminKey: String): Result<List<DeviceHealth>> =
         send("GET", listOf("health"), adminKey, null) {
             json.decodeFromString<HealthResponse>(it).devices
         }

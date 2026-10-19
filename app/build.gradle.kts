@@ -382,6 +382,9 @@ dependencies {
     // classpath resolves to, pulling in an unverified
     // org.jetbrains.compose.annotation-internal 1.8.0 .module.
     implementation(libs.kotlinx.serialization.json)
+    // SARASWATI: Task 7 — renders the owner's pairing link as a QR code
+    // (QrCode.kt). Encoding only; no camera or scanning code is added.
+    implementation(libs.zxing.core)
 
     // Protobuf for message serialization (lite version for Android)
     implementation(libs.protobuf.javalite)
@@ -452,13 +455,19 @@ android {
     // and security/egress-allowlist.json. foss/izzy never ship (gms only),
     // so they get an empty URL: HubClient then fails every call with
     // "not configured" instead of talking to a hub nobody vetted for them.
+    //
+    // SARASWATI: Task 7 — the same host is the pairing link's host
+    // (https://<host>/pair#<token>): app/src/gms/AndroidManifest.xml reads it
+    // as ${hubHost}, so the link filter and HubClient can never disagree.
+    val gmsHubBaseUrl = "https://saraswati-sangat.pandey-mohitk.workers.dev"
     productFlavors {
         getByName("foss") {
             buildConfigField("String", "HUB_BASE_URL", "\"\"")
         }
         getByName("gms") {
             buildConfigField("Boolean", "UPDATER_AVAILABLE", "false")
-            buildConfigField("String", "HUB_BASE_URL", "\"https://saraswati-sangat.pandey-mohitk.workers.dev\"")
+            buildConfigField("String", "HUB_BASE_URL", "\"$gmsHubBaseUrl\"")
+            manifestPlaceholders["hubHost"] = gmsHubBaseUrl.substringAfter("://").substringBefore("/")
         }
         getByName("izzy") {
             buildConfigField("String", "HUB_BASE_URL", "\"\"")

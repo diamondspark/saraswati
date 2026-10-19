@@ -545,6 +545,14 @@ val InnerTubeCookieKey = stringPreferencesKey("innerTubeCookie")
 val FamilyAdminKeyKey = stringPreferencesKey("familyAdminKey")
 val FamilyHubSessionTokenKey = stringPreferencesKey("familyHubSessionToken")
 val FamilyHubClaimSecretKey = stringPreferencesKey("familyHubClaimSecret")
+
+// SARASWATI: Task 7 — not secrets, so stored plain. True only on the phone
+// whose owner pasted a hub-accepted admin key into Manage Family; the Family
+// tab shows "Manage family" only there (the admin key itself is what the hub
+// checks). The hub-issued id of this phone, needed for its own health
+// reports; kept next to the session token (or the claim) it belongs to.
+val IsFamilyOwnerKey = booleanPreferencesKey("isFamilyOwner")
+val FamilyDeviceIdKey = stringPreferencesKey("familyDeviceId")
 val AccountNameKey = stringPreferencesKey("accountName")
 val AccountEmailKey = stringPreferencesKey("accountEmail")
 val AccountChannelHandleKey = stringPreferencesKey("accountChannelHandle")

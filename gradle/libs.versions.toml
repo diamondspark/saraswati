@@ -25,6 +25,9 @@ kotlinxSerializationJson = "1.11.0"
 # that verification valid rather than introducing a different client whose
 # redirect/decoding behavior would need separately auditing.
 okhttp = "5.5.0"
+# SARASWATI: Task 7 — ZXing core, used only to draw the owner's pairing QR code
+# (QRCodeWriter). Apache-2.0, pure Java, no transitive dependencies.
+zxing = "3.5.4"
 compose = "1.12.1"
 lifecycle = "2.11.0"
 material3 = "1.5.0-alpha28"
@@ -86,6 +89,7 @@ coroutines-guava = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-guava", 
 
 gradle = { module = "com.android.tools.build:gradle", version.ref = "androidGradlePlugin" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
+zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
 # SARASWATI: Task 6 (HubClient) — OkHttp's own test server, pinned to the same
 # version line as okhttp above (they ship in lock-step). mockwebserver3 is the
 # current (non-deprecated) artifact; the legacy "mockwebserver" one is only a

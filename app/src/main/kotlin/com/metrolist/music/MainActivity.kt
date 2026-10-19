@@ -136,6 +136,9 @@ import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.WatchEndpoint
 import com.metrolist.music.saraswati.SaraswatiDeepLinkPolicy
 import com.metrolist.music.saraswati.SaraswatiFeatures
+import com.metrolist.music.saraswati.family.FamilyRoutes
+import com.metrolist.music.saraswati.family.PairingInbox
+import com.metrolist.music.saraswati.family.PairingLink
 import com.metrolist.music.saraswati.security.DeepLinkGuard
 import com.metrolist.music.constants.AppBarHeight
 import com.metrolist.music.constants.AppLanguageKey
@@ -263,6 +266,10 @@ class MainActivity : FragmentActivity() {
 
     @Inject
     lateinit var listenTogetherManager: com.metrolist.music.listentogether.ListenTogetherManager
+
+    // SARASWATI: Task 7 — holds a family pairing link until the join screen takes it.
+    @Inject
+    lateinit var pairingInbox: PairingInbox
 
     private lateinit var navController: NavHostController
     private var pendingIntent: Intent? = null
@@ -782,6 +789,7 @@ class MainActivity : FragmentActivity() {
                             Screens.Home.route,
                             Screens.Library.route,
                             Screens.ListenTogether.route,
+                            Screens.Family.route, // SARASWATI: Task 7
                             "settings",
                         )
                     }
@@ -1028,6 +1036,7 @@ class MainActivity : FragmentActivity() {
                             Screens.Search.route -> R.string.search
                             Screens.Library.route -> R.string.filter_library
                             Screens.ListenTogether.route -> R.string.together
+                            Screens.Family.route -> R.string.family_title // SARASWATI: Task 7
                             else -> null
                         }
                     }
@@ -1639,6 +1648,17 @@ class MainActivity : FragmentActivity() {
         // runs. This runs in addition to, not instead of, the broader
         // DeepLinkGuard check below.
         if (SaraswatiDeepLinkPolicy.isListenTogetherLink(uri.host, uri.pathSegments.firstOrNull())) {
+            return
+        }
+
+        // SARASWATI: Task 7 — a family pairing link (this build's hub host,
+        // path /pair, token in the fragment) goes to the join screen and never
+        // reaches the YouTube route-building code below. PairingLink accepts
+        // nothing but that exact shape; anything else falls through to the
+        // YouTube gate, which rejects it.
+        PairingLink.tokenFrom(uri.toString(), BuildConfig.HUB_BASE_URL)?.let { token ->
+            pairingInbox.offer(token)
+            navController.navigate(FamilyRoutes.JOIN) { launchSingleTop = true }
             return
         }
 
