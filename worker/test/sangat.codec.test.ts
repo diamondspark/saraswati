@@ -69,13 +69,14 @@ function noise(length: number): Uint8Array {
   return out;
 }
 
-async function expectInvalid(promise: Promise<unknown>): Promise<void> {
+async function expectInvalid(promise: Promise<unknown>, kind: CodecError["kind"]): Promise<void> {
   const error = await promise.then(
     () => null,
     (e: unknown) => e,
   );
   expect(error).toBeInstanceOf(CodecError);
   expect((error as CodecError).code).toBe("invalid_message");
+  expect((error as CodecError).kind).toBe(kind);
 }
 
 describe("sangat envelope codec", () => {
@@ -155,21 +156,22 @@ describe("sangat envelope codec", () => {
   it("rejects a payload that inflates past 1048576 bytes", async () => {
     const bomb = await gzip(new Uint8Array(MAX_DECODED_PAYLOAD_BYTES + 1).fill(0));
     expect(bomb.length).toBeLessThan(100_000);
-    await expectInvalid(decodeEnvelope(envelopeBytes("bomb", bomb, true)));
+    await expectInvalid(decodeEnvelope(envelopeBytes("bomb", bomb, true)), "too_large");
 
     const hugeBomb = await gzip(new Uint8Array(16 * 1024 * 1024));
-    await expectInvalid(decodeEnvelope(envelopeBytes("bomb", hugeBomb, true)));
+    await expectInvalid(decodeEnvelope(envelopeBytes("bomb", hugeBomb, true)), "too_large");
   });
 
   it("rejects a compressed flag on bytes that are not gzip", async () => {
     await expectInvalid(
       decodeEnvelope(envelopeBytes("ping", new Uint8Array([1, 2, 3, 4]), true)),
+      "bad_bytes",
     );
   });
 
   it("rejects an empty type", async () => {
-    await expectInvalid(decodeEnvelope(envelopeBytes("", new Uint8Array([1]), false)));
-    await expectInvalid(encodeEnvelope("", new Uint8Array([1])));
+    await expectInvalid(decodeEnvelope(envelopeBytes("", new Uint8Array([1]), false)), "empty_type");
+    await expectInvalid(encodeEnvelope("", new Uint8Array([1])), "empty_type");
   });
 
   it("rejects a type longer than 64 chars", async () => {
@@ -178,17 +180,17 @@ describe("sangat envelope codec", () => {
     expect(decoded.type).toBe(atLimit);
 
     const tooLong = "a".repeat(ENVELOPE_TYPE_MAX + 1);
-    await expectInvalid(decodeEnvelope(envelopeBytes(tooLong, new Uint8Array(), false)));
-    await expectInvalid(encodeEnvelope(tooLong, new Uint8Array()));
+    await expectInvalid(decodeEnvelope(envelopeBytes(tooLong, new Uint8Array(), false)), "too_long");
+    await expectInvalid(encodeEnvelope(tooLong, new Uint8Array()), "too_long");
   });
 
   it("rejects bytes that are not an Envelope", async () => {
-    await expectInvalid(decodeEnvelope(new Uint8Array([0xff, 0xff, 0xff, 0xff])));
-    await expectInvalid(decodeEnvelope(new Uint8Array([0x0a, 0x7f, 0x61])));
+    await expectInvalid(decodeEnvelope(new Uint8Array([0xff, 0xff, 0xff, 0xff])), "bad_bytes");
+    await expectInvalid(decodeEnvelope(new Uint8Array([0x0a, 0x7f, 0x61])), "bad_bytes");
   });
 
   it("rejects a message longer than the 524288-byte read limit before decoding it", async () => {
-    await expectInvalid(decodeEnvelope(new Uint8Array(MAX_READ_MESSAGE_BYTES + 1)));
+    await expectInvalid(decodeEnvelope(new Uint8Array(MAX_READ_MESSAGE_BYTES + 1)), "too_large");
 
     // 10 bytes of framing for type "ping" plus a 3-byte payload length.
     const payload = new Uint8Array(MAX_READ_MESSAGE_BYTES - 10).fill(3);
@@ -199,7 +201,7 @@ describe("sangat envelope codec", () => {
 
     const over = envelopeBytes("ping", new Uint8Array(payload.length + 1).fill(3), false);
     expect(over.length).toBe(MAX_READ_MESSAGE_BYTES + 1);
-    await expectInvalid(decodeEnvelope(over));
+    await expectInvalid(decodeEnvelope(over), "too_large");
   });
 
   it("rejects a 256 MiB gzip bomb after reading only a sliver of its input", async () => {
@@ -215,10 +217,11 @@ describe("sangat envelope codec", () => {
     );
     expect(error).toBeInstanceOf(CodecError);
     expect((error as CodecError).code).toBe("invalid_message");
+    expect((error as CodecError).kind).toBe("too_large");
     // Whole bomb is ~256 KB; a bounded reader stops within a few slices.
     expect(fed).toBeGreaterThan(0);
     expect(fed).toBeLessThan(bomb.length / 8);
 
-    await expectInvalid(decodeEnvelope(envelopeBytes("bomb", bomb, true)));
+    await expectInvalid(decodeEnvelope(envelopeBytes("bomb", bomb, true)), "too_large");
   }, 60_000);
 });

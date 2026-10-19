@@ -25,6 +25,7 @@ import {
   MAX_CLIENTS_PER_ROOM,
   MAX_PENDING_JOINS,
   MAX_ROOMS,
+  MAX_ROOMS_PER_DEVICE,
   ROOM_CODE_INPUT_MAX,
   USERNAME_MAX,
 } from "./limits";
@@ -79,6 +80,9 @@ export const handleCreateRoom: Handler = (rt, conn, payload) => {
   if (code === "") return [fail(me, "server_error", "Failed to create room")];
   if (store.openRoomCount() >= MAX_ROOMS) {
     return [fail(me, "room_limit_reached", "Server is at room capacity")];
+  }
+  if (store.roomsHostedBy(conn.att.deviceId) >= MAX_ROOMS_PER_DEVICE) {
+    return [fail(me, "room_limit_reached", "This device is hosting as many rooms as it may")];
   }
 
   const now = rt.now();

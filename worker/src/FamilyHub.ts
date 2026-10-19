@@ -952,6 +952,10 @@ export class FamilyHub extends DurableObject<Env> {
       return json({ error: "feature disabled" }, 503);
     }
 
+    if (!this.sangat.hasRoomForSocket(auth.deviceId)) {
+      return json({ error: "too many connections" }, 429);
+    }
+
     return this.sangat.accept(auth.deviceId);
   }
 

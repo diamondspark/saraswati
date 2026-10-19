@@ -11,7 +11,7 @@ import {
   UserReconnectedPayloadSchema,
   JoinRequestPayloadSchema,
 } from "../gen/listentogether_pb";
-import { RECONNECT_GRACE_MS } from "./limits";
+import { EMPTY_ROOM_CLEANUP_MS, RECONNECT_GRACE_MS } from "./limits";
 import {
   connectedIds,
   currentRoom,
@@ -89,16 +89,30 @@ export function expireMember(store: Store, member: Member, now: number): Out[] {
   return removeFromRoom(store, room, member, now);
 }
 
-/** Everything that is due at `now`: expired seats, then rooms past their cleanup. */
-export function sweep(rt: Runtime, now: number): Out[] {
+/** The rooms with something due at `now`: an expired seat, nobody left in them, or a cleanup deadline. */
+export function dueRooms(store: Store, now: number): string[] {
+  const codes = new Set<string>();
+  for (const member of store.expiredMembers(now)) codes.add(member.roomCode);
+  for (const code of store.roomsWithoutMembers()) codes.add(code);
+  for (const code of store.emptiedRoomsDue(now)) codes.add(code);
+  return [...codes];
+}
+
+/**
+ * Everything due in one room at `now`: expired seats first, then the room itself
+ * if no one is left, then its deletion once its cleanup time has passed. Rooms
+ * are swept one at a time so that one that fails leaves the others' expiries intact.
+ */
+export function sweepRoom(rt: Runtime, code: string, now: number): Out[] {
   const { store } = rt;
   const outs: Out[] = [];
-  for (const member of store.expiredMembers(now)) outs.push(...expireMember(store, member, now));
-  for (const code of store.roomsWithoutMembers()) {
-    const room = store.getRoom(code);
-    if (room) outs.push(...emptyRoom(store, room, now));
+  for (const member of store.expiredMembers(now, code)) outs.push(...expireMember(store, member, now));
+  let room = store.getRoom(code);
+  if (room && room.emptySince === null && store.memberCount(code) === 0) {
+    outs.push(...emptyRoom(store, room, now));
+    room = store.getRoom(code);
   }
-  for (const code of store.emptiedRoomsDue(now)) store.deleteRoom(code);
+  if (room && room.emptySince !== null && room.emptySince + EMPTY_ROOM_CLEANUP_MS <= now) store.deleteRoom(code);
   return outs;
 }
 

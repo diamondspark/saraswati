@@ -9,7 +9,7 @@ import {
   type RoomState,
   type TrackInfo,
 } from "../gen/listentogether_pb";
-import { EMPTY_ROOM_CLEANUP_MS, RECONNECT_GRACE_MS } from "./limits";
+import { EMPTY_ROOM_CLEANUP_MS, MAX_ROOM_STATE_BYTES, RECONNECT_GRACE_MS } from "./limits";
 import { SANGAT_TABLES } from "./schema";
 
 export interface Room {
@@ -175,7 +175,13 @@ export class Store {
     );
   }
 
-  saveRoom(room: Room): void {
+  /**
+   * Saves the room unless its serialized state is over MAX_ROOM_STATE_BYTES (a
+   * row holds about 2 MB). Then nothing is written and the answer is false.
+   */
+  trySaveRoom(room: Room): boolean {
+    const state = toBinary(RoomStateSchema, room.state);
+    if (state.byteLength > MAX_ROOM_STATE_BYTES) return false;
     this.sql.exec(
       `UPDATE sangat_rooms
        SET hostUserId = ?, hostDeviceId = ?, carMode = ?, state = ?, emptySince = ?, hostDisconnectedAt = ?
@@ -183,11 +189,27 @@ export class Store {
       room.hostUserId,
       room.hostDeviceId,
       room.carMode ? 1 : 0,
-      blob(toBinary(RoomStateSchema, room.state)),
+      blob(state),
       room.emptySince,
       room.hostDisconnectedAt,
       room.code,
     );
+    return true;
+  }
+
+  /** For changes that cannot grow the state (a host change, a flag); too large is then a bug, and throws. */
+  saveRoom(room: Room): void {
+    if (!this.trySaveRoom(room)) throw new Error("room state too large");
+  }
+
+  /**
+   * Rooms the device hosts, or last hosted if they have since been emptied and
+   * await deletion: the number its create_room is checked against.
+   */
+  roomsHostedBy(deviceId: string): number {
+    return this.sql
+      .exec<{ n: number }>("SELECT COUNT(*) AS n FROM sangat_rooms WHERE hostDeviceId = ?", deviceId)
+      .one().n;
   }
 
   /** Deletes the room with its members, pending joins and suggestions. */
@@ -288,15 +310,18 @@ export class Store {
       .map(toMember);
   }
 
-  /** Disconnected members whose reconnect grace has run out, oldest first. */
-  expiredMembers(now: number): Member[] {
+  /** Disconnected members whose reconnect grace has run out, oldest first; of one room if `roomCode` is given. */
+  expiredMembers(now: number, roomCode?: string): Member[] {
     return this.sql
       .exec<MemberRow>(
         `SELECT * FROM sangat_members
          WHERE connected = 0 AND disconnectedAt IS NOT NULL AND disconnectedAt + ? <= ?
+           AND (? IS NULL OR roomCode = ?)
          ORDER BY disconnectedAt, rowid`,
         RECONNECT_GRACE_MS,
         now,
+        roomCode ?? null,
+        roomCode ?? null,
       )
       .toArray()
       .map(toMember);

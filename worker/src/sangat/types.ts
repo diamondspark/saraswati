@@ -42,7 +42,9 @@ export interface Runtime {
   /**
    * Gives the live socket that holds `userId` (if any) a new, unused id and
    * closes it, so a newer socket can take the id over. The old socket's own
-   * close event then finds no member.
+   * close event then finds no member. It happens once the handler's changes are
+   * committed, not at the call: a handler that fails afterwards leaves the old
+   * socket alone.
    */
   detachSocket(userId: string, code: number, reason: string): void;
   /** False when `userId` was answered a request_sync less than a second ago. */

@@ -98,8 +98,8 @@ export const handleApproveSuggestion: Handler = (rt, conn, payload) => {
   track.suggestedBy = suggestion.fromUsername;
   state.queue.unshift(track);
   state.revision += 1n;
+  if (!store.trySaveRoom(room)) return [fail(me, "queue_full", "Queue is full")];
   store.deleteSuggestion(suggestion.id);
-  store.saveRoom(room);
 
   const queueAdd = message(PlaybackActionPayloadSchema, {
     action: "queue_add",

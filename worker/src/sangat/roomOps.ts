@@ -147,7 +147,11 @@ export function emptyRoom(store: Store, room: Room, now: number): Out[] {
     .map((p) => send(p.userId, "join_rejected", JoinRejectedPayloadSchema, { reason: "Room is no longer available" }));
   store.deletePendingJoinsOfRoom(room.code);
   store.deleteSuggestionsOfRoom(room.code);
+  // The room keeps naming the device that last hosted it, so it counts toward that
+  // device's cap until it is deleted.
+  const lastHostDeviceId = room.hostDeviceId;
   setHost(store, room, null);
+  room.hostDeviceId = lastHostDeviceId;
   room.emptySince = now;
   store.saveRoom(room);
   return outs;

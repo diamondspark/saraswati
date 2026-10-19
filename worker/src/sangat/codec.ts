@@ -7,19 +7,26 @@ import {
   MAX_READ_MESSAGE_BYTES,
 } from "./limits";
 
+/** Why a frame was refused, for callers that word their answer differently per cause. */
+export type CodecErrorKind = "empty_type" | "too_long" | "bad_bytes" | "too_large";
+
 export class CodecError extends Error {
   readonly code = "invalid_message";
 
-  constructor(message: string, options?: ErrorOptions) {
+  constructor(
+    readonly kind: CodecErrorKind,
+    message: string,
+    options?: ErrorOptions,
+  ) {
     super(message, options);
     this.name = "CodecError";
   }
 }
 
 function checkType(type: string): void {
-  if (type.length === 0) throw new CodecError("empty envelope type");
+  if (type.length === 0) throw new CodecError("empty_type", "empty envelope type");
   if (type.length > ENVELOPE_TYPE_MAX) {
-    throw new CodecError(`envelope type longer than ${ENVELOPE_TYPE_MAX} chars`);
+    throw new CodecError("too_long", `envelope type longer than ${ENVELOPE_TYPE_MAX} chars`);
   }
 }
 
@@ -125,11 +132,11 @@ export async function gunzipCapped(
     await Promise.race([draining, feedFailed]);
   } catch (error) {
     await release();
-    if (overCap) throw new CodecError(`payload inflates past ${cap} bytes`);
-    throw new CodecError("payload is not valid gzip", { cause: error });
+    if (overCap) throw new CodecError("too_large", `payload inflates past ${cap} bytes`);
+    throw new CodecError("bad_bytes", "payload is not valid gzip", { cause: error });
   }
   if (abandoned) await release();
-  if (overCap) throw new CodecError(`payload inflates past ${cap} bytes`);
+  if (overCap) throw new CodecError("too_large", `payload inflates past ${cap} bytes`);
 
   const out = new Uint8Array(total);
   let pos = 0;
@@ -162,13 +169,13 @@ export async function decodeEnvelope(
   bytes: Uint8Array,
 ): Promise<{ type: string; payload: Uint8Array }> {
   if (bytes.byteLength > MAX_READ_MESSAGE_BYTES) {
-    throw new CodecError(`message longer than ${MAX_READ_MESSAGE_BYTES} bytes`);
+    throw new CodecError("too_large", `message longer than ${MAX_READ_MESSAGE_BYTES} bytes`);
   }
   let envelope;
   try {
     envelope = fromBinary(EnvelopeSchema, bytes);
   } catch (error) {
-    throw new CodecError("bytes are not an Envelope", { cause: error });
+    throw new CodecError("bad_bytes", "bytes are not an Envelope", { cause: error });
   }
   checkType(envelope.type);
   if (envelope.compressed) {
@@ -178,7 +185,7 @@ export async function decodeEnvelope(
     };
   }
   if (envelope.payload.byteLength > MAX_DECODED_PAYLOAD_BYTES) {
-    throw new CodecError(`payload larger than ${MAX_DECODED_PAYLOAD_BYTES} bytes`);
+    throw new CodecError("too_large", `payload larger than ${MAX_DECODED_PAYLOAD_BYTES} bytes`);
   }
   return { type: envelope.type, payload: envelope.payload };
 }

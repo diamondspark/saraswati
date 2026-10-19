@@ -19,11 +19,15 @@ import { EnvelopeSchema, ErrorPayloadSchema } from "../gen/listentogether_pb";
 import { CodecError, decodeEnvelope, encodeEnvelope } from "./codec";
 import { handleClientCapabilities, handlePing } from "./connection";
 import { newUserId } from "./ids";
-import { disconnectOrphans, disconnectUser, handleReconnect, sweep } from "./lifecycle";
+import { disconnectOrphans, disconnectUser, dueRooms, handleReconnect, sweepRoom } from "./lifecycle";
 import {
+  ALARM_RETRY_MS,
   CLOSE_GOING_AWAY,
+  CLOSE_POLICY_VIOLATION,
   CLOSE_REASON_IDLE,
+  MAX_PENDING_MESSAGES_PER_SOCKET,
   MAX_READ_MESSAGE_BYTES,
+  MAX_SOCKETS_PER_DEVICE,
   RATE_LIMITED_ERROR_CODE,
   RATE_LIMITED_MESSAGE,
   REQUEST_SYNC_MIN_INTERVAL_MS,
@@ -73,8 +77,6 @@ const HANDLERS = new Map<string, Handler>([
   ["client_capabilities", handleClientCapabilities],
 ]);
 
-// What codec.ts says for an envelope with no type; metroserver words it differently.
-const EMPTY_TYPE_ERROR = "empty envelope type";
 const CLOSE_MESSAGE_TOO_BIG = 1009;
 const CLOSE_INTERNAL_ERROR = 1011;
 
@@ -108,21 +110,39 @@ export class Sangat {
   // The alarm time as last set from here; undefined until first read from storage.
   private alarmAt: number | null | undefined;
   private readonly lastSyncAt = new Map<string, number>();
+  // Messages each socket has in the queue, counted from arrival until handled.
+  private readonly waiting = new WeakMap<WebSocket, number>();
+  // Socket side effects a handler asked for; they run only once its changes are committed.
+  private effects: (() => void)[] = [];
 
   constructor(private readonly ctx: DurableObjectState) {
     this.store = new Store(ctx.storage);
     this.runtime = {
       store: this.store,
       now: () => Date.now(),
-      detachSocket: (userId, code, reason) => this.detachSocket(userId, code, reason),
+      detachSocket: (userId, code, reason) => {
+        this.effects.push(() => this.detachSocket(userId, code, reason));
+      },
       allowSyncResponse: (userId, now) => this.allowSyncResponse(userId, now),
     };
   }
 
   // The hub's entry points
 
-  /** Upgrades an authenticated device's request. The caller has already checked auth and the kill switch. */
+  /** Whether the device may open another socket: it has fewer than MAX_SOCKETS_PER_DEVICE live ones. */
+  hasRoomForSocket(deviceId: string): boolean {
+    let open = 0;
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws.readyState !== WEBSOCKET_OPEN) continue;
+      const att = this.attachmentOf(ws);
+      if (att && !att.closed && att.deviceId === deviceId) open++;
+    }
+    return open < MAX_SOCKETS_PER_DEVICE;
+  }
+
+  /** Upgrades an authenticated device's request. The caller has already checked auth, the kill switch and hasRoomForSocket. */
   accept(deviceId: string): Response {
+    this.reconcileNow();
     const [client, server] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(server);
     const attachment: Attachment = { userId: this.unusedUserId(), deviceId, lastSeen: Date.now() };
@@ -144,6 +164,10 @@ export class Sangat {
     // This runs synchronously, in arrival order, and stores its count in the
     // attachment, where a hibernated object finds it again.
     const att = this.attachmentOf(ws);
+    if (att?.closed) {
+      this.dropClosed(ws);
+      return Promise.resolve();
+    }
     if (att) {
       const allowed = recordMessage(att, receivedAt);
       ws.serializeAttachment(att);
@@ -156,12 +180,28 @@ export class Sangat {
         return Promise.resolve();
       }
     }
-    return this.enqueue(() => this.handleMessage(ws, data, receivedAt));
+
+    // A socket that has this many messages waiting is not keeping up. It is
+    // closed and its member disconnected, which also frees the queue of it.
+    const waiting = this.waiting.get(ws) ?? 0;
+    if (waiting >= MAX_PENDING_MESSAGES_PER_SOCKET) {
+      if (att) this.closeSocket(ws, att, CLOSE_POLICY_VIOLATION, "backpressure");
+      else safeClose(ws, CLOSE_POLICY_VIOLATION, "backpressure");
+      this.onClose(ws).catch((error) => console.error("sangat: disconnect failed", errorName(error)));
+      return Promise.resolve();
+    }
+    this.waiting.set(ws, waiting + 1);
+    return this.enqueue(async () => {
+      try {
+        await this.handleMessage(ws, data, receivedAt);
+      } finally {
+        this.waiting.set(ws, (this.waiting.get(ws) ?? 1) - 1);
+      }
+    });
   }
 
   onClose(ws: WebSocket): Promise<void> {
     return this.enqueue(async () => {
-      await this.reconcileOnce();
       const attachment = this.attachmentOf(ws);
       if (!attachment) return;
       this.lastSyncAt.delete(attachment.userId);
@@ -174,22 +214,44 @@ export class Sangat {
   onAlarm(): Promise<void> {
     return this.enqueue(async () => {
       this.alarmAt = null; // the alarm that just fired is spent
-      this.reconciled = true;
       const now = Date.now();
-      // Silent sockets are cut off first; the sweep below then finds their members
-      // without a socket and disconnects them like any other drop.
-      this.closeIdleSockets(now);
-      const outs = this.store.transaction(() => [
-        ...disconnectOrphans(this.runtime, this.liveUserIds()),
-        ...sweep(this.runtime, now),
-      ]);
-      await this.flush(outs);
-      await this.scheduleAlarm();
+      let failed = false;
+      try {
+        // Silent sockets are cut off first; the orphan step below then finds their
+        // members without a socket and disconnects them like any other drop.
+        this.closeIdleSockets(now);
+        const outs: Out[] = [];
+        // Each piece of work is its own transaction: one that fails (a room whose
+        // state cannot be read, say) must not undo the others' expiries.
+        const attempt = (work: () => Out[]) => {
+          try {
+            outs.push(...this.store.transaction(work));
+          } catch (error) {
+            failed = true;
+            console.error("sangat: alarm work failed", errorName(error));
+          }
+        };
+        attempt(() => disconnectOrphans(this.runtime, this.liveUserIds()));
+        let due: string[] = [];
+        try {
+          due = dueRooms(this.store, now);
+        } catch (error) {
+          failed = true;
+          console.error("sangat: alarm lookup failed", errorName(error));
+        }
+        for (const code of due) attempt(() => sweepRoom(this.runtime, code, now));
+        await this.flush(outs);
+      } finally {
+        // Whatever happened, the next deadline must still be armed. A deadline that
+        // could not be served waits ALARM_RETRY_MS rather than firing in a loop.
+        await this.scheduleAlarm(failed ? now : undefined);
+      }
     });
   }
 
   /** Rooms whose host is connected, for GET /sangat/live. */
   liveRooms(): LiveRoom[] {
+    this.reconcileNow();
     return this.store
       .openRooms()
       .filter(hostIsConnected)
@@ -205,6 +267,7 @@ export class Sangat {
 
   /** Car mode is the host device's to switch, for PUT /sangat/car. */
   setCarMode(roomCode: string, deviceId: string, carMode: boolean): "ok" | "not_found" | "not_host" {
+    this.reconcileNow();
     const room = this.store.getOpenRoom(roomCode);
     if (!room) return "not_found";
     if (room.hostDeviceId !== deviceId) return "not_host";
@@ -231,14 +294,19 @@ export class Sangat {
       return result;
     });
     for (const ws of this.ctx.getWebSockets()) {
-      if (this.attachmentOf(ws)?.deviceId === deviceId) safeClose(ws, code, reason);
+      const att = this.attachmentOf(ws);
+      if (att?.deviceId === deviceId) this.closeSocket(ws, att, code, reason);
     }
     this.announce(outs);
   }
 
   /** Closes every socket with `code` and deletes every room. */
   closeAll(code: number, reason: string): void {
-    for (const ws of this.ctx.getWebSockets()) safeClose(ws, code, reason);
+    for (const ws of this.ctx.getWebSockets()) {
+      const att = this.attachmentOf(ws);
+      if (att) this.closeSocket(ws, att, code, reason);
+      else safeClose(ws, code, reason);
+    }
     this.store.wipe();
     this.lastSyncAt.clear();
     this.announce([]);
@@ -247,7 +315,12 @@ export class Sangat {
   // Serialization
 
   private enqueue<T>(job: () => Promise<T>): Promise<T> {
-    const result = this.tail.then(job);
+    const result = this.tail.then(() => {
+      // After a restart or eviction, members whose sockets are gone are still
+      // marked connected; the first job of the new instance sets that right.
+      this.reconcileNow();
+      return job();
+    });
     // A failed job must not stop the ones behind it.
     this.tail = result.then(
       () => undefined,
@@ -267,7 +340,7 @@ export class Sangat {
   // Messages
 
   private async handleMessage(ws: WebSocket, data: ArrayBuffer | string, receivedAt: number): Promise<void> {
-    await this.reconcileOnce();
+    if (this.dropClosed(ws)) return;
     const bytes = typeof data === "string" ? encoder.encode(data) : new Uint8Array(data);
     if (bytes.byteLength > MAX_READ_MESSAGE_BYTES) {
       safeClose(ws, CLOSE_MESSAGE_TOO_BIG, "message too big");
@@ -275,15 +348,23 @@ export class Sangat {
     }
 
     const decoded = await this.decode(bytes);
+    // The decode may have waited a while, and the server may have closed this
+    // socket meanwhile (revoked device, takeover, switched off): then the message
+    // is dead and must not act as the member it came from.
     const attachment = this.attachmentOf(ws);
     if (!attachment) {
       safeClose(ws, CLOSE_INTERNAL_ERROR, "no session");
+      return;
+    }
+    if (attachment.closed) {
+      this.dropClosed(ws);
       return;
     }
     const conn: Conn = { ws, att: attachment, dirty: false, receivedAt };
     const me = attachment.userId;
 
     let outs: Out[];
+    let committed = false;
     if ("error" in decoded) {
       outs = [fail(me, "invalid_message", decoded.error)];
     } else {
@@ -293,6 +374,7 @@ export class Sangat {
       } else {
         try {
           outs = this.store.transaction(() => handler(this.runtime, conn, decoded.payload));
+          committed = true;
         } catch (error) {
           console.error("sangat: handler failed", decoded.type, errorName(error));
           conn.dirty = false;
@@ -300,6 +382,10 @@ export class Sangat {
         }
       }
     }
+    // Side effects on other sockets (a takeover closes the older one) happen only
+    // for a handler that committed, and before this socket takes the id over.
+    const effects = this.effects.splice(0);
+    if (committed) for (const effect of effects) effect();
     if (conn.dirty) ws.serializeAttachment(conn.att);
     await this.flush(outs);
     await this.scheduleAlarm();
@@ -313,7 +399,8 @@ export class Sangat {
       return await decodeEnvelope(bytes);
     } catch (error) {
       if (!(error instanceof CodecError)) throw error;
-      return { error: error.message === EMPTY_TYPE_ERROR ? "Message type is required" : "Invalid message format" };
+      // metroserver words an envelope with no type differently from the rest.
+      return { error: error.kind === "empty_type" ? "Message type is required" : "Invalid message format" };
     }
   }
 
@@ -357,13 +444,22 @@ export class Sangat {
     safeClose(ws, code, reason);
   }
 
+  /**
+   * A message from a socket the server has already closed is not handled, and the
+   * socket is closed again if the close has not taken hold. True when it was dropped.
+   */
+  private dropClosed(ws: WebSocket): boolean {
+    if (!this.attachmentOf(ws)?.closed) return false;
+    if (ws.readyState === WEBSOCKET_OPEN) safeClose(ws, CLOSE_POLICY_VIOLATION, "closed");
+    return true;
+  }
+
   private detachSocket(userId: string, code: number, reason: string): void {
     for (const ws of this.ctx.getWebSockets()) {
       const att = this.attachmentOf(ws);
       if (att?.userId !== userId) continue;
-      ws.serializeAttachment({ ...att, userId: this.unusedUserId() } satisfies Attachment);
       this.lastSyncAt.delete(userId);
-      safeClose(ws, code, reason);
+      this.closeSocket(ws, att, code, reason, { userId: this.unusedUserId() });
     }
   }
 
@@ -408,14 +504,15 @@ export class Sangat {
   /**
    * Once per instance: after a restart or redeploy the old sockets can be gone
    * without any close event, leaving members marked connected. They become
-   * ordinary disconnects, which their phones recover from by reconnecting.
+   * ordinary disconnects (grace and notices included), which their phones recover
+   * from by reconnecting. Synchronous, so every way into the object can call it
+   * before it reads or answers anything.
    */
-  private async reconcileOnce(): Promise<void> {
+  private reconcileNow(): void {
     if (this.reconciled) return;
     this.reconciled = true;
     const outs = this.store.transaction(() => disconnectOrphans(this.runtime, this.liveUserIds()));
-    await this.flush(outs);
-    await this.scheduleAlarm();
+    this.announce(outs);
   }
 
   // Output
@@ -456,8 +553,11 @@ export class Sangat {
    * Points the one alarm at the earliest deadline, or clears it. Deadlines are
    * the expiries in storage and the moment the quietest socket counts as idle.
    */
-  private async scheduleAlarm(): Promise<void> {
-    const stored = this.store.nextDeadline();
+  private async scheduleAlarm(failedAt?: number): Promise<void> {
+    let stored = this.store.nextDeadline();
+    // A stored deadline that is already past after a failed sweep would fire again
+    // at once; it is retried later instead.
+    if (failedAt !== undefined && stored !== null && stored <= failedAt) stored = failedAt + ALARM_RETRY_MS;
     const idle = this.nextIdleDeadline();
     const wanted = stored === null ? idle : idle === null ? stored : Math.min(stored, idle);
     if (this.alarmAt === undefined) this.alarmAt = await this.ctx.storage.getAlarm();

@@ -28,6 +28,16 @@ export const MAX_QUEUE = 1000;
 export const MAX_PENDING_JOINS = 100;
 export const MAX_PENDING_SUGGESTIONS = 100;
 export const MAX_CLIENTS_PER_ROOM = 100;
+// Per-device and per-socket caps (Saraswati; a family has a handful of phones)
+export const MAX_SOCKETS_PER_DEVICE = 4;
+export const MAX_ROOMS_PER_DEVICE = 2;
+// Messages one socket may have waiting in the queue before it is cut off.
+export const MAX_PENDING_MESSAGES_PER_SOCKET = 64;
+// A room's serialized RoomState is one SQLite row; a row holds about 2 MB.
+export const MAX_ROOM_STATE_BYTES = 1_500_000;
+// When a room could not be swept, the alarm waits this long before trying again.
+export const ALARM_RETRY_MS = 60_000;
+
 // A client may send up to twice MAX_QUEUE tracks; the server keeps at most MAX_QUEUE (metroserver).
 export const MAX_QUEUE_INPUT = MAX_QUEUE * 2;
 // metroserver allows 10000 rooms; a family hub has a handful of phones.
@@ -58,6 +68,7 @@ export const IDLE_TIMEOUT_MS = 75_000;
 export const CLOSE_DEVICE_REVOKED = 4001;
 export const CLOSE_SANGAT_DISABLED = 4003;
 export const CLOSE_GOING_AWAY = 1001;
+export const CLOSE_POLICY_VIOLATION = 1008;
 export const CLOSE_REASON_IDLE = "idle";
 
 // Phase 4 hub routes (Saraswati)
