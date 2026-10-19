@@ -107,11 +107,25 @@ private data class AuthData(
     val authUser: String,
 )
 
-@SuppressLint("SetJavaScriptEnabled")
-@OptIn(ExperimentalMaterial3Api::class)
+// SARASWATI: Task 9 fix round 1 — the sign-in is split in two so Saral (which has no nav
+// graph at all) can host it. LoginScreen is the route's entry point and only supplies the two
+// ways back; LoginContent is everything else, WebView and allowlist included, unchanged.
 @Composable
 fun LoginScreen(
     navController: NavController,
+    isSwitchingChannel: Boolean = false,
+) = LoginContent(
+    onBack = navController::navigateUp,
+    onBackLongPress = navController::backToMain,
+    isSwitchingChannel = isSwitchingChannel,
+)
+
+@SuppressLint("SetJavaScriptEnabled")
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LoginContent(
+    onBack: () -> Unit,
+    onBackLongPress: () -> Unit,
     isSwitchingChannel: Boolean = false,
 ) {
     val context = LocalContext.current
@@ -416,8 +430,8 @@ fun LoginScreen(
             },
             navigationIcon = {
                 IconButton(
-                    onClick = navController::navigateUp,
-                    onLongClick = navController::backToMain,
+                    onClick = onBack,
+                    onLongClick = onBackLongPress,
                 ) {
                     Icon(
                         painterResource(R.drawable.arrow_back),

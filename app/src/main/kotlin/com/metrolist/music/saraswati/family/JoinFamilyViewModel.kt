@@ -87,12 +87,13 @@ class JoinFamilyViewModel
 
         /**
          * Call when the join screen opens and each time it resumes: resumes a stored claim, or
-         * picks up a link that arrived as a deep link. Safe to repeat. Once the wait has started
-         * or finished a newly arrived link is dropped, not kept for a later visit.
+         * picks up a link that arrived as a deep link. Safe to repeat. Once the claim is in flight,
+         * the wait has started or it has finished, a newly arrived link is dropped, not kept for
+         * a later visit, and the state is left alone.
          */
         fun start() {
             viewModelScope.launch {
-                if (pollJob?.isActive == true || _state.value is JoinUiState.Approved) {
+                if (pollJob?.isActive == true || _state.value is JoinUiState.Approved || _state.value is JoinUiState.Claiming) {
                     inbox.take()
                     return@launch
                 }

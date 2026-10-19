@@ -13,8 +13,9 @@
 // because the failure that matters is a grandparent suddenly dropped into the
 // full app with Settings: no signal, a hub error, a revoked token, a phone
 // that is unpaired, still pending approval or the owner's own (no session at
-// all), or a storage error. Nothing on the phone offers a way out; the owner
-// flips the role in Manage Family and the next refresh picks it up.
+// all), a storage error, or an answer with no role this build understands.
+// Nothing on the phone offers a way out; the owner flips the role in Manage
+// Family and the next refresh picks it up.
 package com.metrolist.music.saraswati.saral
 
 import androidx.datastore.core.DataStore
@@ -59,7 +60,11 @@ class GrandparentRoleSync
          */
         suspend fun refresh(): DeviceRole? {
             val session = guarded { family.session() } ?: return null
-            val role = hub.getMe(session.sessionToken).getOrNull()?.role ?: return null
+            val me = hub.getMe(session.sessionToken).getOrNull() ?: return null
+            // A role the hub left out, or one this build does not know, reads as adult elsewhere;
+            // here it must be no answer at all, or it would switch Saral off.
+            if (!me.roleKnown) return null
+            val role = me.role
             val grandparent = role == DeviceRole.GRANDPARENT
             guarded {
                 if (roles.isGrandparent() != grandparent) roles.setGrandparent(grandparent)

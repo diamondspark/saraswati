@@ -90,11 +90,16 @@ data class RosterEntry(
     val role: DeviceRole = DeviceRole.ADULT,
 )
 
-/** GET /me: who the Worker says this phone is, and what the owner set it up as. */
-@Serializable
+/**
+ * GET /me: who the Worker says this phone is, and what the owner set it up as. [role] reads a
+ * missing or unknown wire value as adult, like every other role in these models. [roleKnown] is
+ * false for exactly that case, so a caller that must not act on a guess (the Saral cache) can
+ * tell "the hub said adult" from "the hub said nothing I understand".
+ */
 data class Me(
     val deviceId: String,
     val role: DeviceRole = DeviceRole.ADULT,
+    val roleKnown: Boolean = true,
 )
 
 /** PUT /roster/{deviceId}/role: the role now stored for that device. */
@@ -151,6 +156,18 @@ class HubException(
 internal data class RosterResponse(
     val devices: List<RosterEntry>,
 )
+
+@Serializable
+internal data class MeResponse(
+    val deviceId: String,
+    // A string, not DeviceRole, so a role that is absent, null or not one of ours stays visible.
+    val role: String? = null,
+) {
+    fun toMe(): Me {
+        val known = DeviceRole.entries.firstOrNull { it.wireName == role }
+        return Me(deviceId, known ?: DeviceRole.ADULT, roleKnown = known != null)
+    }
+}
 
 @Serializable
 internal data class HealthResponse(

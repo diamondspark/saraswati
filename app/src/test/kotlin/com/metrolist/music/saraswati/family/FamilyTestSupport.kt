@@ -47,7 +47,13 @@ class FakeHub : HubApi {
     /** While set, getStations waits on it: stands in for a hub that is slow or unreachable. */
     @Volatile var stationsGate: CompletableDeferred<Unit>? = null
 
+    /** While set, claimPairing waits on it: a claim that is still in flight. */
+    @Volatile var claimGate: CompletableDeferred<Unit>? = null
+
     @Volatile var meRole: DeviceRole = DeviceRole.ADULT
+
+    /** false stands in for a /me answer with no role, or one this build does not know. */
+    @Volatile var meRoleKnown: Boolean = true
 
     /** Every later call to [function] fails with [failure] until [heal] is called. */
     fun failWith(
@@ -91,10 +97,13 @@ class FakeHub : HubApi {
         token: String,
         deviceName: String,
         role: DeviceRole?,
-    ) = run("claimPairing", "$token,$deviceName,${role?.wireName}") {
+    ): Result<ClaimResult> {
+        calls.add("claimPairing($token,$deviceName,${role?.wireName})")
+        claimGate?.await()
+        failures["claimPairing"]?.let { return Result.failure(it) }
         val id = "device-${devices.size + 1}"
         devices = devices + RosterEntry(id, deviceName, "pending", null, role ?: DeviceRole.ADULT)
-        ClaimResult(id, "pending", "claim-secret-$id")
+        return Result.success(ClaimResult(id, "pending", "claim-secret-$id"))
     }
 
     override suspend fun pairingStatus(
@@ -133,7 +142,7 @@ class FakeHub : HubApi {
         RoleUpdate(deviceId, role)
     }
 
-    override suspend fun getMe(sessionToken: String) = run("getMe", sessionToken) { Me("me", meRole) }
+    override suspend fun getMe(sessionToken: String) = run("getMe", sessionToken) { Me("me", meRole, meRoleKnown) }
 
     override suspend fun getStations(auth: String): Result<List<Station>> {
         calls.add("getStations($auth)")

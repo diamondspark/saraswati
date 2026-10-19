@@ -134,7 +134,7 @@ class HubClient(
     /** A paired phone asking what the owner has set it up as. Device bearer only; the admin key gets a 401. */
     override suspend fun getMe(sessionToken: String): Result<Me> =
         send("GET", listOf("me"), sessionToken, null) {
-            json.decodeFromString<Me>(it)
+            json.decodeFromString<MeResponse>(it).toMe()
         }
 
     /** [auth] is the owner's admin key or a paired phone's session token; the Worker accepts either. */

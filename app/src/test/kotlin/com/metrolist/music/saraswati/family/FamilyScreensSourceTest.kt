@@ -11,6 +11,7 @@
 // (There is no Compose UI test in this project to observe it at run time.)
 package com.metrolist.music.saraswati.family
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -24,22 +25,109 @@ class FamilyScreensSourceTest {
 
     private val familyDir = "src/main/kotlin/com/metrolist/music/saraswati/family"
 
-    // Variables that may be saved across process death: a phone's display name and the role card
-    // picked. Neither is a credential.
-    private val mayBeSaved = setOf("name", "role")
+    // The only places rememberSaveable may appear, by exact line text: a phone's display name and
+    // the role card picked. Neither is a credential. (The import is what makes them compile.)
+    private val allowedLines =
+        mapOf(
+            "JoinFamilyScreen.kt" to
+                setOf(
+                    "import androidx.compose.runtime.saveable.rememberSaveable",
+                    "var name by rememberSaveable { mutableStateOf(Build.MODEL.orEmpty()) }",
+                    "var role by rememberSaveable { mutableStateOf<DeviceRole?>(null) }",
+                ),
+        )
+
+    /**
+     * Every line that contains the token `rememberSaveable` and is not one of [allowed], whatever
+     * shape it has: delegated or not, typed or not, split over lines, in a call or an import. Lines
+     * that are wholly a comment are skipped, since a comment cannot save anything.
+     */
+    private fun saveableOffenders(
+        files: Map<String, String>,
+        allowed: Map<String, Set<String>>,
+    ): List<String> =
+        files.flatMap { (file, text) ->
+            text
+                .lines()
+                .map { it.trim() }
+                .filter { "rememberSaveable" in it }
+                .filterNot { it.startsWith("//") || it.startsWith("*") || it.startsWith("/*") }
+                .filterNot { it in allowed[file].orEmpty() }
+                .map { "$file: $it" }
+        }
+
+    private fun familySources(): Map<String, String> {
+        val dir = listOf(File(familyDir), File("app/$familyDir")).firstOrNull { it.isDirectory }
+        val files = requireNotNull(dir) { "cannot find $familyDir from ${File(".").absolutePath}" }.listFiles { f -> f.name.endsWith(".kt") }
+        return requireNotNull(files).associate { it.name to it.readText() }
+    }
 
     @Test
     fun `only non-credential screen state is saved across process death`() {
-        val declaration = Regex("""va[rl]\s+(\w+)\s+by\s+rememberSaveable""")
-        val offenders =
-            listOf("JoinFamilyScreen.kt", "ManageFamilyScreen.kt", "FamilyScreen.kt").flatMap { file ->
-                declaration.findAll(source("$familyDir/$file")).map { file to it.groupValues[1] }.toList()
-            }.filter { (_, name) -> name !in mayBeSaved }
+        val sources = familySources()
+        assertTrue("expected to scan the Family screens", "JoinFamilyScreen.kt" in sources && "ManageFamilyScreen.kt" in sources)
+
+        val offenders = saveableOffenders(sources, allowedLines)
 
         assertTrue(
-            "These screen states go into the saved-state Bundle but are not on the allow list: $offenders",
+            "These lines use rememberSaveable (the saved-state Bundle survives process death) " +
+                "and are not on the exact-text allow list: $offenders",
             offenders.isEmpty(),
         )
+    }
+
+    @Test
+    fun `the allowed rememberSaveable lines are still there, so the allow list cannot go stale`() {
+        val join = familySources().getValue("JoinFamilyScreen.kt").lines().map { it.trim() }
+
+        for (line in allowedLines.getValue("JoinFamilyScreen.kt")) {
+            assertTrue("allowed line no longer in JoinFamilyScreen.kt: $line", line in join)
+        }
+    }
+
+    @Test
+    fun `the scan catches a typed declaration, a non-delegated one, and the shapes the old pattern knew`() {
+        val samples =
+            mapOf(
+                "ManageFamilyScreen.kt" to
+                    """
+                    var text: String by rememberSaveable { mutableStateOf("") }
+                    val key = rememberSaveable { mutableStateOf("") }
+                    var adminKey by rememberSaveable { mutableStateOf("") }
+                    var split by
+                        rememberSaveable { mutableStateOf("") }
+                    val holder = rememberSaveableStateHolder()
+                    """.trimIndent(),
+                // The allow list is per file and exact: the allowed text elsewhere is still flagged.
+                "FamilyScreen.kt" to "var name by rememberSaveable { mutableStateOf(Build.MODEL.orEmpty()) }",
+                // A near miss of an allowed line is flagged too.
+                "JoinFamilyScreen.kt" to "var name by rememberSaveable { mutableStateOf(token) }",
+            )
+
+        val offenders = saveableOffenders(samples, allowedLines)
+
+        assertEquals(7, offenders.size)
+        assertTrue(offenders.any { it.contains("var text: String by rememberSaveable") })
+        assertTrue(offenders.any { it.contains("val key = rememberSaveable") })
+        assertTrue(offenders.any { it.startsWith("FamilyScreen.kt") })
+        assertTrue(offenders.any { it.contains("mutableStateOf(token)") })
+    }
+
+    @Test
+    fun `the scan leaves the two allowed declarations, comments and nothing else`() {
+        val clean =
+            mapOf(
+                "JoinFamilyScreen.kt" to
+                    """
+                    import androidx.compose.runtime.saveable.rememberSaveable
+                        var name by rememberSaveable { mutableStateOf(Build.MODEL.orEmpty()) }
+                        var role by rememberSaveable { mutableStateOf<DeviceRole?>(null) }
+                    // never rememberSaveable for the token
+                     * a doc line about rememberSaveable
+                    """.trimIndent(),
+            )
+
+        assertTrue(saveableOffenders(clean, allowedLines).isEmpty())
     }
 
     @Test

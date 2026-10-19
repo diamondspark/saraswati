@@ -13,8 +13,11 @@ import com.metrolist.music.saraswati.family.DataStoreStationsCache
 import com.metrolist.music.saraswati.family.StationsCache
 import com.metrolist.music.saraswati.saral.DataStoreGrandparentRoleStore
 import com.metrolist.music.saraswati.saral.GrandparentRoleStore
+import com.metrolist.music.saraswati.saral.DataStoreYouTubeSignIn
 import com.metrolist.music.saraswati.saral.SaralSearch
 import com.metrolist.music.saraswati.saral.YouTubeSaralSearch
+import com.metrolist.music.saraswati.saral.YouTubeSignIn
+import com.metrolist.music.saraswati.security.SaraswatiVault
 import com.metrolist.music.utils.dataStore
 import dagger.Module
 import dagger.Provides
@@ -43,4 +46,10 @@ object SaralModule {
 
     @Provides
     fun provideSaralSearch(): SaralSearch = YouTubeSaralSearch()
+
+    @Provides
+    @Singleton
+    fun provideYouTubeSignIn(
+        @ApplicationContext context: Context,
+    ): YouTubeSignIn = DataStoreYouTubeSignIn(context.dataStore, SaraswatiVault.cookieVault)
 }

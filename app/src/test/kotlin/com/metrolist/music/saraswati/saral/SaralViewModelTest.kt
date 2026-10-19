@@ -7,8 +7,13 @@
 // tiles come from the local cache and never wait for the hub; a tile starts a
 // YouTube radio on its station's seed video; a spoken song name goes through
 // the same search-then-play-with-radio path a tapped search result takes.
-// Unconfined dispatching makes each call finish before it returns, because the
-// fakes never suspend (except the gated hub in the "never blocks" test).
+//
+// Fix round 1: what the screen says comes from what the player is really
+// doing, not from what was asked of it. A tap is "starting" until the player
+// holds a track from that queue; a failure, being offline, a pause and a track
+// change each show; the highlighted tile follows the queue that is really
+// playing. Unconfined dispatching makes each call finish before it returns,
+// because the fakes never suspend (except the gated hub and search).
 package com.metrolist.music.saraswati.saral
 
 import com.metrolist.innertube.models.SongItem
@@ -18,14 +23,16 @@ import com.metrolist.music.saraswati.family.FakeStore
 import com.metrolist.music.saraswati.family.FamilySession
 import com.metrolist.music.saraswati.family.OFFLINE
 import com.metrolist.music.saraswati.family.Station
+import com.metrolist.music.saraswati.family.StationsRefresher
 import com.metrolist.music.saraswati.family.hubFailure
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -33,14 +40,16 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.IOException
+import java.net.UnknownHostException
 import java.util.concurrent.CopyOnWriteArrayList
 
 class FakePlayback : SaralPlayback {
     val calls = CopyOnWriteArrayList<String>()
-    val playing = MutableStateFlow(false)
+    val playerState = MutableStateFlow(SaralPlayerState())
     var queued = false
 
-    override val isPlaying: StateFlow<Boolean> = playing
+    override val state: Flow<SaralPlayerState> = playerState
 
     override fun hasQueue() = queued
 
@@ -65,15 +74,50 @@ class FakePlayback : SaralPlayback {
     override fun skipPrevious() {
         calls.add("previous")
     }
+
+    /** The player has picked up what Saral started: [title] is on and belongs to it. */
+    fun playingOurs(
+        title: String,
+        playing: Boolean = true,
+    ) {
+        playerState.value = SaralPlayerState(mediaId = "m-$title", title = title, playing = playing, ours = true)
+    }
+
+    /** Something else started: [title] is on and Saral did not ask for it. */
+    fun playingSomethingElse(
+        title: String,
+        playing: Boolean = true,
+    ) {
+        playerState.value = SaralPlayerState(mediaId = "m-$title", title = title, playing = playing, ours = false)
+    }
 }
 
 class FakeSearch : SaralSearch {
     val queries = CopyOnWriteArrayList<String>()
     val answers = HashMap<String, Result<SongItem?>>()
 
+    /** While set, every search waits on it: a search still in flight. */
+    @Volatile var gate: CompletableDeferred<Unit>? = null
+
     override suspend fun firstSong(query: String): Result<SongItem?> {
         queries.add(query)
+        gate?.await()
         return answers[query] ?: Result.success(null)
+    }
+}
+
+class FakeSignIn(
+    initial: Boolean? = true,
+) : YouTubeSignIn {
+    private val state = MutableSharedFlow<Boolean>(replay = 1)
+    override val signedIn: Flow<Boolean> = state
+
+    init {
+        initial?.let { state.tryEmit(it) }
+    }
+
+    fun set(value: Boolean) {
+        state.tryEmit(value)
     }
 }
 
@@ -84,6 +128,7 @@ class SaralViewModelTest {
     private lateinit var cache: FakeStationsCache
     private lateinit var search: FakeSearch
     private lateinit var playback: FakePlayback
+    private lateinit var signIn: FakeSignIn
 
     private val bollywood = Station("default-bollywood-classics", "Bollywood Classics", "seedBollyw01", 0)
     private val bhajan = Station("default-bhajans-devotional", "Bhajans & Devotional", "seedBhajan01", 2)
@@ -102,6 +147,7 @@ class SaralViewModelTest {
         cache = FakeStationsCache(listOf(bollywood, bhajan))
         search = FakeSearch()
         playback = FakePlayback()
+        signIn = FakeSignIn()
     }
 
     @After
@@ -109,12 +155,19 @@ class SaralViewModelTest {
         scope.cancel()
     }
 
-    private fun newVm() = SaralViewModel(cache, hub, family, search, scope)
+    private fun newVm() = SaralViewModel(cache, StationsRefresher(hub, family, cache), search, signIn, scope)
 
     private fun SaralViewModel.ready(): SaralViewModel {
         bindPlayback(playback)
         return this
     }
+
+    private fun SaralViewModel.tile(station: Station) = tiles.value.first { it.station.id == station.id }
+
+    private fun stationSubject(
+        vm: SaralViewModel,
+        station: Station,
+    ) = SaralSubject.Station(vm.tile(station))
 
     // --- tiles come from the cache ------------------------------------------
 
@@ -150,17 +203,6 @@ class SaralViewModelTest {
     }
 
     @Test
-    fun `refresh can be asked for again, for example when the app comes back`() {
-        val vm = newVm()
-        hub.stations = listOf(mine)
-
-        vm.refresh()
-
-        assertEquals(2, hub.callsTo("getStations").size)
-        assertEquals(listOf(mine), vm.tiles.value.map { it.station })
-    }
-
-    @Test
     fun `a phone with no session does not call the hub and keeps what it has`() {
         family.session = null
 
@@ -171,36 +213,20 @@ class SaralViewModelTest {
     }
 
     @Test
-    fun `an unreachable hub keeps the cached tiles`() {
-        hub.failWith("getStations", OFFLINE)
-
-        val vm = newVm()
-
-        assertEquals(listOf(bollywood, bhajan), vm.tiles.value.map { it.station })
-    }
-
-    @Test
-    fun `a revoked phone keeps the cached tiles`() {
-        hub.failWith("getStations", hubFailure(401))
-
-        val vm = newVm()
-
-        assertEquals(listOf(bollywood, bhajan), vm.tiles.value.map { it.station })
-    }
-
-    @Test
-    fun `a hub with no stations set does not blank the tiles`() {
+    fun `an unreachable hub, a revoked phone and an empty list all keep the cached tiles`() {
+        for (failure in listOf<Throwable>(OFFLINE, hubFailure(401))) {
+            hub.failWith("getStations", failure)
+            assertEquals(listOf(bollywood, bhajan), newVm().tiles.value.map { it.station })
+        }
+        hub.heal("getStations")
         hub.stations = emptyList()
-
-        val vm = newVm()
-
-        assertEquals(listOf(bollywood, bhajan), vm.tiles.value.map { it.station })
+        assertEquals(listOf(bollywood, bhajan), newVm().tiles.value.map { it.station })
     }
 
     @Test
     fun `a cache that cannot be written still leaves the tiles working`() {
         hub.stations = listOf(mine)
-        cache.failWrites = java.io.IOException("disk full")
+        cache.failWrites = IOException("disk full")
 
         val vm = newVm()
 
@@ -220,24 +246,95 @@ class SaralViewModelTest {
     // --- tapping a tile -----------------------------------------------------
 
     @Test
-    fun `a tile starts a radio seeded from that station's video`() {
+    fun `a tile starts a radio seeded from that station's video, and says it is starting, not playing`() {
         val vm = newVm().ready()
 
         vm.onTile(bollywood.id)
 
         assertEquals(listOf("radio(seedBollyw01)"), playback.calls.toList())
-        assertEquals(SaralStatus.StationPlaying(vm.tiles.value[0]), vm.status.value)
+        assertEquals(SaralStatus.Starting(stationSubject(vm, bollywood)), vm.status.value)
     }
 
     @Test
-    fun `tapping another tile switches the radio and the highlighted tile`() {
+    fun `it says playing only once the player holds a track from that queue`() {
         val vm = newVm().ready()
-
         vm.onTile(bollywood.id)
+
+        playback.playingOurs("Kabhi Kabhie")
+
+        assertEquals(SaralStatus.Playing(stationSubject(vm, bollywood)), vm.status.value)
+        assertEquals(bollywood.id, vm.status.value.stationId())
+    }
+
+    @Test
+    fun `a player still playing the old queue does not make the new tile look started`() {
+        val vm = newVm().ready()
+        playback.playingSomethingElse("Old song")
+
+        vm.onTile(bhajan.id)
+
+        assertEquals(SaralStatus.Starting(stationSubject(vm, bhajan)), vm.status.value)
+    }
+
+    @Test
+    fun `pausing shows paused, and playing again shows playing`() {
+        val vm = newVm().ready()
+        vm.onTile(bollywood.id)
+        playback.playingOurs("Kabhi Kabhie")
+
+        playback.playingOurs("Kabhi Kabhie", playing = false)
+        assertEquals(SaralStatus.Paused(stationSubject(vm, bollywood)), vm.status.value)
+
+        playback.playingOurs("Kabhi Kabhie", playing = true)
+        assertEquals(SaralStatus.Playing(stationSubject(vm, bollywood)), vm.status.value)
+    }
+
+    @Test
+    fun `a station radio moving on to the next track keeps the station's name and ring`() {
+        val vm = newVm().ready()
+        vm.onTile(bollywood.id)
+        playback.playingOurs("Song one")
+
+        playback.playingOurs("Song two")
+
+        assertEquals(SaralStatus.Playing(stationSubject(vm, bollywood)), vm.status.value)
+        assertEquals(bollywood.id, vm.status.value.stationId())
+    }
+
+    @Test
+    fun `tapping another tile moves the ring to it`() {
+        val vm = newVm().ready()
+        vm.onTile(bollywood.id)
+        playback.playingOurs("Song one")
+
         vm.onTile(bhajan.id)
 
         assertEquals(listOf("radio(seedBollyw01)", "radio(seedBhajan01)"), playback.calls.toList())
-        assertEquals(bhajan.id, (vm.status.value as SaralStatus.StationPlaying).tile.station.id)
+        assertEquals(bhajan.id, vm.status.value.stationId())
+    }
+
+    @Test
+    fun `when something else starts playing the ring goes and the status names the real track`() {
+        val vm = newVm().ready()
+        vm.onTile(bollywood.id)
+        playback.playingOurs("Song one")
+
+        playback.playingSomethingElse("Car's choice")
+
+        assertNull(vm.status.value.stationId())
+        assertEquals(SaralStatus.Playing(SaralSubject.Track("Car's choice")), vm.status.value)
+    }
+
+    @Test
+    fun `the player reconnecting, such as after a rotation, does not lose the ring`() {
+        val vm = newVm().ready()
+        vm.onTile(bollywood.id)
+        playback.playingOurs("Song one")
+
+        vm.bindPlayback(null)
+        vm.bindPlayback(playback)
+
+        assertEquals(SaralStatus.Playing(stationSubject(vm, bollywood)), vm.status.value)
     }
 
     @Test
@@ -246,7 +343,7 @@ class SaralViewModelTest {
 
         vm.onTile(bhajan.id)
         assertTrue(playback.calls.isEmpty())
-        assertTrue(vm.status.value is SaralStatus.StationPlaying)
+        assertEquals(SaralStatus.Starting(stationSubject(vm, bhajan)), vm.status.value)
 
         vm.bindPlayback(playback)
 
@@ -285,6 +382,60 @@ class SaralViewModelTest {
         assertEquals(SaralStatus.Idle, vm.status.value)
     }
 
+    // --- failures are said out loud ----------------------------------------
+
+    @Test
+    fun `a tile that cannot start because the phone is offline says so, and drops the ring`() {
+        val vm = newVm().ready()
+        vm.onTile(bollywood.id)
+
+        playback.playerState.value = SaralPlayerState(problem = PlaybackProblem.OFFLINE)
+
+        assertEquals(SaralStatus.Problem(PlaybackProblem.OFFLINE), vm.status.value)
+        assertNull(vm.status.value.stationId())
+    }
+
+    @Test
+    fun `a tile that cannot start for another reason says it could not play`() {
+        val vm = newVm().ready()
+        vm.onTile(bollywood.id)
+
+        playback.playerState.value = SaralPlayerState(problem = PlaybackProblem.COULD_NOT_PLAY)
+
+        assertEquals(SaralStatus.Problem(PlaybackProblem.COULD_NOT_PLAY), vm.status.value)
+    }
+
+    @Test
+    fun `a song that fails halfway says so even though it was playing`() {
+        val vm = newVm().ready()
+        vm.onTile(bollywood.id)
+        playback.playingOurs("Song one")
+
+        playback.playerState.value = playback.playerState.value.copy(problem = PlaybackProblem.OFFLINE)
+
+        assertEquals(SaralStatus.Problem(PlaybackProblem.OFFLINE), vm.status.value)
+    }
+
+    @Test
+    fun `the message goes away when the player recovers`() {
+        val vm = newVm().ready()
+        vm.onTile(bollywood.id)
+        playback.playerState.value = SaralPlayerState(problem = PlaybackProblem.OFFLINE)
+
+        playback.playingOurs("Song one")
+
+        assertEquals(SaralStatus.Playing(stationSubject(vm, bollywood)), vm.status.value)
+    }
+
+    @Test
+    fun `something already playing, with no tap, is reported as what it is`() {
+        val vm = newVm().ready()
+
+        playback.playingSomethingElse("Restored song", playing = false)
+
+        assertEquals(SaralStatus.Paused(SaralSubject.Track("Restored song")), vm.status.value)
+    }
+
     // --- transport ----------------------------------------------------------
 
     @Test
@@ -314,7 +465,7 @@ class SaralViewModelTest {
         vm.onPlayPause()
 
         assertEquals(listOf("radio(seedBollyw01)"), playback.calls.toList())
-        assertEquals(bollywood.id, (vm.status.value as SaralStatus.StationPlaying).tile.station.id)
+        assertEquals(bollywood.id, vm.status.value.stationId())
     }
 
     @Test
@@ -333,26 +484,100 @@ class SaralViewModelTest {
         assertFalse(vm.isPlaying.value)
 
         vm.bindPlayback(playback)
-        playback.playing.value = true
+        playback.playingOurs("Song one", playing = true)
         assertTrue(vm.isPlaying.value)
 
-        playback.playing.value = false
+        playback.playingOurs("Song one", playing = false)
         assertFalse(vm.isPlaying.value)
 
-        playback.playing.value = true
+        playback.playingOurs("Song one", playing = true)
         vm.bindPlayback(null)
         assertFalse(vm.isPlaying.value)
     }
 
     // --- voice search -------------------------------------------------------
 
+    private fun SaralViewModel.heard(vararg guesses: String) = onVoiceOutcome(VoiceOutcome.Heard(guesses.toList()))
+
     @Test
-    fun `tapping the microphone opens the listening state`() {
+    fun `tapping the microphone opens the listening state and asks the screen to launch the recogniser`() {
         val vm = newVm().ready()
 
+        assertTrue(vm.onMicTapped())
+
+        assertEquals(VoicePhase.LISTENING, vm.voice.value)
+    }
+
+    @Test
+    fun `a second tap while the recogniser is opening does not launch it twice`() {
+        val vm = newVm().ready()
         vm.onMicTapped()
 
-        assertTrue(vm.voiceActive.value)
+        assertFalse(vm.onMicTapped())
+        assertEquals(VoicePhase.LISTENING, vm.voice.value)
+    }
+
+    @Test
+    fun `the listening screen cannot be dismissed while the recogniser is in flight`() {
+        val vm = newVm().ready()
+        vm.onMicTapped()
+
+        vm.onOverlayDismissed()
+
+        assertEquals(VoicePhase.LISTENING, vm.voice.value)
+    }
+
+    @Test
+    fun `the recogniser's answer is accepted after the overlay was tapped during launch`() {
+        search.answers["लग जा गले"] = Result.success(song("vid-lag", "Lag Ja Gale"))
+        val vm = newVm().ready()
+        vm.onMicTapped()
+        vm.onOverlayDismissed()
+
+        vm.heard("लग जा गले")
+
+        assertEquals(listOf("song(vid-lag)"), playback.calls.toList())
+    }
+
+    @Test
+    fun `an answer nobody asked for is ignored`() {
+        search.answers["लग जा गले"] = Result.success(song("vid-lag", "Lag Ja Gale"))
+        val vm = newVm().ready()
+
+        vm.heard("लग जा गले")
+
+        assertTrue(search.queries.isEmpty())
+        assertTrue(playback.calls.isEmpty())
+    }
+
+    @Test
+    fun `a second answer for the same launch is ignored`() {
+        search.answers["a"] = Result.success(song("vid-a", "A"))
+        val vm = newVm().ready()
+        vm.onMicTapped()
+        vm.heard("a")
+
+        vm.heard("a")
+
+        assertEquals(listOf("a"), search.queries.toList())
+    }
+
+    @Test
+    fun `while the search runs the overlay says searching, and tapping it cancels the search`() {
+        val inFlight = CompletableDeferred<Unit>()
+        search.gate = inFlight
+        search.answers["लग जा गले"] = Result.success(song("vid-lag", "Lag Ja Gale"))
+        val vm = newVm().ready()
+        vm.onMicTapped()
+
+        vm.heard("लग जा गले")
+        assertEquals(VoicePhase.SEARCHING, vm.voice.value)
+
+        vm.onOverlayDismissed()
+        inFlight.complete(Unit)
+
+        assertEquals(VoicePhase.IDLE, vm.voice.value)
+        assertTrue("a cancelled search plays nothing", playback.calls.isEmpty())
     }
 
     @Test
@@ -361,12 +586,43 @@ class SaralViewModelTest {
         val vm = newVm().ready()
         vm.onMicTapped()
 
-        vm.onVoiceResult(listOf("लग जा गले"))
+        vm.heard("लग जा गले")
 
         assertEquals(listOf("लग जा गले"), search.queries.toList())
         assertEquals(listOf("song(vid-lag)"), playback.calls.toList())
-        assertEquals(SaralStatus.SongPlaying("Lag Ja Gale"), vm.status.value)
-        assertFalse(vm.voiceActive.value)
+        assertEquals(VoicePhase.IDLE, vm.voice.value)
+        assertEquals(SaralStatus.Starting(SaralSubject.Track("Lag Ja Gale")), vm.status.value)
+    }
+
+    @Test
+    fun `a voice song follows the real track, including pause and the next song`() {
+        search.answers["लग जा गले"] = Result.success(song("vid-lag", "Lag Ja Gale"))
+        val vm = newVm().ready()
+        vm.onMicTapped()
+        vm.heard("लग जा गले")
+
+        playback.playingOurs("Lag Ja Gale")
+        assertEquals(SaralStatus.Playing(SaralSubject.Track("Lag Ja Gale")), vm.status.value)
+
+        playback.playingOurs("Lag Ja Gale", playing = false)
+        assertEquals(SaralStatus.Paused(SaralSubject.Track("Lag Ja Gale")), vm.status.value)
+
+        playback.playingOurs("Next one in the radio")
+        assertEquals(SaralStatus.Playing(SaralSubject.Track("Next one in the radio")), vm.status.value)
+        assertNull(vm.status.value.stationId())
+    }
+
+    @Test
+    fun `a voice song drops the station ring that was on`() {
+        search.answers["x"] = Result.success(song("vid-x", "X"))
+        val vm = newVm().ready()
+        vm.onTile(bollywood.id)
+        playback.playingOurs("Song one")
+        vm.onMicTapped()
+
+        vm.heard("x")
+
+        assertNull(vm.status.value.stationId())
     }
 
     @Test
@@ -376,7 +632,7 @@ class SaralViewModelTest {
         val vm = newVm().ready()
         vm.onMicTapped()
 
-        vm.onVoiceResult(listOf("lug ja gale", "  ", "लग जा गले"))
+        vm.heard("lug ja gale", "  ", "लग जा गले")
 
         assertEquals(listOf("lug ja gale", "लग जा गले"), search.queries.toList())
         assertEquals(listOf("song(vid-lag)"), playback.calls.toList())
@@ -387,63 +643,80 @@ class SaralViewModelTest {
         val vm = newVm().ready()
         vm.onMicTapped()
 
-        vm.onVoiceResult(listOf("xyzzy"))
+        vm.heard("xyzzy")
 
         assertTrue(playback.calls.isEmpty())
-        assertEquals(SaralStatus.VoiceNotFound, vm.status.value)
-        assertFalse(vm.voiceActive.value)
+        assertEquals(SaralStatus.Voice(VoiceNotice.NOT_FOUND), vm.status.value)
+        assertEquals(VoicePhase.IDLE, vm.voice.value)
     }
 
     @Test
-    fun `a search that fails, such as with no signal, says nothing was found`() {
-        search.answers["लग जा गले"] = Result.failure(OFFLINE)
+    fun `a search that fails because the phone is offline says offline, not not-found`() {
+        search.answers["लग जा गले"] = Result.failure(UnknownHostException("music.youtube.com"))
         val vm = newVm().ready()
         vm.onMicTapped()
 
-        vm.onVoiceResult(listOf("लग जा गले"))
+        vm.heard("लग जा गले", "लग जा गले ")
 
-        assertEquals(SaralStatus.VoiceNotFound, vm.status.value)
+        assertEquals(SaralStatus.Voice(VoiceNotice.OFFLINE), vm.status.value)
+        assertEquals("one failure ends the attempt", 1, search.queries.size)
         assertTrue(playback.calls.isEmpty())
     }
 
     @Test
-    fun `speech that came back empty says nothing was found without searching`() {
+    fun `a search that fails for another reason says it did not work, not not-found`() {
+        search.answers["लग जा गले"] = Result.failure(IllegalStateException("bad response"))
         val vm = newVm().ready()
         vm.onMicTapped()
 
-        vm.onVoiceResult(null)
-        assertEquals(SaralStatus.VoiceNotFound, vm.status.value)
+        vm.heard("लग जा गले")
+
+        assertEquals(SaralStatus.Voice(VoiceNotice.FAILED), vm.status.value)
+    }
+
+    @Test
+    fun `speech that came back empty says it was not understood, without searching`() {
+        val vm = newVm().ready()
+        vm.onMicTapped()
+        vm.onVoiceOutcome(VoiceOutcome.Heard(null))
+        assertEquals(SaralStatus.Voice(VoiceNotice.NOT_HEARD), vm.status.value)
 
         vm.onMicTapped()
-        vm.onVoiceResult(listOf("", "   "))
-        assertEquals(SaralStatus.VoiceNotFound, vm.status.value)
+        vm.heard("", "   ")
+        assertEquals(SaralStatus.Voice(VoiceNotice.NOT_HEARD), vm.status.value)
         assertTrue(search.queries.isEmpty())
     }
 
     @Test
-    fun `closing the listening screen leaves what was playing alone`() {
+    fun `each way the recogniser can end shows the matching message`() {
+        val expected =
+            mapOf(
+                VoiceOutcome.NotHeard to VoiceNotice.NOT_HEARD,
+                VoiceOutcome.Offline to VoiceNotice.OFFLINE,
+                VoiceOutcome.Failed to VoiceNotice.FAILED,
+            )
+        for ((outcome, notice) in expected) {
+            val vm = newVm().ready()
+            vm.onMicTapped()
+
+            vm.onVoiceOutcome(outcome)
+
+            assertEquals("$outcome", SaralStatus.Voice(notice), vm.status.value)
+            assertEquals(VoicePhase.IDLE, vm.voice.value)
+        }
+    }
+
+    @Test
+    fun `the user cancelling the recogniser closes the overlay and says nothing`() {
         val vm = newVm().ready()
         vm.onTile(bollywood.id)
         val before = vm.status.value
         vm.onMicTapped()
 
-        vm.onVoiceCancelled()
+        vm.onVoiceOutcome(VoiceOutcome.Cancelled)
 
-        assertFalse(vm.voiceActive.value)
+        assertEquals(VoicePhase.IDLE, vm.voice.value)
         assertEquals(before, vm.status.value)
-    }
-
-    @Test
-    fun `an answer that arrives after the listening screen was closed is ignored`() {
-        search.answers["लग जा गले"] = Result.success(song("vid-lag", "Lag Ja Gale"))
-        val vm = newVm().ready()
-        vm.onMicTapped()
-        vm.onVoiceCancelled()
-
-        vm.onVoiceResult(listOf("लग जा गले"))
-
-        assertTrue(playback.calls.isEmpty())
-        assertTrue(search.queries.isEmpty())
     }
 
     @Test
@@ -453,8 +726,8 @@ class SaralViewModelTest {
 
         vm.onVoiceUnavailable()
 
-        assertEquals(SaralStatus.VoiceUnavailable, vm.status.value)
-        assertFalse(vm.voiceActive.value)
+        assertEquals(SaralStatus.Voice(VoiceNotice.UNAVAILABLE), vm.status.value)
+        assertEquals(VoicePhase.IDLE, vm.voice.value)
     }
 
     @Test
@@ -462,7 +735,7 @@ class SaralViewModelTest {
         search.answers["लग जा गले"] = Result.success(song("vid-lag", "Lag Ja Gale"))
         val vm = newVm()
         vm.onMicTapped()
-        vm.onVoiceResult(listOf("लग जा गले"))
+        vm.heard("लग जा गले")
         assertTrue(playback.calls.isEmpty())
 
         vm.bindPlayback(playback)
@@ -474,11 +747,67 @@ class SaralViewModelTest {
     fun `a new tap clears an old voice message`() {
         val vm = newVm().ready()
         vm.onMicTapped()
-        vm.onVoiceResult(listOf("xyzzy"))
-        assertEquals(SaralStatus.VoiceNotFound, vm.status.value)
+        vm.heard("xyzzy")
+        assertEquals(SaralStatus.Voice(VoiceNotice.NOT_FOUND), vm.status.value)
 
         vm.onTile(bhajan.id)
 
-        assertTrue(vm.status.value is SaralStatus.StationPlaying)
+        assertTrue(vm.status.value is SaralStatus.Starting)
+    }
+
+    // --- sign-in tile -------------------------------------------------------
+
+    @Test
+    fun `a phone signed in to YouTube has no sign-in tile, not even before storage has been read`() {
+        signIn = FakeSignIn(initial = null)
+
+        val vm = newVm()
+        assertTrue("no flash of the tile before the answer is known", vm.signedIn.value)
+
+        signIn.set(true)
+        assertTrue(vm.signedIn.value)
+    }
+
+    @Test
+    fun `a signed-out phone shows the sign-in tile`() {
+        signIn = FakeSignIn(initial = false)
+
+        val vm = newVm()
+
+        assertFalse(vm.signedIn.value)
+    }
+
+    @Test
+    fun `the tile opens the sign-in screen and closing it returns to the tiles`() {
+        signIn = FakeSignIn(initial = false)
+        val vm = newVm().ready()
+        assertFalse(vm.signingIn.value)
+
+        vm.onSignInTapped()
+        assertTrue(vm.signingIn.value)
+
+        vm.onSignInClosed()
+        assertFalse(vm.signingIn.value)
+    }
+
+    @Test
+    fun `signing in elsewhere hides the tile and closes the sign-in screen`() {
+        signIn = FakeSignIn(initial = false)
+        val vm = newVm()
+        vm.onSignInTapped()
+
+        signIn.set(true)
+
+        assertTrue(vm.signedIn.value)
+        assertFalse(vm.signingIn.value)
+    }
+
+    @Test
+    fun `the sign-in screen cannot be opened on a phone that is signed in`() {
+        val vm = newVm()
+
+        vm.onSignInTapped()
+
+        assertFalse(vm.signingIn.value)
     }
 }

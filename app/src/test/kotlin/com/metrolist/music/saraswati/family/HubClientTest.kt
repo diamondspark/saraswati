@@ -751,4 +751,30 @@ class HubClientTest {
             }
             assertEquals(0, server.requestCount)
         }
+
+    @Test
+    fun `getMe says whether the role was one this build knows`() =
+        runBlocking {
+            reply(200, """{"deviceId":"dev-1","role":"grandparent"}""")
+            assertEquals(true, hub.getMe("sess").getOrNull()?.roleKnown)
+
+            reply(200, """{"deviceId":"dev-1","role":"adult"}""")
+            assertEquals(true, hub.getMe("sess").getOrNull()?.roleKnown)
+
+            reply(200, """{"deviceId":"dev-1","role":"auditor"}""")
+            val unknown = hub.getMe("sess").getOrNull()
+            assertEquals(false, unknown?.roleKnown)
+            assertEquals("other uses still read it as adult", DeviceRole.ADULT, unknown?.role)
+
+            reply(200, """{"deviceId":"dev-1"}""")
+            val missing = hub.getMe("sess").getOrNull()
+            assertEquals(false, missing?.roleKnown)
+            assertEquals(DeviceRole.ADULT, missing?.role)
+
+            reply(200, """{"deviceId":"dev-1","role":null}""")
+            assertEquals(false, hub.getMe("sess").getOrNull()?.roleKnown)
+
+            reply(200, """{"deviceId":"dev-1","role":7}""")
+            assertTrue("a role of the wrong type is an unusable answer, which is no answer either", hub.getMe("sess").isFailure)
+        }
 }

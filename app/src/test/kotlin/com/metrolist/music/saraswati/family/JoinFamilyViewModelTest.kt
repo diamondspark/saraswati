@@ -406,4 +406,41 @@ class JoinFamilyViewModelTest {
         assertTrue("gap after 2nd 429 was ${gapsMs[1]} ms", gapsMs[1] >= 4 * interval - 5)
         assertTrue("gap after 3rd 429 was ${gapsMs[2]} ms", gapsMs[2] >= 8 * interval - 5)
     }
+
+    // --- Fix round 2 -------------------------------------------------------
+
+    @Test
+    fun `a link that arrives while the claim is in flight does not overwrite it`() {
+        val inFlight = kotlinx.coroutines.CompletableDeferred<Unit>()
+        hub.claimGate = inFlight
+        vm.submitInput(link)
+        vm.claim("Mummy's Pixel", DeviceRole.ADULT)
+        assertEquals(JoinUiState.Claiming, vm.state.value)
+
+        inbox.offer("e".repeat(64))
+        vm.start()
+
+        assertEquals(JoinUiState.Claiming, vm.state.value)
+        assertNull("the newly arrived link is dropped, not kept", inbox.take())
+        assertEquals(1, hub.callsTo("claimPairing").size)
+
+        inFlight.complete(Unit)
+        assertEquals(JoinUiState.Waiting, vm.state.value)
+    }
+
+    @Test
+    fun `resume while the claim is in flight cannot re-enter the start path`() {
+        val inFlight = kotlinx.coroutines.CompletableDeferred<Unit>()
+        hub.claimGate = inFlight
+        store.claim = PendingClaim("device-9", "stored-secret")
+        vm.submitInput(link)
+        vm.claim("Mummy's Pixel", DeviceRole.ADULT)
+
+        vm.start()
+        vm.start()
+
+        assertEquals("a stored claim must not start a second wait mid-claim", 0, hub.callsTo("pairingStatus").size)
+        assertEquals(JoinUiState.Claiming, vm.state.value)
+        inFlight.complete(Unit)
+    }
 }

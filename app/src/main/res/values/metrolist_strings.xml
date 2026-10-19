@@ -1101,25 +1101,35 @@
     <string name="family_feature_cast_relay">Cast relay</string>
     <string name="family_feature_cast_relay_desc">Off hides casting from one family phone to another.</string>
 
-    <!-- SARASWATI: Task 9 — Saral, the grandparents' screen. Hindi on purpose: the one screen built only for them.
-         The copy is the approved mockup's, except the last three lines, which are new and need a
-         native-speaker read. -->
-    <string name="saral_identity">सरस्वती · सरल</string>
-    <string name="saral_station_bollywood">बॉलीवुड क्लासिक्स</string>
-    <string name="saral_station_bhajan">भजन और भक्ति गीत</string>
-    <string name="saral_station_ghazal">ग़ज़लें और पुराने गीत</string>
-    <string name="saral_station_meditation">शांति और ध्यान</string>
-    <string name="saral_idle">टाइल दबाएं और सुनें</string>
-    <string name="saral_now_playing">%1$s बज रहा है</string>
-    <string name="saral_play">चलाएं</string>
-    <string name="saral_pause">रोकें</string>
-    <string name="saral_next">आगे वाला गीत</string>
-    <string name="saral_previous">पिछला गीत</string>
-    <string name="saral_voice_search">बोलकर खोजें</string>
-    <string name="saral_listening">सुन रहे हैं…</string>
-    <string name="saral_say_song">गाने का नाम बोलें</string>
-    <string name="saral_close">बंद करें</string>
-    <string name="saral_empty">स्टेशन अभी तैयार नहीं हैं</string>
-    <string name="saral_voice_not_found">गाना नहीं मिला, फिर से बोलें</string>
-    <string name="saral_voice_unavailable">इस फ़ोन पर बोलकर खोजना उपलब्ध नहीं है</string>
+    <!-- SARASWATI: Task 9 — Saral, the grandparents' screen. Hindi on purpose: the one screen built only for them,
+         so none of it is translatable. The copy is the approved mockup's, except the lines marked NEW, which
+         need a native-speaker read. -->
+    <string name="saral_identity" translatable="false">सरस्वती · सरल</string>
+    <string name="saral_station_bollywood" translatable="false">बॉलीवुड क्लासिक्स</string>
+    <string name="saral_station_bhajan" translatable="false">भजन और भक्ति गीत</string>
+    <string name="saral_station_ghazal" translatable="false">ग़ज़लें और पुराने गीत</string>
+    <string name="saral_station_meditation" translatable="false">शांति और ध्यान</string>
+    <string name="saral_idle" translatable="false">टाइल दबाएं और सुनें</string>
+    <string name="saral_now_playing" translatable="false">%1$s बज रहा है</string>
+    <string name="saral_play" translatable="false">चलाएं</string>
+    <string name="saral_pause" translatable="false">रोकें</string>
+    <string name="saral_next" translatable="false">आगे वाला गीत</string>
+    <string name="saral_previous" translatable="false">पिछला गीत</string>
+    <string name="saral_voice_search" translatable="false">बोलकर खोजें</string>
+    <string name="saral_listening" translatable="false">सुन रहे हैं…</string>
+    <string name="saral_say_song" translatable="false">गाने का नाम बोलें</string>
+    <string name="saral_close" translatable="false">बंद करें</string>
+    <string name="saral_searching" translatable="false">ढूँढ रहे हैं…</string>
+    <string name="saral_sign_in" translatable="false">यूट्यूब म्यूज़िक में साइन इन करें · Sign in</string>
+    <!-- NEW: not in the approved mockup. -->
+    <string name="saral_empty" translatable="false">स्टेशन अभी तैयार नहीं हैं</string>
+    <string name="saral_starting" translatable="false">%1$s शुरू हो रहा है…</string>
+    <string name="saral_paused" translatable="false">%1$s रुका है</string>
+    <string name="saral_problem_offline" translatable="false">इंटरनेट नहीं है</string>
+    <string name="saral_problem_could_not_play" translatable="false">गाना नहीं चल सका</string>
+    <string name="saral_voice_not_found" translatable="false">गाना नहीं मिला, फिर से बोलें</string>
+    <string name="saral_voice_not_heard" translatable="false">समझ नहीं आया, फिर से बोलें</string>
+    <string name="saral_voice_offline" translatable="false">इंटरनेट के बिना खोज नहीं हो सकती</string>
+    <string name="saral_voice_failed" translatable="false">बोलकर खोजना अभी नहीं हो सका</string>
+    <string name="saral_voice_unavailable" translatable="false">इस फ़ोन पर बोलकर खोजना उपलब्ध नहीं है</string>
 </resources>

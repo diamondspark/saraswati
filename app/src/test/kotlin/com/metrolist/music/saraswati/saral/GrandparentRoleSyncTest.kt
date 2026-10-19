@@ -151,4 +151,32 @@ class GrandparentRoleSyncTest {
 
         assertEquals(listOf(true), roles.writes.toList())
     }
+
+    @Test
+    fun `an answer with no role, or one this build does not know, is no answer`() {
+        for (known in listOf(true, false)) {
+            roles.grandparent = known
+            roles.writes.clear()
+            hub.meRole = DeviceRole.ADULT
+            hub.meRoleKnown = false
+
+            assertNull(refresh())
+
+            assertEquals("the cache must stay as it was", known, roles.grandparent)
+            assertTrue(roles.writes.isEmpty())
+        }
+    }
+
+    @Test
+    fun `a known role after an unknown one is taken`() {
+        roles.grandparent = true
+        hub.meRole = DeviceRole.ADULT
+        hub.meRoleKnown = false
+        refresh()
+
+        hub.meRoleKnown = true
+
+        assertEquals(DeviceRole.ADULT, refresh())
+        assertFalse(roles.grandparent)
+    }
 }

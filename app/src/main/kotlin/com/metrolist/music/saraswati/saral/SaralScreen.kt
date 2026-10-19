@@ -14,11 +14,11 @@
 // swallowed so it cannot finish the screen or reveal anything behind it.
 // SaralIsolationTest fails the build if any of that changes.
 //
-// The only other screen it ever starts is the phone's own speech recogniser
-// (RecognizerIntent), for "बोलकर खोजें".
+// It starts the phone's own speech recogniser (RecognizerIntent) for "बोलकर खोजें", and
+// hosts the existing sign-in (SaralSignIn) when the phone is signed out of YouTube.
+// Nothing else.
 package com.metrolist.music.saraswati.saral
 
-import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.speech.RecognizerIntent
@@ -48,6 +48,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
@@ -89,8 +90,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.metrolist.music.R
 import com.metrolist.music.playback.PlayerConnection
@@ -104,6 +103,8 @@ private val TextPrimary = Color(0xFFF3ECDF)
 private val TextDim = Color(0xFFB8AFA0)
 private val Accent = Color(0xFFF5B301)
 private val AccentInk = Color(0xFF1A1200)
+private val MessageTint = Color(0xFF3A1A12)
+private val MessageRing = Color(0xFFE85D4A)
 private val TileTints = listOf(Color(0xFF3A2410), Color(0xFF3A2F10), Color(0xFF2F2A10), Color(0xFF1E2A20))
 
 private val NotoSansDevanagari =
@@ -116,6 +117,7 @@ private val NotoSansDevanagari =
 private val TileLabelStyle = TextStyle(fontFamily = NotoSansDevanagari, fontWeight = FontWeight.Bold, fontSize = 20.sp, lineHeight = 26.sp)
 private val StatusStyle = TextStyle(fontFamily = NotoSansDevanagari, fontWeight = FontWeight.SemiBold, fontSize = 19.sp, lineHeight = 26.sp)
 private val IdentityStyle = TextStyle(fontFamily = NotoSansDevanagari, fontSize = 13.sp, letterSpacing = 0.04.em)
+private val MessageStyle = TextStyle(fontFamily = NotoSansDevanagari, fontWeight = FontWeight.Bold, fontSize = 24.sp, lineHeight = 32.sp)
 private val ListeningStyle = TextStyle(fontFamily = NotoSansDevanagari, fontWeight = FontWeight.Bold, fontSize = 26.sp, lineHeight = 34.sp)
 private val ListeningHintStyle = TextStyle(fontFamily = NotoSansDevanagari, fontSize = 16.sp, lineHeight = 22.sp)
 
@@ -136,12 +138,12 @@ fun SaralScreen(
     val tiles by viewModel.tiles.collectAsStateWithLifecycle()
     val status by viewModel.status.collectAsStateWithLifecycle()
     val isPlaying by viewModel.isPlaying.collectAsStateWithLifecycle()
-    val voiceActive by viewModel.voiceActive.collectAsStateWithLifecycle()
+    val voice by viewModel.voice.collectAsStateWithLifecycle()
+    val signedIn by viewModel.signedIn.collectAsStateWithLifecycle()
+    val signingIn by viewModel.signingIn.collectAsStateWithLifecycle()
 
     // Back does nothing here. It must not finish the screen or surface anything behind it.
     BackHandler {}
-
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refresh() }
 
     val playback = remember(playerConnection) { playerConnection?.let(::PlayerConnectionPlayback) }
     DisposableEffect(playback) {
@@ -151,31 +153,28 @@ fun SaralScreen(
 
     val speech =
         rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            if (result.resultCode == Activity.RESULT_OK) {
-                viewModel.onVoiceResult(result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS))
-            } else {
-                viewModel.onVoiceCancelled()
-            }
+            val guesses = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            viewModel.onVoiceOutcome(VoiceOutcome.fromActivityResult(result.resultCode, guesses))
         }
     val songPrompt = stringResource(R.string.saral_say_song)
     val onMic = {
-        viewModel.onMicTapped()
-        try {
-            speech.launch(voiceIntent(songPrompt))
-        } catch (e: ActivityNotFoundException) {
-            viewModel.onVoiceUnavailable()
+        if (viewModel.onMicTapped()) {
+            try {
+                speech.launch(voiceIntent(songPrompt))
+            } catch (e: ActivityNotFoundException) {
+                viewModel.onVoiceUnavailable()
+            }
         }
     }
 
-    val playingId = (status as? SaralStatus.StationPlaying)?.tile?.station?.id
-    val statusText =
-        when (val current = status) {
-            SaralStatus.Idle -> stringResource(R.string.saral_idle)
-            is SaralStatus.StationPlaying -> stringResource(R.string.saral_now_playing, tileLabel(current.tile))
-            is SaralStatus.SongPlaying -> stringResource(R.string.saral_now_playing, current.title)
-            SaralStatus.VoiceNotFound -> stringResource(R.string.saral_voice_not_found)
-            SaralStatus.VoiceUnavailable -> stringResource(R.string.saral_voice_unavailable)
-        }
+    if (signingIn) {
+        SaralSignIn(onClose = viewModel::onSignInClosed)
+        return
+    }
+
+    val ringedId = status.stationId()
+    val statusText = statusText(status)
+    val isMessage = status is SaralStatus.Problem || status is SaralStatus.Voice
 
     Box(
         Modifier
@@ -185,30 +184,69 @@ fun SaralScreen(
         BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars)) {
             if (maxWidth > maxHeight) {
                 Row(Modifier.fillMaxSize()) {
-                    Tiles(tiles, playingId, viewModel::onTile, Modifier.weight(1f).fillMaxHeight().padding(16.dp))
+                    Column(Modifier.weight(1f).fillMaxHeight().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        if (!signedIn) SignInTile(viewModel::onSignInTapped)
+                        Tiles(tiles, ringedId, viewModel::onTile, Modifier.weight(1f).fillMaxWidth())
+                    }
                     Column(
                         Modifier.width(300.dp).fillMaxHeight().padding(end = 16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.SpaceEvenly,
                     ) {
                         TopRow(onMic)
-                        StatusLine(statusText)
+                        StatusLine(statusText, isMessage)
                         Transport(isPlaying, viewModel::onPrevious, viewModel::onPlayPause, viewModel::onNext)
                     }
                 }
             } else {
                 Column(Modifier.fillMaxSize()) {
                     TopRow(onMic, Modifier.padding(top = 8.dp))
-                    Tiles(tiles, playingId, viewModel::onTile, Modifier.weight(1f).fillMaxWidth().padding(16.dp))
-                    StatusLine(statusText, Modifier.padding(start = 24.dp, end = 24.dp, top = 4.dp, bottom = 10.dp))
+                    Column(Modifier.weight(1f).fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        if (!signedIn) SignInTile(viewModel::onSignInTapped)
+                        Tiles(tiles, ringedId, viewModel::onTile, Modifier.weight(1f).fillMaxWidth())
+                    }
+                    StatusLine(statusText, isMessage, Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 10.dp))
                     Transport(isPlaying, viewModel::onPrevious, viewModel::onPlayPause, viewModel::onNext, Modifier.padding(bottom = 30.dp))
                 }
             }
         }
 
-        if (voiceActive) ListeningOverlay(onClose = viewModel::onVoiceCancelled)
+        if (voice != VoicePhase.IDLE) ListeningOverlay(voice, onClose = viewModel::onOverlayDismissed)
     }
 }
+
+@Composable
+private fun statusText(status: SaralStatus): String =
+    when (status) {
+        SaralStatus.Idle -> stringResource(R.string.saral_idle)
+        is SaralStatus.Starting -> stringResource(R.string.saral_starting, subjectLabel(status.subject))
+        is SaralStatus.Playing -> stringResource(R.string.saral_now_playing, subjectLabel(status.subject))
+        is SaralStatus.Paused -> stringResource(R.string.saral_paused, subjectLabel(status.subject))
+        is SaralStatus.Problem ->
+            stringResource(
+                when (status.kind) {
+                    PlaybackProblem.OFFLINE -> R.string.saral_problem_offline
+                    PlaybackProblem.COULD_NOT_PLAY -> R.string.saral_problem_could_not_play
+                },
+            )
+        is SaralStatus.Voice ->
+            stringResource(
+                when (status.notice) {
+                    VoiceNotice.NOT_FOUND -> R.string.saral_voice_not_found
+                    VoiceNotice.NOT_HEARD -> R.string.saral_voice_not_heard
+                    VoiceNotice.OFFLINE -> R.string.saral_voice_offline
+                    VoiceNotice.FAILED -> R.string.saral_voice_failed
+                    VoiceNotice.UNAVAILABLE -> R.string.saral_voice_unavailable
+                },
+            )
+    }
+
+@Composable
+private fun subjectLabel(subject: SaralSubject): String =
+    when (subject) {
+        is SaralSubject.Station -> tileLabel(subject.tile)
+        is SaralSubject.Track -> subject.title
+    }
 
 private fun voiceIntent(prompt: String): Intent =
     Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
@@ -312,18 +350,65 @@ private fun StationTile(
     }
 }
 
+/** What is playing, quietly; or, when something went wrong, one large message in a fixed style. */
 @Composable
 private fun StatusLine(
     text: String,
+    isMessage: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    Text(
-        text,
-        style = StatusStyle,
-        color = TextDim,
-        textAlign = TextAlign.Center,
-        modifier = modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
-    )
+    if (!isMessage) {
+        Text(
+            text,
+            style = StatusStyle,
+            color = TextDim,
+            textAlign = TextAlign.Center,
+            modifier = modifier.fillMaxWidth().padding(horizontal = 8.dp).semantics { liveRegion = LiveRegionMode.Polite },
+        )
+        return
+    }
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(MessageTint)
+            .border(2.dp, MessageRing, RoundedCornerShape(20.dp))
+            .padding(horizontal = 16.dp, vertical = 14.dp)
+            .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Assertive },
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(painter = painterResource(R.drawable.error), contentDescription = null, tint = MessageRing, modifier = Modifier.size(32.dp))
+        Text(text, style = MessageStyle, color = TextPrimary, modifier = Modifier.weight(1f))
+    }
+}
+
+/** The one sign-in tile, shown while the phone is signed out of YouTube. */
+@Composable
+private fun SignInTile(onClick: () -> Unit) {
+    val shape = RoundedCornerShape(24.dp)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 88.dp)
+            .clip(shape)
+            .background(Surface2)
+            .border(3.dp, Accent, shape)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(painter = painterResource(R.drawable.account), contentDescription = null, tint = Accent, modifier = Modifier.size(36.dp))
+        Text(
+            stringResource(R.string.saral_sign_in),
+            style = TileLabelStyle,
+            color = TextPrimary,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+    }
 }
 
 @Composable
@@ -393,14 +478,23 @@ private fun RoundButton(
     }
 }
 
+/**
+ * While the system speech screen is opening or open ([VoicePhase.LISTENING]) a tap here does
+ * nothing: dismissing now would throw away what is being said. While the song is searched for
+ * ([VoicePhase.SEARCHING]) a tap cancels the search.
+ */
 @Composable
-private fun ListeningOverlay(onClose: () -> Unit) {
+private fun ListeningOverlay(
+    phase: VoicePhase,
+    onClose: () -> Unit,
+) {
     val pulse by rememberInfiniteTransition(label = "listening").animateFloat(
         initialValue = 1f,
         targetValue = 0.45f,
         animationSpec = infiniteRepeatable(tween(700, easing = FastOutSlowInEasing), RepeatMode.Reverse),
         label = "pulse",
     )
+    val dismissable = phase == VoicePhase.SEARCHING
     Column(
         Modifier
             .fillMaxSize()
@@ -408,9 +502,9 @@ private fun ListeningOverlay(onClose: () -> Unit) {
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
-                onClickLabel = stringResource(R.string.saral_close),
-                role = Role.Button,
-                onClick = onClose,
+                onClickLabel = if (dismissable) stringResource(R.string.saral_close) else null,
+                role = if (dismissable) Role.Button else null,
+                onClick = { if (dismissable) onClose() },
             ),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(18.dp, Alignment.CenterVertically),
@@ -421,7 +515,11 @@ private fun ListeningOverlay(onClose: () -> Unit) {
             tint = Accent,
             modifier = Modifier.size(64.dp).graphicsLayer { alpha = pulse },
         )
-        Text(stringResource(R.string.saral_listening), style = ListeningStyle, color = TextPrimary, textAlign = TextAlign.Center)
-        Text(stringResource(R.string.saral_say_song), style = ListeningHintStyle, color = TextDim, textAlign = TextAlign.Center)
+        if (phase == VoicePhase.LISTENING) {
+            Text(stringResource(R.string.saral_listening), style = ListeningStyle, color = TextPrimary, textAlign = TextAlign.Center)
+            Text(stringResource(R.string.saral_say_song), style = ListeningHintStyle, color = TextDim, textAlign = TextAlign.Center)
+        } else {
+            Text(stringResource(R.string.saral_searching), style = ListeningStyle, color = TextPrimary, textAlign = TextAlign.Center)
+        }
     }
 }

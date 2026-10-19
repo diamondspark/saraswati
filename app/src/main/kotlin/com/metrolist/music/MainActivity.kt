@@ -141,6 +141,7 @@ import com.metrolist.music.saraswati.SaraswatiFeatures
 import com.metrolist.music.saraswati.family.FamilyRoutes
 import com.metrolist.music.saraswati.family.PairingInbox
 import com.metrolist.music.saraswati.family.StationsCache
+import com.metrolist.music.saraswati.family.StationsRefresher
 import com.metrolist.music.saraswati.saral.GrandparentRoleSync
 import com.metrolist.music.saraswati.saral.SaralApp
 import com.metrolist.music.saraswati.saral.SaralShell
@@ -287,6 +288,10 @@ class MainActivity : FragmentActivity() {
     // already there when it appears.
     @Inject
     lateinit var stationsCache: StationsCache
+
+    // SARASWATI: Task 9 fix round 1 — keeps that cache fresh on every launch and resume.
+    @Inject
+    lateinit var stationsRefresher: StationsRefresher
 
     private lateinit var navController: NavHostController
     private var pendingIntent: Intent? = null
@@ -480,9 +485,15 @@ class MainActivity : FragmentActivity() {
                 }
         }
         // On launch and on every return to the app, ask the hub what this phone
-        // is. A failed or missing answer changes nothing (GrandparentRoleSync).
+        // is (a failed or missing answer changes nothing: GrandparentRoleSync)
+        // and for the current stations. Separate jobs, so neither can hold up
+        // the other or the first frame.
         lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.RESUMED) { grandparentRoleSync.refresh() }
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                launch { grandparentRoleSync.refresh() }
+                // Every paired phone, not only Saral's: it is what fills the car's Stations tab.
+                launch { stationsRefresher.refresh() }
+            }
         }
 
         // Defer migration and version tracking to avoid blocking first frame

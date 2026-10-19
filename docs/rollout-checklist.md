@@ -143,8 +143,9 @@ earlier in the call and it lapses, make another.
       your approval.
 - [ ] You: the phone appears in Manage Family as pending. Check the name matches
       the phone you are on the call with. Approve it.
-- [ ] They: do nothing more. The phone collects its own sign-in automatically; it
-      checks about every 5 seconds.
+- [ ] They: keep the Join screen open and do nothing more. The phone collects
+      its own sign-in automatically; it checks every 6 seconds, and only while
+      that screen is open.
 
 If the link has expired, or the phone says it was already used, create a new
 one. If the phone just keeps waiting, see "If something goes wrong".
@@ -235,10 +236,10 @@ shows name, version, last seen and local time, not authorization slots.
 
 - **The phone says the link is invalid or used:** it expired or was already
   claimed. Create a new pairing link.
-- **The phone keeps waiting after you approved it:** give it a few seconds
-  (it checks about every 5), then check that its row in Manage Family shows
-  approved and not revoked. If it still doesn't move, create a fresh pairing
-  link and start section 5 again.
+- **The phone keeps waiting after you approved it:** make sure the Join screen
+  is still open, and give it a few seconds (it checks every 6), then check that
+  its row in Manage Family shows approved and not revoked. If it still doesn't
+  move, create a fresh pairing link and start section 5 again.
 - **A phone behaves badly or is lost:** revoke it in Manage Family.
 - **Saraswati Updates won't install on a Samsung:** Auto Blocker is probably
   still on. Turn it off, install, turn it back on.
