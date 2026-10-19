@@ -1,12 +1,20 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "./index";
 import type { HubContext, RouteHandler } from "./hubContext";
-import { isNonEmptyString, json, readJsonBody, readStrictJsonObject } from "./http";
+import {
+  isNonEmptyString,
+  json,
+  parseJsonObject,
+  readBoundedBody,
+  readJsonBody,
+  readStrictJsonObject,
+} from "./http";
 import {
   addFamilyPlaylist,
   deleteFamilyPlaylist,
   listFamilyPlaylists,
 } from "./routes/familyPlaylists";
+import { tooLarge } from "./routes/common";
 import { listParivaarPlaylists, putParivaarPlaylist } from "./routes/parivaar";
 import { CLOSE_DEVICE_REVOKED, CLOSE_SANGAT_DISABLED } from "./sangat/limits";
 import { Sangat, type LiveRoom } from "./sangat/Sangat";
@@ -15,6 +23,10 @@ import { createSangatTables } from "./sangat/schema";
 
 const PAIRING_TOKEN_TTL_MS = 15 * 60 * 1000;
 const MAX_STATIONS = 6;
+// PUT /sangat/car: a room code and a boolean. The code is checked at 32 characters before it
+// is normalized (which cuts it to 10 bytes), so a huge string is never cleaned.
+const MAX_CAR_BODY_BYTES = 1024;
+const MAX_CAR_ROOM_CODE_LENGTH = 32;
 
 // /health: at most one accepted report per device per 5 minutes.
 const HEALTH_WINDOW_SECONDS = 5 * 60;
@@ -258,6 +270,10 @@ export class FamilyHub extends DurableObject<Env> {
       rateLimit: (key, windowSeconds, max) =>
         this.rateLimit(key, windowSeconds, max),
       featureEnabled: (key) => this.readKillSwitches()[key],
+      isApproved: (deviceId) =>
+        ctx.storage.sql
+          .exec("SELECT 1 FROM roster WHERE deviceId = ? AND status = 'approved'", deviceId)
+          .toArray().length > 0,
       now: () => Date.now(),
     };
 
@@ -1012,9 +1028,17 @@ export class FamilyHub extends DurableObject<Env> {
       return json({ error: "feature disabled" }, 503);
     }
 
-    const body = await readStrictJsonObject(request);
+    const bytes = await readBoundedBody(request, MAX_CAR_BODY_BYTES);
+    if (bytes === null) {
+      return tooLarge();
+    }
+    const body = parseJsonObject(bytes);
+    const rawRoomCode = body?.roomCode;
+    if (typeof rawRoomCode === "string" && rawRoomCode.length > MAX_CAR_ROOM_CODE_LENGTH) {
+      return json({ error: `roomCode must be at most ${MAX_CAR_ROOM_CODE_LENGTH} characters` }, 400);
+    }
     // The code is read as join_room reads it, so what opens a room opens its car switch.
-    const roomCode = typeof body?.roomCode === "string" ? normalizeRoomCode(body.roomCode) : "";
+    const roomCode = typeof rawRoomCode === "string" ? normalizeRoomCode(rawRoomCode) : "";
     const carMode = body?.carMode;
     if (roomCode === "" || typeof carMode !== "boolean") {
       return json({ error: "roomCode and a boolean carMode are required" }, 400);
@@ -1036,7 +1060,8 @@ export class FamilyHub extends DurableObject<Env> {
    * Runs one of the Parivaar / family-playlist handlers. "device" routes are closed to the
    * admin bearer, so an admin never reaches them or spends the shared admin budget on them;
    * "any" routes take a device or the admin, and the admin's call is counted as everywhere
-   * else. The handler does the rest: kill switch, body, per-device write limit.
+   * else. The handler does the rest: kill switch, body (size, then JSON), and for a write the
+   * roster re-check after the body is read, then the per-device write limit.
    */
   private async runRoute(
     request: Request,

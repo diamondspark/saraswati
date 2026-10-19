@@ -132,9 +132,11 @@ describe("a socket the server has closed", () => {
     await client.next("pong");
 
     const queued = await slowFrame("create_room", toBinary(CreateRoomPayloadSchema, create(CreateRoomPayloadSchema, { username: "Asha" })), 1000);
-    client.sendRaw(await slowPing());
+    const ping = await slowPing();
+    client.sendRaw(ping);
     client.sendRaw(queued);
-    await received(hub, queued.byteLength);
+    // Both frames count: the ping is being decoded while the queued one waits behind it.
+    await received(hub, ping.byteLength + queued.byteLength);
     const sangat = await liveSangat(hub);
     await runInDurableObject(hub, () => sangat.closeDevice(device.deviceId, 4001, "revoked"));
     expect(await client.closed).toEqual({ code: 4001, reason: "revoked" });
@@ -157,9 +159,11 @@ describe("a socket the server has closed", () => {
       toBinary(JoinRoomPayloadSchema, create(JoinRoomPayloadSchema, { roomCode: host.code, username: "Zed" })),
       1000,
     );
-    client.sendRaw(await slowPing());
+    const ping = await slowPing();
+    client.sendRaw(ping);
     client.sendRaw(queued);
-    await received(hub, queued.byteLength);
+    // Both frames count: the ping is being decoded while the queued one waits behind it.
+    await received(hub, ping.byteLength + queued.byteLength);
     const sangat = await liveSangat(hub);
     await runInDurableObject(hub, () => sangat.closeDevice(intruder.deviceId, 4001, "revoked"));
     await drained(hub);

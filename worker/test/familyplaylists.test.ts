@@ -1,10 +1,11 @@
 // GET/POST /family-playlists and DELETE /family-playlists/{id}: the playlists the whole family
-// shares. Check order: auth (401), kill switch (503), body (400), rate limit (429), then the
-// rules that read stored rows (409, 404, 403).
+// shares. Check order: auth (401), kill switch (503), body size (413), body (400), rate limit
+// (429), then the rules that read stored rows (409, 404, 403). A device revoked while its body
+// is still arriving is 401.
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { addFamilyPlaylist } from "../src/routes/familyPlaylists";
-import { hubStub, seedDevice, sql, type Device } from "./sangat.helpers";
+import { hubStub, seedDevice, sleep, sql, type Device } from "./sangat.helpers";
 import {
   ageRateWindow,
   call,
@@ -15,6 +16,7 @@ import {
   resetRegistries,
   revoke,
   setSwitch,
+  streamedCall,
   stubContext,
   TEST_ADMIN_KEY,
   UUID,
@@ -161,6 +163,14 @@ describe("POST /family-playlists", () => {
     ["an empty title", { playlistId: pid(1), title: "" }],
     ["a blank title", { playlistId: pid(1), title: "  \n\t " }],
     ["a 151-char title", { playlistId: pid(1), title: "t".repeat(151) }],
+    ["a title with a NUL", { playlistId: pid(1), title: "Bha\u0000jans" }],
+    ["a title that starts with a NUL", { playlistId: pid(1), title: "\u0000Bhajans" }],
+    ["a title with a newline", { playlistId: pid(1), title: "Morning\nBhajans" }],
+    ["a title with a tab", { playlistId: pid(1), title: "Morning\tBhajans" }],
+    ["a title with U+2028", { playlistId: pid(1), title: "Morning\u2028Bhajans" }],
+    ["a title with U+2029", { playlistId: pid(1), title: "Morning\u2029Bhajans" }],
+    ["a title with DEL", { playlistId: pid(1), title: "Morning\u007fBhajans" }],
+    ["a title with a C1 control", { playlistId: pid(1), title: "Morning\u0085Bhajans" }],
     ["a body that is a JSON array", [pid(1)]],
     ["a body that is not JSON", "{not json"],
     ["a body that is null", "null"],
@@ -273,6 +283,139 @@ describe("POST /family-playlists", () => {
       expect(ok.status).toBe(201);
       expect(await ok.json()).toMatchObject({ addedAt: "2026-10-19T08:30:15.123Z" });
       expect(db.exec("SELECT addedAt FROM family_playlists").one().addedAt).toBe(at);
+    });
+  });
+});
+
+describe("POST /family-playlists: text, size and revoke races", () => {
+  it("keeps inner spaces and non-Latin titles; only controls are refused", async () => {
+    const a = await seedDevice(hubStub(), "a");
+    const reply = await add(a.token, { playlistId: pid(1), title: "  Morning  Bhajans\u00a0Mix  " });
+    expect(reply.status).toBe(201);
+    expect(reply.body.title).toBe("Morning  Bhajans\u00a0Mix");
+    expect((await add(a.token, { playlistId: pid(2), title: "सुबह के भजन" })).status).toBe(201);
+  });
+
+  // A body with filler so the whole thing is exactly `bytes` long.
+  const bodyOfSize = (bytes: number) => {
+    const head = JSON.stringify({ playlistId: pid(1), title: "Bhajans", pad: "" });
+    return JSON.stringify({ playlistId: pid(1), title: "Bhajans", pad: "p".repeat(bytes - head.length) });
+  };
+
+  it("takes a body of 4096 bytes and refuses 4097 with 413 before parsing, spending nothing", async () => {
+    const hub = hubStub();
+    const a = await seedDevice(hub, "a");
+    expect(bodyOfSize(4096)).toHaveLength(4096);
+
+    const refused = await add(a.token, bodyOfSize(4097));
+    expect(refused.status).toBe(413);
+    expect(refused.body).toEqual({ error: "too large" });
+    expect(await rows()).toEqual([]);
+    expect(await rateKeys(hub)).toEqual([]);
+
+    expect((await add(a.token, bodyOfSize(4096))).status).toBe(201);
+  });
+
+  it("counts bytes, not characters", async () => {
+    const a = await seedDevice(hubStub(), "a");
+    // 1400 three-byte characters: 1400 characters but 4200 bytes.
+    const reply = await add(a.token, JSON.stringify({ playlistId: pid(1), title: "Bhajans", pad: "म".repeat(1400) }));
+    expect(reply.status).toBe(413);
+  });
+
+  it("is 413 for a streamed body past the cap even though it never declared a length", async () => {
+    const hub = hubStub();
+    const a = await seedDevice(hub, "a");
+    const streamed = streamedCall(hub, "POST", "/family-playlists", a.token);
+    streamed.send('{"playlistId":"' + pid(1) + '","title":"Bhajans","pad":"');
+    for (let i = 0; i < 6; i++) streamed.send("p".repeat(1000));
+    streamed.send('"}');
+    streamed.end();
+
+    const reply = await streamed.reply;
+    expect(reply.status).toBe(413);
+    expect(reply.body).toEqual({ error: "too large" });
+    expect(await rows()).toEqual([]);
+    expect(await rateKeys(hub)).toEqual([]);
+  });
+
+  it("checks size before JSON, after auth and the switch", async () => {
+    const hub = hubStub();
+    const a = await seedDevice(hub, "a");
+    const notJson = "x".repeat(5000);
+
+    expect((await add(a.token, notJson)).status).toBe(413);
+    expect((await add(a.token, "x".repeat(100))).status).toBe(400);
+    expect((await add("ab".repeat(32), notJson)).status).toBe(401);
+    expect((await add(TEST_ADMIN_KEY, notJson)).status).toBe(401);
+    await setSwitch(hub, "family_playlists", false);
+    expect((await add(a.token, notJson)).status).toBe(503);
+  });
+
+  it("a device revoked while its body is still arriving gets 401, and nothing is written or charged", async () => {
+    const hub = hubStub();
+    const a = await seedDevice(hub, "a");
+    const b = await seedDevice(hub, "b");
+
+    const streamed = streamedCall(hub, "POST", "/family-playlists", a.token);
+    // Let the hub authenticate the request and start waiting for the body.
+    await sleep(100);
+    expect((await revoke(hub, a.deviceId)).status).toBe(200);
+    streamed.send(JSON.stringify({ playlistId: pid(1), title: "Bhajans" }));
+    streamed.end();
+
+    const reply = await streamed.reply;
+    expect(reply.status).toBe(401);
+    expect(reply.body).toEqual({ error: "unauthorized" });
+    expect(await rows()).toEqual([]);
+    expect(await rateKeys(hub)).toEqual([]);
+    expect((await add(b.token, { playlistId: pid(1), title: "Bhajans" })).status).toBe(201);
+  });
+
+  it("re-checks the roster right after the body is read: revoked between auth and write is 401", async () => {
+    const hub = hubStub();
+    const a = await seedDevice(hub, "a");
+    const auth = { role: "device", deviceId: a.deviceId } as const;
+    const payload = new TextEncoder().encode(JSON.stringify({ playlistId: pid(1), title: "Bhajans" }));
+
+    await inHub(hub, async (db) => {
+      // The revoke lands while the body is being read, as it can between two events.
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          db.exec("UPDATE roster SET status = 'revoked', sessionToken = NULL WHERE deviceId = ?", a.deviceId);
+          controller.enqueue(payload);
+          controller.close();
+        },
+      });
+      const ctx = stubContext(db);
+      const reply = await addFamilyPlaylist(
+        ctx,
+        new Request("https://hub.example/family-playlists", { method: "POST", body, duplex: "half" } as RequestInit),
+        auth,
+      );
+      expect(reply.status).toBe(401);
+      expect(await reply.json()).toEqual({ error: "unauthorized" });
+      expect(ctx.rateCalls).toEqual([]);
+      expect(db.exec("SELECT COUNT(*) AS n FROM family_playlists").one().n).toBe(0);
+    });
+  });
+
+  it("asks the hub whether the device is still approved, with its own deviceId", async () => {
+    const hub = hubStub();
+    const a = await seedDevice(hub, "a");
+    await inHub(hub, async (db) => {
+      const asked: string[] = [];
+      const ctx = { ...stubContext(db), isApproved: (id: string) => (asked.push(id), false) };
+      const reply = await addFamilyPlaylist(
+        ctx,
+        new Request("https://hub.example/family-playlists", {
+          method: "POST",
+          body: JSON.stringify({ playlistId: pid(1), title: "Bhajans" }),
+        }),
+        { role: "device", deviceId: a.deviceId },
+      );
+      expect(reply.status).toBe(401);
+      expect(asked).toEqual([a.deviceId]);
     });
   });
 });

@@ -1,9 +1,10 @@
 // Family playlists: up to 20 YouTube playlists the whole family shares. Any device may add
 // one; the device that added it, or the owner, may remove it. Checks run in this order:
-// auth (401), kill switch (503), body (400), write limit (429), then the rules that read
-// the stored rows (409, 404, 403).
+// auth (401), kill switch (503), body size (413), body (400), write limit (429), then the
+// rules that read the stored rows (409, 404, 403). A device revoked while its body was
+// arriving is 401, as at the door.
 
-import { json, readStrictJsonObject } from "../http";
+import { json } from "../http";
 import type { AuthResult, HubContext, RouteHandler } from "../hubContext";
 import {
   cleanText,
@@ -11,6 +12,7 @@ import {
   isoTime,
   isPlaylistId,
   PLAYLIST_ID_ERROR,
+  readWriteBody,
   tooManyRequests,
   unauthorized,
 } from "./common";
@@ -63,9 +65,12 @@ export const addFamilyPlaylist: RouteHandler = async (ctx, request, auth) => {
     return featureDisabled();
   }
 
-  const body = await readStrictJsonObject(request);
-  const playlistId = body?.playlistId;
-  const title = cleanText(body?.title, MAX_TITLE_LENGTH);
+  const body = await readWriteBody(ctx, request, auth.deviceId);
+  if (body instanceof Response) {
+    return body;
+  }
+  const playlistId = body.playlistId;
+  const title = cleanText(body.title, MAX_TITLE_LENGTH);
   if (!isPlaylistId(playlistId)) {
     return json({ error: PLAYLIST_ID_ERROR }, 400);
   }
@@ -77,8 +82,8 @@ export const addFamilyPlaylist: RouteHandler = async (ctx, request, auth) => {
     return tooManyRequests();
   }
 
-  // Nothing is awaited from here to the insert, so the checks and the write cannot interleave
-  // with another request.
+  // Nothing is awaited from the body read to the insert, so the revoke check, the rules and the
+  // write cannot interleave with another request.
   const duplicate = ctx.sql
     .exec("SELECT 1 FROM family_playlists WHERE playlistId = ?", playlistId)
     .toArray();

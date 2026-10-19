@@ -1,8 +1,9 @@
 // Parivaar Mix: each phone publishes the id of its own playlist and the name to show for
 // it, and every phone reads the whole family's list. Checks run in this order: auth (401),
-// kill switch (503), body (400), write limit (429).
+// kill switch (503), body size (413), body (400), write limit (429). A device revoked while
+// its body was arriving is 401, as at the door.
 
-import { json, readStrictJsonObject } from "../http";
+import { json } from "../http";
 import type { HubContext, RouteHandler } from "../hubContext";
 import {
   cleanText,
@@ -10,6 +11,7 @@ import {
   isoTime,
   isPlaylistId,
   PLAYLIST_ID_ERROR,
+  readWriteBody,
   tooManyRequests,
   unauthorized,
 } from "./common";
@@ -46,9 +48,13 @@ export const putParivaarPlaylist: RouteHandler = async (ctx, request, auth) => {
     return featureDisabled();
   }
 
-  const body = await readStrictJsonObject(request);
-  const playlistId = body?.playlistId;
-  const memberName = cleanText(body?.memberName, MAX_MEMBER_NAME_LENGTH);
+  // Nothing is awaited after this, so the revoke check in it holds up to the write.
+  const body = await readWriteBody(ctx, request, auth.deviceId);
+  if (body instanceof Response) {
+    return body;
+  }
+  const playlistId = body.playlistId;
+  const memberName = cleanText(body.memberName, MAX_MEMBER_NAME_LENGTH);
   if (!isPlaylistId(playlistId)) {
     return json({ error: PLAYLIST_ID_ERROR }, 400);
   }

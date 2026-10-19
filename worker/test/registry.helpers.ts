@@ -13,6 +13,17 @@ export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 
 export type Reply = { status: number; body: any; contentType: string | null };
 
+async function toReply(response: Response): Promise<Reply> {
+  const text = await response.text();
+  let parsed: unknown = text;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    // not JSON; the text stays
+  }
+  return { status: response.status, body: parsed, contentType: response.headers.get("content-type") };
+}
+
 export async function call(
   hub: Hub,
   method: string,
@@ -26,15 +37,32 @@ export async function call(
     headers["content-type"] = "application/json";
     body = typeof opts.body === "string" ? opts.body : JSON.stringify(opts.body);
   }
-  const response = await hub.fetch(`${HUB_ORIGIN}${path}`, { method, headers, body });
-  const text = await response.text();
-  let parsed: unknown = text;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    // not JSON; the text stays
-  }
-  return { status: response.status, body: parsed, contentType: response.headers.get("content-type") };
+  return toReply(await hub.fetch(`${HUB_ORIGIN}${path}`, { method, headers, body }));
+}
+
+/**
+ * A request whose body is streamed: nothing is sent until `send` is called, which can be in
+ * several chunks (so the request has no Content-Length), and `end` finishes it. The hub is left
+ * waiting on the body in between, which is where a revoke can land.
+ */
+export function streamedCall(hub: Hub, method: string, path: string, token: string | null) {
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  const stream = new ReadableStream<Uint8Array>({
+    start(c) {
+      controller = c;
+    },
+  });
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const reply = hub
+    .fetch(`${HUB_ORIGIN}${path}`, { method, headers, body: stream, duplex: "half" } as RequestInit)
+    .then(toReply);
+  const encoder = new TextEncoder();
+  return {
+    reply,
+    send: (chunk: string) => controller.enqueue(encoder.encode(chunk)),
+    end: () => controller.close(),
+  };
 }
 
 export const setSwitch = (hub: Hub, key: string, enabled: boolean) =>
@@ -85,10 +113,11 @@ export const inHub = <T>(hub: Hub, fn: (sqlStorage: SqlStorage) => Promise<T> | 
 /**
  * A HubContext over the hub's real storage whose clock, switches and limiter the test
  * controls. `rateCalls` records every rateLimit(key, windowSeconds, max) the handler made.
+ * `isApproved` reads the roster, as the hub does, unless `approved` fixes the answer.
  */
 export function stubContext(
   db: SqlStorage,
-  opts: { now?: number; allowed?: boolean; enabled?: boolean } = {},
+  opts: { now?: number; allowed?: boolean; enabled?: boolean; approved?: boolean } = {},
 ): HubContext & { rateCalls: [string, number, number][] } {
   const rateCalls: [string, number, number][] = [];
   return {
@@ -98,6 +127,9 @@ export function stubContext(
       return opts.allowed ?? true;
     },
     featureEnabled: () => opts.enabled ?? true,
+    isApproved: (deviceId) =>
+      opts.approved ??
+      db.exec("SELECT 1 FROM roster WHERE deviceId = ? AND status = 'approved'", deviceId).toArray().length > 0,
     now: () => opts.now ?? Date.now(),
     rateCalls,
   };

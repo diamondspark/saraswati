@@ -35,6 +35,7 @@ Phase 4 consumes these Phase 3 deliverables. Task 8 greps for each and adds only
 4. **Taste.** The spec says both "Sangat … plays don't count" and, in the car, "only songs you add count toward your own taste". This plan uses one rule for every Sangat: a play counts for you only if you added it. Parivaar Mix plays never count. The existing-design toggle "Count Sangat and Parivaar Mix plays" makes all of them count.
 5. **Design gate vs. building UI before checkpoints.** The spec's gate ("mockups approved in the browser before UI code") wins. Compose UI (Tasks 19–21) waits for Task 1's approval. The car browse tree is template-rendered by Android Auto, not Compose, so it is not gated (as in Phase 3 Task 11).
 6. **Spotify import has no kill-switch.** It is local-only and one-shot, and the hub's four keys are fixed. No fifth key is added.
+7. **Parivaar list order.** `GET /parivaar/playlists` orders by SQLite's binary collation (`memberName`, then `deviceId`), so "Zed" sorts before "asha". The app sorts for display.
 
 ## Global Constraints
 
@@ -70,6 +71,7 @@ Phase 4 consumes these Phase 3 deliverables. Task 8 greps for each and adds only
     - gzip only when the payload is over 100 B and gets smaller
   - Error `code` and `message` strings are copied verbatim (`not_host`, `room_not_found`, `unknown_message_type`, …).
   - Deliberate divergences: the auth header (Spec note 1); no UA policy (no `/uas`, no advert queue titles, every authenticated device may host); car mode set over HTTP; close codes `4001` (device revoked) and `4003` (sangat disabled).
+    - a leaver's pending suggestions are deleted when they leave or are removed (metroserver may keep them)
 - **New hub routes** (JSON; auth as in Phase 3: "device" = approved session token, "admin" = `ADMIN_KEY`):
 
   | Method | Path | Auth | Body → Response |
@@ -241,7 +243,7 @@ Phase 4 consumes these Phase 3 deliverables. Task 8 greps for each and adds only
   - `reconnect after 15 minutes answers session_expired` (age `disconnectedAt` in SQL, then `runDurableObjectAlarm`)
   - `a fresh Sangat instance over the same storage restores the room for a reconnecting host`
   - `an empty room is deleted 5 minutes after its last member leaves`
-  - `the alarm is always the earliest pending deadline`
+  - `the alarm is never later than the earliest pending deadline`
   - `when the host's 15-minute grace expires, the earliest-joined connected member becomes host and everyone gets host_changed` (metroserver picks from a Go map; the Worker makes it deterministic)
 
   Run: FAIL.
