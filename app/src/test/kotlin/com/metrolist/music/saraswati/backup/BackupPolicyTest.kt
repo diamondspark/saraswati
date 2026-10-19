@@ -26,6 +26,7 @@ import com.metrolist.music.constants.FamilyDeviceIdKey
 import com.metrolist.music.constants.FamilyHubSessionTokenKey
 import com.metrolist.music.constants.FamilyStationsSavedKey
 import com.metrolist.music.constants.FamilyFeaturesDisabledKey
+import com.metrolist.music.constants.FamilyPlaylistsCacheKey
 import com.metrolist.music.constants.FamilyStationsCacheKey
 import com.metrolist.music.constants.GrandparentRoleKey
 import com.metrolist.music.constants.IsFamilyOwnerKey
@@ -268,6 +269,7 @@ class BackupPolicyTest {
                 FamilyStationsCacheKey to "{}",
                 FamilyFeaturesDisabledKey to setOf("sangat"),
                 ParivaarMixKey to "{}",
+                FamilyPlaylistsCacheKey to "[]",
                 ParivaarPlaylistIdKey to "PLabcdefghij",
                 ParivaarTopSongsSyncedAtKey to 1L,
             ).toPreferences()
@@ -278,6 +280,7 @@ class BackupPolicyTest {
         assertNull(sanitized[FamilyStationsCacheKey])
         assertNull(sanitized[FamilyFeaturesDisabledKey])
         assertNull(sanitized[ParivaarMixKey])
+        assertNull(sanitized[FamilyPlaylistsCacheKey])
         assertNull(sanitized[ParivaarPlaylistIdKey])
         assertNull(sanitized[ParivaarTopSongsSyncedAtKey])
     }

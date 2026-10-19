@@ -30,6 +30,12 @@ import com.metrolist.music.saraswati.family.parivaar.ParivaarMixRefresher
 import com.metrolist.music.saraswati.family.parivaar.ParivaarMixStore
 import com.metrolist.music.saraswati.family.parivaar.TopSongsPlaylistSync
 import com.metrolist.music.saraswati.family.parivaar.YouTubePlaylistPort
+import com.metrolist.music.saraswati.family.playlists.CollaborationApi
+import com.metrolist.music.saraswati.family.playlists.FamilyPlaylistsCache
+import com.metrolist.music.saraswati.family.playlists.FamilyPlaylistsHub
+import com.metrolist.music.saraswati.family.playlists.FamilyPlaylistsRepository
+import com.metrolist.music.saraswati.family.playlists.HubClientFamilyPlaylistsHub
+import com.metrolist.music.saraswati.family.playlists.UnconfirmedCollaborationApi
 import com.metrolist.music.saraswati.family.sangat.SangatCarMode
 import com.metrolist.music.saraswati.family.sangat.SangatForeground
 import com.metrolist.music.saraswati.family.sangat.SangatLiveWatcher
@@ -161,6 +167,34 @@ object FamilyModule {
             MixDownloader.create(context, downloadUtil),
             enabled = { gate.isEnabled(FamilyFeature.PARIVAAR_MIX) },
         )
+
+    // SARASWATI: Phase 4 Task 14 — the family's shared playlists. Collaboration stays the "unavailable" stand-in
+    // until Task 23 captures YouTube's calls, so only a playlist's creator can add to it.
+    @Provides
+    @Singleton
+    fun provideFamilyPlaylistsHub(hub: HubClient): FamilyPlaylistsHub = HubClientFamilyPlaylistsHub(hub)
+
+    @Provides
+    @Singleton
+    fun provideCollaborationApi(): CollaborationApi = UnconfirmedCollaborationApi
+
+    @Provides
+    @Singleton
+    fun provideFamilyPlaylistsCache(
+        @ApplicationContext context: Context,
+    ): FamilyPlaylistsCache = FamilyPlaylistsCache(context.dataStore, CoroutineScope(SupervisorJob() + Dispatchers.IO))
+
+    @Provides
+    @Singleton
+    fun provideFamilyPlaylistsRepository(
+        hub: FamilyPlaylistsHub,
+        port: YouTubePlaylistPort,
+        identity: HubIdentity,
+        cache: FamilyPlaylistsCache,
+        collaboration: CollaborationApi,
+        gate: FamilyFeatureGate,
+    ): FamilyPlaylistsRepository =
+        FamilyPlaylistsRepository(hub, port, identity, cache, collaboration, enabled = { gate.isEnabled(FamilyFeature.FAMILY_PLAYLISTS) })
 
     @Provides
     @Singleton

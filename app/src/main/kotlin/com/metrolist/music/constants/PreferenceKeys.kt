@@ -597,6 +597,10 @@ val ParivaarTopSongsSyncedAtKey = longPreferencesKey("parivaarTopSongsSyncedAt")
 // SARASWATI: Phase 4 Task 13 — off by default: plays of a song someone else picked in a Sangat, and of the Parivaar
 // Mix, leave no listen history and no YouTube watch history (TastePolicy). On, they count like any other play.
 val CountSharedPlaysKey = booleanPreferencesKey("saraswatiCountSharedPlays")
+
+// SARASWATI: Phase 4 Task 14 — the family playlists the hub last listed, as JSON (FamilyPlaylistsCache). Hub data,
+// so a restored backup must not plant playlists (BackupPolicy).
+val FamilyPlaylistsCacheKey = stringPreferencesKey("familyPlaylistsCache")
 val AccountNameKey = stringPreferencesKey("accountName")
 val AccountEmailKey = stringPreferencesKey("accountEmail")
 val AccountChannelHandleKey = stringPreferencesKey("accountChannelHandle")

@@ -44,6 +44,7 @@ import com.metrolist.music.constants.DiscordNameKey
 import com.metrolist.music.constants.DiscordUsernameKey
 import com.metrolist.music.constants.FamilyDeviceIdKey
 import com.metrolist.music.constants.FamilyFeaturesDisabledKey
+import com.metrolist.music.constants.FamilyPlaylistsCacheKey
 import com.metrolist.music.constants.FamilyStationsCacheKey
 import com.metrolist.music.constants.FamilyStationsSavedKey
 import com.metrolist.music.constants.FamilyUnauthorizedAtKey
@@ -147,6 +148,8 @@ object BackupPolicy {
                 FamilyFeaturesDisabledKey,
                 // SARASWATI: Phase 4 Task 11 — the built Parivaar Mix is derived from the family's listening.
                 ParivaarMixKey,
+                // SARASWATI: Phase 4 Task 14 — the family playlists are the hub's list, cached.
+                FamilyPlaylistsCacheKey,
                 // SARASWATI: Phase 4 Task 12 — this phone's own top-songs playlist and the time of its last sync.
                 ParivaarPlaylistIdKey,
                 ParivaarTopSongsSyncedAtKey,
