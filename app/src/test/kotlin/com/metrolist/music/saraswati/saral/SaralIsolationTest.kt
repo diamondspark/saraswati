@@ -40,6 +40,28 @@ class SaralIsolationTest {
     private val loginScreen get() = source("src/main/kotlin/com/metrolist/music/ui/screens/LoginScreen.kt")
     private val loginUrlPolicy get() = source("src/main/kotlin/com/metrolist/music/saraswati/security/LoginUrlPolicy.kt")
 
+    private companion object {
+        // Ways code that draws UI can leave an app without a startActivity call in sight.
+        val WAYS_OUT_OF_SARAL = listOf("LocalUriHandler", "openUri", "LinkAnnotation", "PendingIntent")
+    }
+
+    private fun mainSources(): List<Pair<String, String>> {
+        val root = listOf(File("src/main/kotlin"), File("app/src/main/kotlin")).first { it.isDirectory }
+        return root.walkTopDown().filter { it.isFile && it.extension == "kt" }.map { it.name to it.readText() }.toList()
+    }
+
+    /** Fails unless every occurrence of [token] in [text] is inside the braces of the function starting at [signature]. */
+    private fun assertOnlyInside(
+        text: String,
+        signature: String,
+        token: String,
+    ) {
+        val total = Regex(Regex.escape(token)).findAll(text).count()
+        val inside = Regex(Regex.escape(token)).findAll(bodyOf(text, signature)).count()
+        assertTrue("$token must appear inside $signature", inside >= 1)
+        assertEquals("$token appears outside $signature", total, inside)
+    }
+
     private fun bodyOf(
         text: String,
         signature: String,
@@ -146,10 +168,65 @@ class SaralIsolationTest {
                 "ui.screens",
                 "startActivity(",
                 "Intent.ACTION_VIEW",
-            )
+            ) + WAYS_OUT_OF_SARAL
         for (word in forbidden) {
             assertTrue("SaralScreen.kt must not contain $word", !screen.contains(word))
         }
+    }
+
+    // SARASWATI: fix wave A (M1) — more ways a tile, a link in text or a notification could leave the app.
+    // None of them is used by the Saral screens today; the list fails the build if one is added.
+    @Test
+    fun `no Saral screen file can open a link or hand out an intent`() {
+        for ((name, text) in listOf("SaralScreen.kt" to saralScreen, "SaralSignIn.kt" to saralSignIn)) {
+            for (word in WAYS_OUT_OF_SARAL) {
+                assertTrue("$name must not contain $word", !text.contains(word))
+            }
+        }
+    }
+
+    @Test
+    fun `every Saral UI file is covered by the way-out scan`() {
+        val dir = listOf(File("src/main/kotlin/com/metrolist/music/saraswati/saral"), File("app/src/main/kotlin/com/metrolist/music/saraswati/saral")).first { it.isDirectory }
+        val composableFiles =
+            dir
+                .listFiles { f -> f.extension == "kt" }
+                .orEmpty()
+                .filter { it.readText().contains("@Composable") }
+                .map { it.name }
+                .toSet()
+
+        assertEquals("a new Saral file that draws UI must be added to the scan above", setOf("SaralScreen.kt", "SaralSignIn.kt"), composableFiles)
+    }
+
+    // SARASWATI: fix wave A (M1) — the new-intent listener of the full app is what follows links, widgets and
+    // shares. It lives inside MetrolistApp, which is not composed while Saral is on. Registered anywhere else,
+    // it would keep routing intents under Saral.
+    @Test
+    fun `the new-intent listener is registered only inside the full app's composable`() {
+        val everywhere = mainSources().filter { it.second.contains("addOnNewIntentListener") }
+
+        assertEquals("exactly one file registers it", listOf("MainActivity.kt"), everywhere.map { it.first })
+        assertOnlyInside(mainActivity, "private fun MetrolistApp", "addOnNewIntentListener")
+        assertEquals("and only once", 1, Regex("""addOnNewIntentListener""").findAll(mainActivity).count())
+    }
+
+    @Test
+    fun `the listener check fails when the listener is moved out of the full app composable`() {
+        val inOnCreate = "class A { override fun onCreate() { addOnNewIntentListener(l) }\n private fun MetrolistApp() { } }"
+        val inBoth = "class A { override fun onCreate() { addOnNewIntentListener(l) }\n private fun MetrolistApp() { addOnNewIntentListener(l) } }"
+        val inside = "class A { override fun onCreate() { }\n private fun MetrolistApp() { addOnNewIntentListener(l) } }"
+
+        assertTrue(runCatching { assertOnlyInside(inOnCreate, "private fun MetrolistApp", "addOnNewIntentListener") }.isFailure)
+        assertTrue(runCatching { assertOnlyInside(inBoth, "private fun MetrolistApp", "addOnNewIntentListener") }.isFailure)
+        assertOnlyInside(inside, "private fun MetrolistApp", "addOnNewIntentListener")
+    }
+
+    @Test
+    fun `no other source in the app registers an intent listener on an activity`() {
+        val offenders = mainSources().filter { (name, text) -> name != "MainActivity.kt" && Regex("""OnNewIntentListener""").containsMatchIn(text) }
+
+        assertTrue("these files register new-intent listeners: ${offenders.map { it.first }}", offenders.isEmpty())
     }
 
     @Test
@@ -176,7 +253,7 @@ class SaralIsolationTest {
 
         assertTrue(signIn.contains("LoginContent("))
         assertFalse("the nav-graph entry point needs a NavController", signIn.contains("LoginScreen("))
-        for (word in listOf("androidx.navigation", "NavController", "NavHost", "LocalNavController", "Screens.", "\"settings\"", "startActivity(", "Intent.ACTION_VIEW")) {
+        for (word in listOf("androidx.navigation", "NavController", "NavHost", "LocalNavController", "Screens.", "\"settings\"", "startActivity(", "Intent.ACTION_VIEW") + WAYS_OUT_OF_SARAL) {
             assertTrue("SaralSignIn.kt must not contain $word", !signIn.contains(word))
         }
     }

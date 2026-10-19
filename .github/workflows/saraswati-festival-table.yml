@@ -1,0 +1,51 @@
+name: festival-table
+
+# Weekly reminder that the hand-sourced festival table is running out (it ends
+# 2028-10-19). Runs only FestivalCalendarTest, in its strict mode, which fails
+# once today is within six months of the last entry. That failure is the alert
+# (GitHub emails the repository owner about a failed scheduled run). The strict
+# mode is switched on here and nowhere else: saraswati-ci and the release verify
+# job run the same test in its default mode, where it only skips with the same
+# message, so a stale calendar can never hold back a release. See
+# docs/release-runbook.md, "Before every release".
+on:
+  schedule:
+    # Mondays 05:23 UTC. An off-the-hour minute avoids the top-of-hour
+    # scheduling crush GitHub's docs warn about (same reasoning as codeql.yml).
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: festival-table-${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  festival-table:
+    name: festival-table
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      - name: Festival table (strict)
+        run: >-
+          ./gradlew --dependency-verification strict --no-build-cache
+          :app:testGmsDebugUnitTest --rerun
+          --tests '*FestivalCalendarTest'
+          -Psaraswati.strictFestivalTable=true

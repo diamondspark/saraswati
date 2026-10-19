@@ -172,6 +172,43 @@ class FamilyViewModelTest {
         assertEquals(1, hub.callsTo("getRoster").size)
     }
 
+    // SARASWATI: fix wave B1 — the hub answers 410 for approving a request older than an hour.
+    @Test
+    fun `an approve the hub refuses as expired says so, and the roster is read again`() {
+        hub.devices = listOf(mummy)
+        vm.refreshRoster()
+        hub.failWith("approveDevice", hubFailure(410))
+
+        vm.approve("d1")
+
+        assertEquals(FamilyError.EXPIRED, vm.error.value)
+        assertEquals("pending", vm.roster.value.single().status)
+        assertEquals("the row is refreshed so the hub's view of its age shows", 2, hub.callsTo("getRoster").size)
+    }
+
+    @Test
+    fun `a request can still be denied after it expired`() {
+        hub.devices = listOf(mummy)
+        vm.refreshRoster()
+        hub.failWith("approveDevice", hubFailure(410))
+        vm.approve("d1")
+
+        vm.revoke("d1")
+
+        assertEquals(listOf("revokeDevice($TEST_ADMIN_KEY,d1)"), hub.callsTo("revokeDevice"))
+        assertEquals("revoked", vm.roster.value.single().status)
+        assertNull(vm.error.value)
+    }
+
+    @Test
+    fun `the roster keeps the time each request was made`() {
+        hub.devices = listOf(mummy.copy(claimedAt = 1_234L), papa)
+
+        vm.refreshRoster()
+
+        assertEquals(listOf<Long?>(1_234L, null), vm.roster.value.map { it.claimedAt })
+    }
+
     @Test
     fun `a failed revoke is an error`() {
         hub.devices = listOf(papa)
@@ -331,6 +368,44 @@ class FamilyViewModelTest {
         assertFalse(store.owner)
     }
 
+    // SARASWATI: fix wave A (M7) — the screen clears the clipboard once, and only after, the key was kept.
+    @Test
+    fun `onSaved runs once with the trimmed key after the key was kept`() {
+        store.admin = null
+        val saved = mutableListOf<String>()
+
+        vm.saveAdminKey("  new-admin-key \n") { saved.add(it) }
+
+        assertEquals(listOf("new-admin-key"), saved)
+        assertEquals("new-admin-key", store.admin)
+    }
+
+    @Test
+    fun `onSaved never runs when the hub refuses the key, the key is blank, or storing it fails`() {
+        store.admin = null
+        val saved = mutableListOf<String>()
+
+        vm.saveAdminKey("   ") { saved.add(it) }
+        hub.failWith("getRoster", hubFailure(401))
+        vm.saveAdminKey("wrong-key") { saved.add(it) }
+        hub.heal("getRoster")
+        store.failWrites = java.io.IOException("disk full")
+        vm.saveAdminKey("right-key") { saved.add(it) }
+
+        assertTrue(saved.toString(), saved.isEmpty())
+        assertEquals(OwnerSetupState.Failed(FamilyError.UNKNOWN), vm.setupState.value)
+    }
+
+    @Test
+    fun `a callback that throws cannot undo a saved key`() {
+        store.admin = null
+
+        vm.saveAdminKey("the-admin-key") { error("clipboard exploded") }
+
+        assertEquals(OwnerSetupState.Done, vm.setupState.value)
+        assertEquals("the-admin-key", store.admin)
+    }
+
     @Test
     fun `saveAdminKey with a blank key is rejected without calling the hub`() {
         store.admin = null
@@ -363,6 +438,46 @@ class FamilyViewModelTest {
         assertTrue(vm.isMember.value)
     }
 
+    // SARASWATI: fix wave B1 — the Family tab shows the code of a claim that waits for approval.
+    @Test
+    fun `a stored claim gives the Family tab the code to show, and no claim gives none`() {
+        vm.refreshMembership()
+        assertNull(vm.pendingClaimCode.value)
+
+        store.claim = PendingClaim("3f2b8c1e-9a4d-4f6b-8e2a-1c5d7e9f0a3b", "secret")
+        vm.refreshMembership()
+        assertEquals("0A3B", vm.pendingClaimCode.value)
+
+        store.claim = null
+        vm.refreshMembership()
+        assertNull(vm.pendingClaimCode.value)
+    }
+
+    @Test
+    fun `an approved phone has no waiting code`() {
+        store.claim = PendingClaim("d9", "secret")
+        vm.refreshMembership()
+        store.session = FamilySession("d9", "tok")
+        store.claim = null
+
+        vm.refreshMembership()
+
+        assertNull(vm.pendingClaimCode.value)
+        assertTrue(vm.isMember.value)
+    }
+
+    @Test
+    fun `a storage error reads as no waiting claim`() {
+        store.claim = PendingClaim("d9", "secret")
+        vm.refreshMembership()
+        store.failReads = java.io.IOException("keystore unavailable")
+
+        vm.refreshMembership()
+
+        assertNull(vm.pendingClaimCode.value)
+        assertFalse(vm.hasPendingClaim.value)
+    }
+
     @Test
     fun `a phone that only has a pending claim is not yet a member`() {
         store.claim = PendingClaim("d9", "secret")
@@ -370,6 +485,42 @@ class FamilyViewModelTest {
         vm.refreshMembership()
 
         assertFalse(vm.isMember.value)
+    }
+
+    // SARASWATI: fix wave A (M2) — the Family tab hides owner setup while a claim waits for approval.
+    @Test
+    fun `a phone with a stored claim and no session reports a pending claim`() {
+        vm.refreshMembership()
+        assertFalse(vm.hasPendingClaim.value)
+
+        store.claim = PendingClaim("d9", "secret")
+        vm.refreshMembership()
+        assertTrue(vm.hasPendingClaim.value)
+        assertFalse(vm.isMember.value)
+    }
+
+    @Test
+    fun `approval ends the pending claim`() {
+        store.claim = PendingClaim("d9", "secret")
+        vm.refreshMembership()
+        assertTrue(vm.hasPendingClaim.value)
+
+        store.session = FamilySession("d9", "tok")
+        store.claim = null
+        vm.refreshMembership()
+
+        assertFalse(vm.hasPendingClaim.value)
+        assertTrue(vm.isMember.value)
+    }
+
+    @Test
+    fun `a storage error reads as no pending claim and does not throw`() {
+        store.claim = PendingClaim("d9", "secret")
+        store.failReads = java.io.IOException("keystore unavailable")
+
+        vm.refreshMembership()
+
+        assertFalse(vm.hasPendingClaim.value)
     }
 
     @Test
@@ -717,6 +868,26 @@ class FamilyViewModelTest {
         assertEquals(false, vm.killSwitches.value["sangat"])
         assertEquals(false, vm.killSwitches.value["cast_relay"])
         assertEquals(true, vm.killSwitches.value["parivaar_mix"])
+    }
+
+    @Test
+    fun `a kill-switch key the app does not know is ignored`() {
+        hub.killSwitches =
+            linkedMapOf(
+                "sangat" to false,
+                "parivaar_mix" to true,
+                "family_playlists" to true,
+                "cast_relay" to true,
+                "ask_saraswati" to false,
+            )
+
+        vm.loadSettings()
+
+        assertEquals(setOf("sangat", "parivaar_mix", "family_playlists", "cast_relay"), vm.killSwitches.value.keys)
+        assertEquals(false, vm.killSwitches.value["sangat"])
+
+        vm.toggleKillSwitch("sangat", true)
+        assertEquals(setOf("sangat", "parivaar_mix", "family_playlists", "cast_relay"), vm.killSwitches.value.keys)
     }
 
     @Test

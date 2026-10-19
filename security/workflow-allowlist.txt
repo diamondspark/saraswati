@@ -4,3 +4,4 @@ saraswati-release.yml
 saraswati-promote.yml
 saraswati-upstream-sync.yml
 saraswati-worker.yml
+saraswati-festival-table.yml

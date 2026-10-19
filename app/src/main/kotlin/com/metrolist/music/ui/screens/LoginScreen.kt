@@ -44,6 +44,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -127,10 +128,14 @@ fun LoginContent(
     onBack: () -> Unit,
     onBackLongPress: () -> Unit,
     isSwitchingChannel: Boolean = false,
+    // SARASWATI: fix wave B2 — true while finalizeLogin is saving the account, so Saral's host can leave
+    // the sheet open for that long (the signed-in cookie lands before this function has finished).
+    onCompleting: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var loginStage by remember { mutableStateOf(LoginStage.Authenticating) }
+    LaunchedEffect(loginStage) { onCompleting(loginStage == LoginStage.Completing) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var accounts by remember { mutableStateOf<List<YouTubeAccount>>(emptyList()) }
     var selectedAccount by remember { mutableStateOf<YouTubeAccount?>(null) }

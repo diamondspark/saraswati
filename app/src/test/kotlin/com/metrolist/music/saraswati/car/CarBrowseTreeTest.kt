@@ -12,7 +12,7 @@
 //  - Stations are the cached family stations, read at once (never from the hub),
 //    with Saral's Hindi names for the four starting ones, each carrying its seed
 //    so choosing one plays a radio;
-//  - Family is one greyed "Sangat (coming soon)" row and nothing else.
+//  - Family is one greyed "Sangat · Listen together (coming soon)" row and nothing else.
 // An empty cache that has not finished loading is told apart from one that has:
 // both answer an empty list at once, but only the first has to ask again.
 package com.metrolist.music.saraswati.car

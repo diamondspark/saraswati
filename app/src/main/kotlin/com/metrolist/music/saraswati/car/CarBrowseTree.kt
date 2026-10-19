@@ -16,7 +16,7 @@
 //    from storage a moment after the process starts and the car can ask first,
 //    so an empty answer is possible; carStationsChanges tells the car to ask
 //    again when the cache has loaded or changed.
-//  - Family is one greyed row, "Sangat (coming soon)": the family features are
+//  - Family is one greyed row, "Sangat · Listen together (coming soon)": the family features are
 //    Phase 4, and the car never advertises what does not exist yet.
 //
 // The shelves for Home and the sections for Library are handed in, because they

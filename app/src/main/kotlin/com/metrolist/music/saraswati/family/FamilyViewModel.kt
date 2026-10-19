@@ -127,18 +127,43 @@ class FamilyViewModel
         /** True once the owner approved this phone (it holds a hub session). Set by [refreshMembership]. */
         val isMember: StateFlow<Boolean> = _isMember.asStateFlow()
 
+        private val _hasPendingClaim = MutableStateFlow(false)
+
+        /**
+         * True while this phone has asked to join and the owner has not approved yet. The Family tab hides the
+         * owner setup link then: a phone waiting to be approved is not the owner's. Set by [refreshMembership].
+         */
+        val hasPendingClaim: StateFlow<Boolean> = _hasPendingClaim.asStateFlow()
+
+        private val _pendingClaimCode = MutableStateFlow<String?>(null)
+
+        /** The four-character code of that waiting claim (what the person says to the owner), or null. */
+        val pendingClaimCode: StateFlow<String?> = _pendingClaimCode.asStateFlow()
+
         fun refreshMembership() {
             viewModelScope.launch {
-                _isMember.value =
+                _isMember.value = readFlag { store.session() != null }
+                val claim =
                     try {
-                        store.session() != null
+                        store.pendingClaim()
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
-                        false
+                        null
                     }
+                _hasPendingClaim.value = claim != null
+                _pendingClaimCode.value = claim?.let { ClaimCode.of(it.deviceId) }
             }
         }
+
+        private suspend fun readFlag(read: suspend () -> Boolean): Boolean =
+            try {
+                read()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                false
+            }
 
         fun clearError() {
             _error.value = null
@@ -189,7 +214,13 @@ class FamilyViewModel
                 hub
                     .approveDevice(key, deviceId)
                     .onSuccess { loadRoster(key) }
-                    .onFailure { fail(it) }
+                    .onFailure { failure ->
+                        val error = FamilyError.fromApproval(failure)
+                        _error.value = error
+                        // The hub's clock decided the request was too old: read the roster again so the
+                        // row shows as expired, without letting a failed read replace that message.
+                        if (error == FamilyError.EXPIRED) hub.getRoster(key).onSuccess { _roster.value = it }
+                    }
             }
 
         fun revoke(deviceId: String) =
@@ -280,9 +311,13 @@ class FamilyViewModel
 
         /**
          * First-time owner setup: the pasted admin key is kept only if the hub
-         * accepts it, so a typo is never stored.
+         * accepts it, so a typo is never stored. [onSaved] runs once, with the
+         * trimmed key, after it was kept and not otherwise.
          */
-        fun saveAdminKey(pasted: String) {
+        fun saveAdminKey(
+            pasted: String,
+            onSaved: (key: String) -> Unit = {},
+        ) {
             val key = pasted.trim()
             if (key.isEmpty()) {
                 _setupState.value = OwnerSetupState.Failed(FamilyError.INVALID_INPUT)
@@ -298,6 +333,8 @@ class FamilyViewModel
                                 store.saveOwner(key)
                                 _roster.value = devices
                                 _error.value = null
+                                // The caller's chance to tidy up after the key was kept (the screen clears the clipboard).
+                                runCatching { onSaved(key) }
                                 OwnerSetupState.Done
                             } catch (e: CancellationException) {
                                 throw e

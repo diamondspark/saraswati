@@ -41,6 +41,7 @@ import com.metrolist.music.db.entities.SpeedDialItem
 import com.metrolist.music.extensions.filterVideoSongs
 import com.metrolist.music.extensions.toEnum
 import com.metrolist.music.models.SimilarRecommendation
+import com.metrolist.music.saraswati.security.OpenResult
 import com.metrolist.music.saraswati.security.SaraswatiVault
 import com.metrolist.music.ui.screens.wrapped.WrappedAudioService
 import com.metrolist.music.ui.screens.wrapped.WrappedManager
@@ -58,6 +59,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -764,6 +766,10 @@ class HomeViewModel @Inject constructor(
                 .map { (stored, savedAccountName) ->
                     stored?.let { SaraswatiVault.cookieVault.open(it) } to savedAccountName
                 }
+                // SARASWATI (I1): an unavailable Keystore says nothing about the cookie, so the
+                // account already shown stays until the Keystore answers.
+                .filter { (opened, _) -> opened != OpenResult.Unavailable }
+                .map { (opened, savedAccountName) -> (opened as? OpenResult.Opened)?.plaintext to savedAccountName }
                 .collect { (cookie, savedAccountName) ->
                     if (!cookie.isNullOrEmpty()) {
                         YouTube.cookie = cookie
@@ -801,7 +807,7 @@ class HomeViewModel @Inject constructor(
                     .map { it[InnerTubeCookieKey] }
                     .distinctUntilChanged()
                     .first()
-                val cookie = stored?.let { SaraswatiVault.cookieVault.open(it) }
+                val cookie = stored?.let { SaraswatiVault.cookieVault.openOrNull(it) }
 
                 if (!cookie.isNullOrEmpty()) {
                     YouTube.cookie = cookie

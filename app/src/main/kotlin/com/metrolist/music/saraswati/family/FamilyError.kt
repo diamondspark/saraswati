@@ -24,8 +24,11 @@ enum class FamilyError {
     /** 404: unknown device, or a claim the hub no longer holds. */
     NOT_FOUND,
 
-    /** 410: the pairing link expired or was already used. */
+    /** 410 on a claim: the pairing link expired or was already used. */
     GONE,
+
+    /** 410 on an approval: the hub refuses a request older than an hour; the person must send a new one. */
+    EXPIRED,
 
     /** 429: too many requests; trying again in a minute works. */
     RATE_LIMITED,
@@ -45,11 +48,15 @@ enum class FamilyError {
     ;
 
     companion object {
+        /** [from] for the owner's approve call, where a 410 is an expired request rather than a spent link. */
+        fun fromApproval(failure: Throwable): FamilyError = if (failure is HubException && failure.status == 410) EXPIRED else from(failure)
+
         fun from(failure: Throwable): FamilyError =
             when (failure) {
                 is HubException ->
                     when (failure.status) {
-                        400 -> INVALID_INPUT
+                        // 413: the hub's body cap. Nothing this app sends is near it, so it means the input was.
+                        400, 413 -> INVALID_INPUT
                         401 -> UNAUTHORIZED
                         404 -> NOT_FOUND
                         410 -> GONE

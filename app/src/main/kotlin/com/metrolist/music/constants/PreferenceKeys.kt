@@ -554,6 +554,12 @@ val FamilyHubClaimSecretKey = stringPreferencesKey("familyHubClaimSecret")
 val IsFamilyOwnerKey = booleanPreferencesKey("isFamilyOwner")
 val FamilyDeviceIdKey = stringPreferencesKey("familyDeviceId")
 
+// SARASWATI: fix wave B2 — how many 401s the hub has given this phone's session in a row, and when the
+// last counted one came (epoch ms). Not secrets, so plain. The hub answers one generic 401 for every
+// failure, so one 401 never ends a pairing: SessionVerdict clears the session on the third counted one.
+val FamilyUnauthorizedCountKey = intPreferencesKey("familyUnauthorizedCount")
+val FamilyUnauthorizedAtKey = longPreferencesKey("familyUnauthorizedAt")
+
 // SARASWATI: Task 8 — set the first time the owner saves a station list to the
 // hub. Until then an empty list from the hub means "nobody has set any yet" and
 // the editor starts on four defaults; after it, an empty list is shown as empty.

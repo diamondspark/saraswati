@@ -3,6 +3,9 @@
  * Licensed under GPL-3.0 | See git history for contributors
  */
 
+// SARASWATI: Task 11 — imports removed from this file with the code that used them: android.content.ContentResolver
+// (the icon uri builder moved to carDrawableUri in CarMediaItems.kt) and the YouTube-playlists preference's key (Home
+// is no longer behind that setting). Fix wave B2 — the Home tab is served from CarHomeSnapshot.
 package com.metrolist.music.playback
 
 import android.content.Context
@@ -67,6 +70,9 @@ import com.metrolist.music.constants.AutoRadioQueueKey
 import com.metrolist.music.playback.queues.ListQueue
 import com.metrolist.music.playback.queues.YouTubeQueue
 import com.metrolist.music.saraswati.car.CarBrowseTree
+import com.metrolist.music.saraswati.car.CarHomeHolder
+import com.metrolist.music.saraswati.car.CarHomeSnapshot
+import com.metrolist.music.saraswati.car.FileCarHomeStore
 import com.metrolist.music.saraswati.car.CarResources
 import com.metrolist.music.saraswati.car.CarStations
 import com.metrolist.music.saraswati.car.carBrowsableMediaItem
@@ -80,6 +86,7 @@ import com.metrolist.music.ui.screens.settings.AndroidAutoSection
 import com.metrolist.music.ui.screens.settings.deserializeSections
 import com.metrolist.music.ui.screens.settings.serializeSections
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.cancellation.CancellationException
 
 class MediaLibrarySessionCallback
 @Inject
@@ -91,6 +98,17 @@ constructor(
     stationsCache: StationsCache,
 ) : MediaLibrarySession.Callback {
     private val scope = CoroutineScope(Dispatchers.Main) + Job()
+
+    // SARASWATI: fix wave B2 — see CarHomeSnapshot.
+    private val homeSnapshot =
+        CarHomeSnapshot(
+            store = FileCarHomeStore.of(context),
+            fetch = ::loadHomeShelves,
+            scope = scope,
+        ).also(CarHomeHolder::register)
+
+    /** How many rows the car's Home tab now has, each time a background refresh brought a new one. */
+    val homeChanges get() = homeSnapshot.changes
 
     // SARASWATI: Task 11 — the car's four tabs (Home, Library, Stations, Family). The root and each tab are
     // answered by the tree; everything below them is still answered here, as before.
@@ -106,7 +124,9 @@ constructor(
                     ),
                 )
             },
-            homeShelves = ::loadHomeShelves,
+            // SARASWATI: fix wave B2 — Home answers from its last good snapshot at once and refreshes in the
+            // background (8 s at most), so a slow or failing YouTube never leaves the car's Home tab blank.
+            homeShelves = { homeSnapshot.current() },
         )
     private val packageLookup = AndroidPackageLookup(context)
     private val tag = "MediaLibrarySessionCallback"
@@ -117,6 +137,8 @@ constructor(
     var addToTargetPlaylist: () -> Unit = {}
 
     fun release() {
+        // SARASWATI: fix wave B3 — a released callback must not be what a later sign-out tries to clear.
+        CarHomeHolder.unregister(homeSnapshot)
         scope.cancel()
     }
 
@@ -330,8 +352,8 @@ constructor(
 
     // SARASWATI: Task 11 — what the "Mixes" folder (MusicService.YOUTUBE_PLAYLIST) used to hold, moved here
     // unchanged except that the setting that used to switch it on is no longer read: it is the car's Home tab,
-    // always offered. Failures still give an empty Home, never an error.
-    private suspend fun loadHomeShelves(): List<MediaItem> =
+    // always offered. Fix wave B2: a failure is null (CarHomeSnapshot then keeps what it has), never an error.
+    private suspend fun loadHomeShelves(): List<MediaItem>? =
         try {
             val allSections = mutableListOf<com.metrolist.innertube.pages.HomePage.Section>()
             var continuation: String? = null
@@ -365,9 +387,11 @@ constructor(
                     MediaMetadata.MEDIA_TYPE_PLAYLIST,
                 )
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             reportException(e)
-            emptyList()
+            null
         }
 
     private suspend fun loadLocalChildren(
@@ -914,6 +938,8 @@ constructor(
             }
         }
 
+    // SARASWATI: Task 11 — the body of this helper (and of browsableMediaItem below) moved to
+    // CarMediaItems.kt so the car tabs build their rows the same way; both only delegate now.
     private fun drawableUri(
         @DrawableRes id: Int,
     ) = carDrawableUri(context, id)

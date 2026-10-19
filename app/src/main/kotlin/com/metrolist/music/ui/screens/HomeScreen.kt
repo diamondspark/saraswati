@@ -120,13 +120,13 @@ import com.metrolist.music.LocalPlayerAwareWindowInsets
 import com.metrolist.music.LocalPlayerConnection
 import com.metrolist.music.R
 import com.metrolist.music.saraswati.SaraswatiFeatures
-import com.metrolist.music.saraswati.update.SaraswatiUpdateHttpFetcher
 import com.metrolist.music.saraswati.culture.FestivalBanner
 import com.metrolist.music.saraswati.culture.FestivalRadio
 import com.metrolist.music.saraswati.culture.FestivalSeed
 import com.metrolist.music.saraswati.culture.radioEndpointFor
 import com.metrolist.music.saraswati.culture.rememberCurrentFestival
 import com.metrolist.music.saraswati.saral.YouTubeSaralSearch
+import com.metrolist.music.saraswati.update.SaraswatiUpdateHttpFetcher
 import com.metrolist.music.saraswati.update.UpdateBanner
 import com.metrolist.music.saraswati.update.UpdateChecker
 import com.metrolist.music.saraswati.update.UpdateStatus
@@ -1255,10 +1255,13 @@ fun HomeScreen(
                 // not built yet), then the festival banner, then the Sudhaar banner.
                 festival?.let { today ->
                     item(key = "festival_banner") {
+                        // SARASWATI: fix wave B2 — a Listen Together guest follows the host's queue, so the
+                        // button is off for them, like every other control here that would start a queue.
                         FestivalBanner(
                             festival = today,
-                            enabled = !festivalStarting,
+                            enabled = !festivalStarting && !isListenTogetherGuest,
                             onPlay = {
+                                if (isListenTogetherGuest) return@FestivalBanner
                                 festivalStarting = true
                                 scope.launch {
                                     // Off again before any message, which waits on the snackbar to go.

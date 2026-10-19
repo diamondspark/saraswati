@@ -6,8 +6,14 @@
 // SARASWATI: Task 6 — the family hub Worker's JSON shapes (worker/src/FamilyHub.ts).
 // Field names are the Worker's wire names. Timestamps are not normalised:
 // `expiresAt` of a pairing token is the ISO-8601 string the Worker sends,
-// while `approvedAt` and `lastSeenAt` are epoch milliseconds (null until the
-// Worker has a value for them).
+// while `approvedAt`, `claimedAt` and `lastSeenAt` are epoch milliseconds
+// (null until the Worker has a value for them).
+//
+// Fix wave B1: every response model ignores fields it does not know (HubClient's
+// Json), so a hub that has grown a field never breaks an older app; the same goes
+// for a kill-switch key (see HubClient.parseKillSwitches). The approve answer is
+// `{deviceId, status}` with no session token: that credential belongs to the
+// claiming phone, and ApprovedDevice never holds one.
 //
 // Every type that carries a credential (a pairing token, a claim secret or a
 // session token) overrides toString() so a stray log line or crash report
@@ -15,6 +21,7 @@
 // ApprovedDevice and the wire requests ClaimRequest and PairingStatusRequest.
 package com.metrolist.music.saraswati.family
 
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.descriptors.PrimitiveKind
@@ -22,6 +29,9 @@ import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * What the owner has set a phone up as. The Worker owns the value; the phone
@@ -88,7 +98,34 @@ data class RosterEntry(
     val status: String,
     val approvedAt: Long? = null,
     val role: DeviceRole = DeviceRole.ADULT,
+    // When the phone made its request (epoch ms). Null when the hub left it out or sent something
+    // that is not a number: one odd field never fails the whole roster.
+    @Serializable(with = LenientEpochMillisSerializer::class) val claimedAt: Long? = null,
 )
+
+/** An epoch-millisecond timestamp that reads as null for anything but a non-negative number. */
+internal object LenientEpochMillisSerializer : KSerializer<Long?> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("LenientEpochMillis", PrimitiveKind.LONG)
+
+    @OptIn(ExperimentalSerializationApi::class)
+    override fun serialize(
+        encoder: Encoder,
+        value: Long?,
+    ) {
+        if (value == null) encoder.encodeNull() else encoder.encodeLong(value)
+    }
+
+    override fun deserialize(decoder: Decoder): Long? {
+        val element = (decoder as? JsonDecoder)?.decodeJsonElement() ?: return decoder.decodeLong()
+        if (element is JsonNull || element !is JsonPrimitive || element.isString) return null
+        val whole = element.content.toLongOrNull()
+        val millis = whole ?: element.content.toDoubleOrNull()?.takeIf { it.isFinite() && it < MAX_EXACT_DOUBLE }?.toLong()
+        return millis?.takeIf { it >= 0 }
+    }
+
+    // A double holds integers exactly up to 2^53; past it the value is no timestamp.
+    private const val MAX_EXACT_DOUBLE = 9.007199254740992E15
+}
 
 /**
  * GET /me: who the Worker says this phone is, and what the owner set it up as. [role] reads a
@@ -109,13 +146,19 @@ data class RoleUpdate(
     val role: DeviceRole = DeviceRole.ADULT,
 )
 
+/**
+ * POST /roster/{id}/approve: the hub answers `{deviceId, status}`. [sessionToken] is optional only
+ * so that an answer from a hub that still sends one reads; HubClient drops it, and nothing in the
+ * app stores or shows it.
+ */
 @Serializable
 data class ApprovedDevice(
     val deviceId: String,
-    val sessionToken: String,
     val status: String,
+    val sessionToken: String? = null,
 ) {
-    override fun toString(): String = "ApprovedDevice(deviceId=$deviceId, status=$status, sessionToken=<redacted>)"
+    override fun toString(): String =
+        "ApprovedDevice(deviceId=$deviceId, status=$status, sessionToken=${if (sessionToken == null) "null" else "<redacted>"})"
 }
 
 @Serializable
@@ -183,7 +226,10 @@ internal data class StationsEnvelope(
 internal data class PairingStatusResponse(
     val status: String,
     val sessionToken: String? = null,
-)
+) {
+    // SARASWATI: fix wave A (M6) — the session token is a credential; the default toString would print it.
+    override fun toString(): String = "PairingStatusResponse(status=$status, sessionToken=${if (sessionToken == null) "null" else "<redacted>"})"
+}
 
 @Serializable
 internal data class ClaimRequest(

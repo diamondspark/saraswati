@@ -91,6 +91,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -186,6 +187,7 @@ private fun SectionCard(content: @Composable () -> Unit) {
 
 @Composable
 private fun OwnerSetupContent(viewModel: FamilyViewModel) {
+    val clipboard = LocalContext.current.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     val setup by viewModel.setupState.collectAsStateWithLifecycle()
     var key by remember { mutableStateOf("") }
     val checking = setup is OwnerSetupState.Checking
@@ -213,7 +215,9 @@ private fun OwnerSetupContent(viewModel: FamilyViewModel) {
             )
             (setup as? OwnerSetupState.Failed)?.let { FamilyErrorBanner(it.error) }
             Button(
-                onClick = { viewModel.saveAdminKey(key) },
+                // SARASWATI: fix wave A (M7) — the key was most likely pasted from the clipboard, which would
+                // otherwise keep it for any other app to read once it has been saved.
+                onClick = { viewModel.saveAdminKey(key) { saved -> ClipboardHygiene.clearIfHolds(clipboard, saved) } },
                 enabled = key.isNotBlank() && !checking,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -344,9 +348,17 @@ private fun OwnerContent(viewModel: FamilyViewModel) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            if (pending.isNotEmpty()) {
+                Text(
+                    stringResource(R.string.family_requests_hint),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             pending.forEach { entry ->
                 PendingRow(
                     entry = entry,
+                    now = now,
                     onApprove = { viewModel.approve(entry.deviceId) },
                     onDeny = { viewModel.revoke(entry.deviceId) },
                 )
@@ -790,24 +802,43 @@ private fun PhoneInitial(name: String) {
 @Composable
 private fun PendingRow(
     entry: RosterEntry,
+    now: Long,
     onApprove: () -> Unit,
     onDeny: () -> Unit,
 ) {
     val name = entry.deviceName?.takeIf { it.isNotBlank() } ?: stringResource(R.string.family_unnamed_phone)
+    val request = entry.pendingRequest(now)
+    val ageText =
+        when (val age = request.age) {
+            null -> null
+            RequestAge.JustNow -> stringResource(R.string.family_request_age_now)
+            is RequestAge.Minutes -> stringResource(R.string.family_request_age_minutes, age.count)
+            is RequestAge.Hours -> stringResource(R.string.family_request_age_hours, age.count)
+        }
+    val codeAndAge = listOfNotNull(stringResource(R.string.family_request_code, request.code), ageText).joinToString(" · ")
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             PhoneInitial(name)
             Column(Modifier.weight(1f)) {
                 Text(name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    roleSummary(entry.role),
+                    codeAndAge,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    listOfNotNull(if (request.expired) stringResource(R.string.family_request_expired) else null, roleSummary(entry.role))
+                        .joinToString(" · "),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (request.expired) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-            Button(onClick = onApprove, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.family_approve)) }
+            Button(onClick = onApprove, enabled = request.canApprove, modifier = Modifier.weight(1f)) {
+                Text(stringResource(R.string.family_approve))
+            }
             OutlinedButton(onClick = onDeny, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.family_deny)) }
         }
     }
