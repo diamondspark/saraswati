@@ -16,8 +16,8 @@
 //    from storage a moment after the process starts and the car can ask first,
 //    so an empty answer is possible; carStationsChanges tells the car to ask
 //    again when the cache has loaded or changed.
-//  - Family is one greyed row, "Sangat · Listen together (coming soon)": the family features are
-//    Phase 4, and the car never advertises what does not exist yet.
+//  - Family (Phase 4 Task 15) is the Parivaar Mix, the family's playlists and the Sangat row, from what the
+//    phone already holds (CarFamilyTree); it never waits for the hub or YouTube either.
 //
 // The shelves for Home and the sections for Library are handed in, because they
 // come from YouTube and the settings store, which this class must stay free of.
@@ -35,12 +35,15 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 
 internal class CarBrowseTree(
     private val resources: CarResources,
     private val stations: StationsCache,
     private val librarySections: suspend () -> List<Pair<AndroidAutoSection, Boolean>>,
     private val homeShelves: suspend () -> List<MediaItem>,
+    // SARASWATI: Phase 4 Task 15 — the Family folder's rows, built by CarFamilyTree from cached snapshots.
+    private val familyItems: () -> List<MediaItem>,
 ) {
     /** The children of [parentId] if it is the root or one of the four tabs, else null: the rest of the browse tree answers. */
     suspend fun childrenOf(parentId: String): List<MediaItem>? =
@@ -121,24 +124,6 @@ internal class CarBrowseTree(
     fun stationItems(): List<MediaItem> {
         return CarStations.items(resources, stations.snapshot())
     }
-
-    /** Greyed: neither something to open nor to play. */
-    private fun familyItems(): List<MediaItem> =
-        listOf(
-            MediaItem
-                .Builder()
-                .setMediaId("${MusicService.CAR_FAMILY}/sangat_soon")
-                .setMediaMetadata(
-                    MediaMetadata
-                        .Builder()
-                        .setTitle(resources.string(R.string.car_family_sangat_soon))
-                        .setArtworkUri(resources.iconUri(R.drawable.group_outlined))
-                        .setIsPlayable(false)
-                        .setIsBrowsable(false)
-                        .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
-                        .build(),
-                ).build(),
-        )
 }
 
 /**
@@ -150,5 +135,19 @@ internal class CarBrowseTree(
 internal fun carStationsChanges(cache: StationsCache): Flow<Int> =
     combine(cache.loaded, cache.stations) { loaded, list -> if (loaded) CarStations.playable(list) else null }
         .filterNotNull()
+        .distinctUntilChanged()
+        .map { it.size }
+
+/**
+ * How many rows the car's Family folder should now have, each time something it shows may have changed (the mix,
+ * the playlists, a feature switch, Sangat starting or ending). [triggers] only say "look again"; what the car will
+ * see is read from [items], the same function the folder answers with, and an unchanged answer is not repeated.
+ */
+internal fun carFamilyChanges(
+    triggers: List<Flow<*>>,
+    items: () -> List<MediaItem>,
+): Flow<Int> =
+    merge(*triggers.map { flow -> flow.map { } }.toTypedArray())
+        .map { items().map { it.mediaId to it.mediaMetadata.title?.toString() } }
         .distinctUntilChanged()
         .map { it.size }

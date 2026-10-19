@@ -16,12 +16,18 @@ object MediaSessionConstants {
     const val ACTION_TOGGLE_REPEAT_MODE = "TOGGLE_REPEAT_MODE"
     const val ACTION_ADD_TO_TARGET_PLAYLIST = "ADD_TO_TARGET_PLAYLIST"
 
+    // SARASWATI: Phase 4 Task 15 — the car's Start/End Sangat button.
+    const val ACTION_TOGGLE_SANGAT = "TOGGLE_SANGAT"
+
     val CommandToggleLibrary = SessionCommand(ACTION_TOGGLE_LIBRARY, Bundle.EMPTY)
     val CommandToggleLike = SessionCommand(ACTION_TOGGLE_LIKE, Bundle.EMPTY)
     val CommandToggleStartRadio = SessionCommand(ACTION_TOGGLE_START_RADIO, Bundle.EMPTY)
     val CommandToggleShuffle = SessionCommand(ACTION_TOGGLE_SHUFFLE, Bundle.EMPTY)
     val CommandToggleRepeatMode = SessionCommand(ACTION_TOGGLE_REPEAT_MODE, Bundle.EMPTY)
     val CommandAddToTargetPlaylist = SessionCommand(ACTION_ADD_TO_TARGET_PLAYLIST, Bundle.EMPTY)
+
+    // SARASWATI: Phase 4 Task 15
+    val CommandToggleSangat = SessionCommand(ACTION_TOGGLE_SANGAT, Bundle.EMPTY)
 
     const val TARGET_PLAYLIST_AUTO = "auto"
 }

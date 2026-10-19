@@ -304,6 +304,16 @@ class MusicService :
     @Inject
     lateinit var listenTogetherManager: com.metrolist.music.listentogether.ListenTogetherManager
 
+    // SARASWATI: Phase 4 Task 15 — the car's Start/End Sangat button, shown only while the owner has Sangat on.
+    @Inject
+    lateinit var carSangat: com.metrolist.music.saraswati.family.sangat.CarSangatController
+
+    @Inject
+    lateinit var carSangatRoom: com.metrolist.music.saraswati.family.sangat.ListenTogetherCarRoom
+
+    @Inject
+    lateinit var familyFeatureGate: com.metrolist.music.saraswati.family.FamilyFeatureGate
+
     private lateinit var audioManager: AudioManager
     private var audioFocusRequest: AudioFocusRequest? = null
     private var lastAudioFocusState = AudioManager.AUDIOFOCUS_NONE
@@ -733,6 +743,21 @@ class MusicService :
             com.metrolist.music.saraswati.car.carStationsChanges(stationsCache).collect { count ->
                 mediaSession?.notifyChildrenChanged(MusicService.CAR_STATIONS, count, null)
             }
+        }
+        // SARASWATI: Phase 4 Task 15 — the same for the Family folder (the mix, the playlists, a feature switch,
+        // Sangat starting or ending), and the Sangat button follows the switch and the state.
+        scope.launch {
+            mediaLibrarySessionCallback.familyChanges.collect { count ->
+                mediaSession?.notifyChildrenChanged(MusicService.CAR_FAMILY, count, null)
+            }
+        }
+        scope.launch {
+            combine(carSangat.state, familyFeatureGate.enabled) { sangat, features ->
+                sangat to (features[com.metrolist.music.saraswati.family.FamilyFeature.SANGAT] != false)
+            }.distinctUntilChanged().collect { updateNotification() }
+        }
+        carSangatRoom.attachPlayer = {
+            listenTogetherManager.attachForCar { PlayerConnection(this@MusicService, binder, database, scope) }
         }
         // SARASWATI: fix wave B2 — the same for Home, which answers from its last snapshot at once and tells
         // the car to ask again when a background refresh brought a different one.
@@ -1655,7 +1680,21 @@ class MusicService :
                     .setSessionCommand(CommandAddToTargetPlaylist)
                     .setEnabled(currentSong.value != null)
                     .build(),
-            ),
+            ) + sangatButton(),
+        )
+    }
+
+    // SARASWATI: Phase 4 Task 15 — Start Sangat / End Sangat, only while the owner has Sangat switched on.
+    private fun sangatButton(): List<CommandButton> {
+        if (!familyFeatureGate.isEnabled(com.metrolist.music.saraswati.family.FamilyFeature.SANGAT)) return emptyList()
+        val hosting = carSangat.state.value.hosting
+        return listOf(
+            CommandButton
+                .Builder()
+                .setDisplayName(getString(if (hosting) R.string.car_sangat_button_end else R.string.car_family_sangat_start))
+                .setIconResId(R.drawable.group_outlined)
+                .setSessionCommand(com.metrolist.music.constants.MediaSessionConstants.CommandToggleSangat)
+                .build(),
         )
     }
 

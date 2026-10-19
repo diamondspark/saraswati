@@ -412,6 +412,7 @@ class CarHomeSnapshotTest {
             stations = com.metrolist.music.saraswati.family.FakeStationsCache(),
             librarySections = { emptyList() },
             homeShelves = { snapshot.current() },
+            familyItems = { emptyList() },
         )
 
     private fun carHome(tree: CarBrowseTree) = runBlocking { withTimeout(2_000) { tree.childrenOf(MusicService.CAR_HOME) } }!!
@@ -561,6 +562,7 @@ class CarHomeSnapshotTest {
                 stations = com.metrolist.music.saraswati.family.FakeStationsCache(),
                 librarySections = { emptyList() },
                 homeShelves = { snapshot.current() },
+                familyItems = { emptyList() },
             )
 
         val answer = runBlocking { withTimeout(2_000) { tree.childrenOf(MusicService.CAR_HOME) } }

@@ -64,6 +64,9 @@ class ParivaarMixStore(
             }
         }
 
+    /** Returns once the stored mix has been read, so [cached] no longer answers the empty mix only for want of reading. */
+    suspend fun awaitHydrated() = hydration.join()
+
     suspend fun save(mix: ParivaarMix) {
         val kept = mix.copy(tracks = mix.tracks.take(ParivaarMixBuilder.MIX_MAX))
         synchronized(lock) {

@@ -302,6 +302,10 @@ class MainActivity : FragmentActivity() {
     @Inject
     lateinit var stationsRefresher: StationsRefresher
 
+    // SARASWATI: Phase 4 Task 15
+    @Inject
+    lateinit var familyPlaylistsRepository: com.metrolist.music.saraswati.family.playlists.FamilyPlaylistsRepository
+
     // SARASWATI: fix wave B1 (I2) — the paired phone's heartbeat for the owner's health view.
     @Inject
     lateinit var healthReporter: HealthReporter
@@ -526,6 +530,8 @@ class MainActivity : FragmentActivity() {
                 launch { grandparentRoleSync.refresh() }
                 // Every paired phone, not only Saral's: it is what fills the car's Stations tab.
                 launch { stationsRefresher.refresh() }
+                // SARASWATI: Phase 4 Task 15 — the family's playlists, for the car's Family folder (Task 14 left this out).
+                launch { familyPlaylistsRepository.refresh() }
                 // SARASWATI: fix wave B1 (I2) — its own job too, so a slow hub holds up neither of the others.
                 launch { healthReporter.report() }
                 // SARASWATI: Phase 4 Task 12 — this phone's weekly top-songs playlist, then the daily Parivaar Mix

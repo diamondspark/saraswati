@@ -27,6 +27,7 @@ import com.metrolist.music.playback.queues.YouTubeQueue
 import com.metrolist.music.saraswati.family.sangat.PassengerPlayCredit
 import com.metrolist.music.saraswati.family.sangat.RemoteControllerMode
 import com.metrolist.music.saraswati.family.sangat.RemoteControllerPolicy
+import com.metrolist.music.saraswati.family.sangat.RemoteHostGuard
 import com.metrolist.music.saraswati.family.sangat.RemoteEventRouter
 import com.metrolist.music.saraswati.family.sangat.RemoteControllerStore
 import com.metrolist.music.utils.dataStore
@@ -355,6 +356,13 @@ class ListenTogetherManager
          * Set the player connection for playback sync.
          * Should be called when PlayerConnection is available.
          */
+        // SARASWATI: Phase 4 Task 15 — a Sangat started from the car may be the first Listen Together use since the
+        // process started: the app screen, which normally wires the manager up, has never been opened. Idempotent.
+        fun attachForCar(newConnection: () -> PlayerConnection) {
+            if (eventCollectorJob == null) initialize()
+            if (playerConnection == null) setPlayerConnection(newConnection())
+        }
+
         fun setPlayerConnection(connection: PlayerConnection?) {
             Timber.tag(TAG).d("setPlayerConnection: ${connection != null}, isInRoom: $isInRoom")
 
@@ -499,6 +507,12 @@ class ListenTogetherManager
         }
 
         private fun handleEvent(event: ListenTogetherEvent) {
+            // SARASWATI: Phase 4 Task 15 — a remote controller is never left as the host (see RemoteHostGuard)
+            if (RemoteHostGuard.mustLeave(event, userId.value, remoteMode.enabled.value)) {
+                Timber.tag(TAG).w("Remote controller was made host; leaving so the room can pick a host that plays")
+                leaveRoom()
+                return
+            }
             // SARASWATI: a remote controller's room events never reach the guest handlers below
             if (remoteEventRouter.route(event)) return
             when (event) {

@@ -27,6 +27,25 @@ object RemoteControllerPolicy {
 }
 
 /**
+ * A remote controller never hosts: it plays nothing, so as host it would publish an idle local player to everyone
+ * (Phase 4 Task 10 carry-over). When the room makes it the host anyway (the car's phone left, or a reconnect says
+ * so), it leaves, and the room hands the role to someone who can play.
+ */
+object RemoteHostGuard {
+    fun mustLeave(
+        event: ListenTogetherEvent,
+        myUserId: String?,
+        remoteController: Boolean,
+    ): Boolean =
+        remoteController &&
+            when (event) {
+                is ListenTogetherEvent.HostChanged -> myUserId != null && event.newHostId == myUserId
+                is ListenTogetherEvent.Reconnected -> event.isHost
+                else -> false
+            }
+}
+
+/**
  * Whether this phone joined the current room as a remote controller, and the room as that passenger sees it.
  * [persist] stores the flag so a process death in the middle of a drive does not rejoin the room as a normal
  * guest (and start playing).

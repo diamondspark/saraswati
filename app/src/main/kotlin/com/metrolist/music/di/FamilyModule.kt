@@ -11,7 +11,10 @@ package com.metrolist.music.di
 import android.content.Context
 import com.metrolist.music.BuildConfig
 import com.metrolist.music.saraswati.family.DataStoreFamilyStore
+import android.os.Build
+import com.metrolist.music.constants.ListenTogetherUsernameKey
 import com.metrolist.music.db.MusicDatabase
+import com.metrolist.music.listentogether.ListenTogetherManager
 import com.metrolist.music.playback.DownloadUtil
 import com.metrolist.music.saraswati.family.FamilyFeature
 import com.metrolist.music.saraswati.family.FamilyFeatureGate
@@ -36,11 +39,14 @@ import com.metrolist.music.saraswati.family.playlists.FamilyPlaylistsHub
 import com.metrolist.music.saraswati.family.playlists.FamilyPlaylistsRepository
 import com.metrolist.music.saraswati.family.playlists.HubClientFamilyPlaylistsHub
 import com.metrolist.music.saraswati.family.playlists.UnconfirmedCollaborationApi
+import com.metrolist.music.saraswati.family.sangat.CarSangatController
+import com.metrolist.music.saraswati.family.sangat.ListenTogetherCarRoom
 import com.metrolist.music.saraswati.family.sangat.SangatCarMode
 import com.metrolist.music.saraswati.family.sangat.SangatForeground
 import com.metrolist.music.saraswati.family.sangat.SangatLiveWatcher
 import com.metrolist.music.saraswati.security.SaraswatiVault
 import com.metrolist.music.utils.dataStore
+import com.metrolist.music.utils.get
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -49,6 +55,7 @@ import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
@@ -98,6 +105,29 @@ object FamilyModule {
         hub: HubClient,
         identity: HubIdentity,
     ): SangatCarMode = SangatCarMode(hub, identity)
+
+    // SARASWATI: Phase 4 Task 15 — starting and ending a Sangat from the car.
+    @Provides
+    @Singleton
+    fun provideListenTogetherCarRoom(manager: ListenTogetherManager): ListenTogetherCarRoom =
+        ListenTogetherCarRoom(manager, CoroutineScope(SupervisorJob() + Dispatchers.Default), Dispatchers.Main)
+
+    @Provides
+    @Singleton
+    fun provideCarSangatController(
+        @ApplicationContext context: Context,
+        room: ListenTogetherCarRoom,
+        carMode: SangatCarMode,
+        identity: HubIdentity,
+        gate: FamilyFeatureGate,
+    ): CarSangatController =
+        CarSangatController(
+            room,
+            carMode,
+            identity,
+            enabled = gate::isEnabled,
+            username = { withContext(Dispatchers.IO) { context.dataStore.get(ListenTogetherUsernameKey, "").trim().ifBlank { Build.MODEL } } },
+        )
 
     @Provides
     @Singleton

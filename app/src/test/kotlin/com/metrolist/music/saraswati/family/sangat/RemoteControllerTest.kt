@@ -194,6 +194,33 @@ class RemoteControllerTest {
         assertTrue(leave.contains("remoteMode.clear()"))
     }
 
+    // SARASWATI: Phase 4 Task 15 — a host must never be a remote controller.
+    @Test
+    fun `a remote controller made host by the room leaves it`() {
+        val madeHost = ListenTogetherEvent.HostChanged("me", "Mohit")
+        val reconnectedAsHost = ListenTogetherEvent.Reconnected("ABC123", "me", room(), isHost = true)
+
+        assertTrue(RemoteHostGuard.mustLeave(madeHost, "me", remoteController = true))
+        assertTrue(RemoteHostGuard.mustLeave(reconnectedAsHost, "me", remoteController = true))
+    }
+
+    @Test
+    fun `the guard leaves everyone else alone`() {
+        assertFalse("someone else became host", RemoteHostGuard.mustLeave(ListenTogetherEvent.HostChanged("other", "Papa"), "me", true))
+        assertFalse("a normal guest may host", RemoteHostGuard.mustLeave(ListenTogetherEvent.HostChanged("me", "Mohit"), "me", false))
+        assertFalse("unknown user id", RemoteHostGuard.mustLeave(ListenTogetherEvent.HostChanged("me", "Mohit"), null, true))
+        assertFalse(RemoteHostGuard.mustLeave(ListenTogetherEvent.Reconnected("ABC123", "me", room(), isHost = false), "me", true))
+        assertFalse(RemoteHostGuard.mustLeave(ListenTogetherEvent.Kicked("x"), "me", true))
+    }
+
+    @Test
+    fun `the manager asks the guard before anything else`() {
+        val manager = source("src/main/kotlin/com/metrolist/music/listentogether/ListenTogetherManager.kt")
+        val handleEvent = manager.substringAfter("private fun handleEvent(event: ListenTogetherEvent) {").substringBefore("when (event)")
+
+        assertTrue(handleEvent.indexOf("RemoteHostGuard.mustLeave") in 0 until handleEvent.indexOf("remoteEventRouter.route(event)"))
+    }
+
     private fun source(path: String): String {
         val file = listOf(File(path), File("app/$path")).firstOrNull { it.isFile } ?: error("cannot find $path")
         return file.readText()

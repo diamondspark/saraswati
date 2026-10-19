@@ -1171,5 +1171,12 @@
 
     <!-- SARASWATI: Task 11 — the car's four tabs. Home, Library and Family reuse existing strings. -->
     <string name="car_tab_stations">Stations</string>
-    <string name="car_family_sangat_soon">Sangat · Listen together (coming soon)</string>
+    <!-- SARASWATI: Phase 4 Task 15 — the car's Family folder and Sangat button. The row "coming soon" it replaces is gone. -->
+    <string name="car_family_parivaar_mix">Parivaar Mix · Family mix</string>
+    <string name="car_family_sangat_start">Start Sangat</string>
+    <string name="car_family_sangat_end">End Sangat · %1$d joined</string>
+    <string name="car_sangat_button_end">End Sangat</string>
+    <string name="car_sangat_pair_first">Pair this phone first</string>
+    <string name="car_sangat_off">Sangat is off</string>
+    <string name="car_sangat_no_connection">No connection</string>
 </resources>
