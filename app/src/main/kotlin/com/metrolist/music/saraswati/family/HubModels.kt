@@ -13,7 +13,43 @@
 // stray log line or crash report never prints it.
 package com.metrolist.music.saraswati.family
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+
+/**
+ * What the owner has set a phone up as. The Worker owns the value; the phone
+ * caches it and refreshes it from GET /me. A wire value this build does not
+ * know reads as [ADULT], so an older app never invents a locked-down mode it
+ * cannot render.
+ */
+@Serializable(with = DeviceRoleSerializer::class)
+enum class DeviceRole(
+    val wireName: String,
+) {
+    ADULT("adult"),
+    GRANDPARENT("grandparent"),
+    ;
+
+    companion object {
+        fun fromWire(value: String?): DeviceRole = entries.firstOrNull { it.wireName == value } ?: ADULT
+    }
+}
+
+internal object DeviceRoleSerializer : KSerializer<DeviceRole> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("DeviceRole", PrimitiveKind.STRING)
+
+    override fun serialize(
+        encoder: Encoder,
+        value: DeviceRole,
+    ) = encoder.encodeString(value.wireName)
+
+    override fun deserialize(decoder: Decoder): DeviceRole = DeviceRole.fromWire(decoder.decodeString())
+}
 
 @Serializable
 data class PairingToken(
@@ -47,6 +83,21 @@ data class RosterEntry(
     val deviceName: String? = null,
     val status: String,
     val approvedAt: Long? = null,
+    val role: DeviceRole = DeviceRole.ADULT,
+)
+
+/** GET /me: who the Worker says this phone is, and what the owner set it up as. */
+@Serializable
+data class Me(
+    val deviceId: String,
+    val role: DeviceRole = DeviceRole.ADULT,
+)
+
+/** PUT /roster/{deviceId}/role: the role now stored for that device. */
+@Serializable
+data class RoleUpdate(
+    val deviceId: String,
+    val role: DeviceRole = DeviceRole.ADULT,
 )
 
 @Serializable
@@ -117,6 +168,13 @@ internal data class PairingStatusResponse(
 internal data class ClaimRequest(
     val token: String,
     val deviceName: String,
+    // Null is omitted from the body (kotlinx default), so the Worker applies its own default.
+    val role: DeviceRole? = null,
+)
+
+@Serializable
+internal data class RoleRequest(
+    val role: DeviceRole,
 )
 
 @Serializable

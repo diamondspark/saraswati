@@ -82,10 +82,13 @@ class HubClientTest {
         listOf(
             call("createPairing") { hub.createPairing("admin") },
             call("claimPairing") { hub.claimPairing("tok", "Mummy's Pixel") },
+            call("claimPairingWithRole") { hub.claimPairing("tok", "Nani's phone", DeviceRole.GRANDPARENT) },
             call("pairingStatus") { hub.pairingStatus("dev-1", "secret") },
             call("getRoster") { hub.getRoster("admin") },
             call("approveDevice") { hub.approveDevice("admin", "dev-1") },
             call("revokeDevice") { hub.revokeDevice("admin", "dev-1") },
+            call("setRole") { hub.setRole("admin", "dev-1", DeviceRole.GRANDPARENT) },
+            call("getMe") { hub.getMe("sess") },
             call("getStations") { hub.getStations("admin") },
             call("setStations") { hub.setStations("admin", listOf(Station("s1", "Bhajans", "vid1", 2))) },
             call("getKillSwitches") { hub.getKillSwitches("admin") },
@@ -192,14 +195,14 @@ class HubClientTest {
     // --- getRoster -----------------------------------------------------
 
     @Test
-    fun `getRoster gets with the admin bearer and parses nullable name and approval time`() =
+    fun `getRoster gets with the admin bearer and parses nullable name, approval time and role`() =
         runBlocking {
             reply(
                 200,
                 """
                 {"devices":[
-                  {"deviceId":"a","deviceName":"Dad's phone","status":"approved","approvedAt":1760000000000},
-                  {"deviceId":"b","deviceName":null,"status":"pending","approvedAt":null}
+                  {"deviceId":"a","deviceName":"Dad's phone","status":"approved","approvedAt":1760000000000,"role":"adult"},
+                  {"deviceId":"b","deviceName":null,"status":"pending","approvedAt":null,"role":"grandparent"}
                 ]}
                 """.trimIndent(),
             )
@@ -208,8 +211,8 @@ class HubClientTest {
 
             assertEquals(
                 listOf(
-                    RosterEntry("a", "Dad's phone", "approved", 1_760_000_000_000L),
-                    RosterEntry("b", null, "pending", null),
+                    RosterEntry("a", "Dad's phone", "approved", 1_760_000_000_000L, DeviceRole.ADULT),
+                    RosterEntry("b", null, "pending", null, DeviceRole.GRANDPARENT),
                 ),
                 result.getOrNull(),
             )
@@ -421,13 +424,111 @@ class HubClientTest {
             assertEquals("Bearer admin-key", request.headers["Authorization"])
         }
 
+    // --- device roles --------------------------------------------------
+
+    @Test
+    fun `claimPairing sends the role on the wire when one is given`() =
+        runBlocking {
+            for ((role, wire) in listOf(DeviceRole.ADULT to "adult", DeviceRole.GRANDPARENT to "grandparent")) {
+                reply(200, """{"deviceId":"dev-1","status":"pending","claimSecret":"${"cd".repeat(32)}"}""")
+
+                assertTrue(hub.claimPairing("tok-1", "Nani's phone", role).isSuccess)
+
+                assertEquals(
+                    buildJsonObject {
+                        put("token", "tok-1")
+                        put("deviceName", "Nani's phone")
+                        put("role", wire)
+                    },
+                    takeRequest().json(),
+                )
+            }
+        }
+
+    @Test
+    fun `claimPairing omits the role entirely when none is given`() =
+        runBlocking {
+            reply(200, """{"deviceId":"dev-1","status":"pending","claimSecret":"${"cd".repeat(32)}"}""")
+
+            hub.claimPairing("tok-1", "Mummy's Pixel")
+
+            val body = takeRequest().json() as JsonObject
+            assertFalse("role must be absent so the Worker applies its own default", "role" in body)
+        }
+
+    @Test
+    fun `getMe gets with the device bearer and parses id and role`() =
+        runBlocking {
+            reply(200, """{"deviceId":"dev-1","role":"grandparent"}""")
+
+            val result = hub.getMe("sess-1")
+
+            assertEquals(Me("dev-1", DeviceRole.GRANDPARENT), result.getOrNull())
+            val request = takeRequest()
+            assertEquals("GET", request.method)
+            assertEquals("/me", request.url.encodedPath)
+            assertEquals("Bearer sess-1", request.headers["Authorization"])
+        }
+
+    @Test
+    fun `setRole puts the role to the device's role path with the admin bearer`() =
+        runBlocking {
+            reply(200, """{"deviceId":"dev-1","role":"adult"}""")
+
+            val result = hub.setRole("admin-key", "dev-1", DeviceRole.ADULT)
+
+            assertEquals(RoleUpdate("dev-1", DeviceRole.ADULT), result.getOrNull())
+            val request = takeRequest()
+            assertEquals("PUT", request.method)
+            assertEquals("/roster/dev-1/role", request.url.encodedPath)
+            assertEquals("Bearer admin-key", request.headers["Authorization"])
+            assertEquals(buildJsonObject { put("role", "adult") }, request.json())
+        }
+
+    @Test
+    fun `setRole refuses a device id that could escape its path segment without any request`() =
+        runBlocking {
+            for (badId in listOf("..", "../stations", "a/b", "", "dev-1?x=1")) {
+                assertTrue("setRole '$badId'", hub.setRole("admin", badId, DeviceRole.ADULT).isFailure)
+            }
+
+            assertEquals(0, server.requestCount)
+        }
+
+    @Test
+    fun `an unknown role on the wire reads as adult`() =
+        runBlocking {
+            reply(200, """{"deviceId":"dev-1","role":"auditor"}""")
+            assertEquals(DeviceRole.ADULT, hub.getMe("sess").getOrNull()?.role)
+
+            reply(200, """{"deviceId":"dev-1","role":"auditor"}""")
+            assertEquals(DeviceRole.ADULT, hub.setRole("admin", "dev-1", DeviceRole.GRANDPARENT).getOrNull()?.role)
+
+            reply(200, """{"devices":[{"deviceId":"a","deviceName":null,"status":"approved","approvedAt":1,"role":"auditor"}]}""")
+            assertEquals(DeviceRole.ADULT, hub.getRoster("admin").getOrNull()?.single()?.role)
+        }
+
+    @Test
+    fun `a roster entry with no role field reads as adult`() =
+        runBlocking {
+            reply(200, """{"devices":[{"deviceId":"a","deviceName":"Old","status":"approved","approvedAt":1}]}""")
+
+            assertEquals(DeviceRole.ADULT, hub.getRoster("admin").getOrNull()?.single()?.role)
+        }
+
+    @Test
+    fun `DeviceRole wire names are adult and grandparent`() {
+        assertEquals("adult", DeviceRole.ADULT.wireName)
+        assertEquals("grandparent", DeviceRole.GRANDPARENT.wireName)
+    }
+
     // --- failure mapping -----------------------------------------------
 
     @Test
-    fun `every function maps 401, 404, 410 and 429 to a HubException carrying that status`() =
+    fun `every function maps 400, 401, 404, 410 and 429 to a HubException carrying that status`() =
         runBlocking {
             for ((name, call) in allCalls) {
-                for (code in listOf(401, 404, 410, 429)) {
+                for (code in listOf(400, 401, 404, 410, 429)) {
                     reply(code, """{"error":"nope"}""")
 
                     val result = call()

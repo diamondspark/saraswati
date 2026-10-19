@@ -60,12 +60,18 @@ class HubClient(
             json.decodeFromString<PairingToken>(it)
         }
 
-    /** First contact from a phone that scanned a pairing link: it has no credential yet, so no bearer. */
+    /**
+     * First contact from a phone that scanned a pairing link: it has no
+     * credential yet, so no bearer. [role] is what this phone is being set up
+     * as; null sends nothing and the Worker defaults to adult. A role the
+     * Worker rejects is a 400 that does not spend the pairing token.
+     */
     suspend fun claimPairing(
         token: String,
         deviceName: String,
+        role: DeviceRole? = null,
     ): Result<ClaimResult> =
-        send("POST", listOf("pairing", "claim"), null, json.encodeToString(ClaimRequest(token, deviceName))) {
+        send("POST", listOf("pairing", "claim"), null, json.encodeToString(ClaimRequest(token, deviceName, role))) {
             json.decodeFromString<ClaimResult>(it)
         }
 
@@ -113,6 +119,24 @@ class HubClient(
         if (!isSafeSegment(deviceId)) return invalidDeviceId()
         return send("POST", listOf("roster", deviceId, "revoke"), adminKey, "{}") { }
     }
+
+    /** The owner flips a phone's role (how a grandparent-mode phone is switched back). 404 is unknown or revoked. */
+    suspend fun setRole(
+        adminKey: String,
+        deviceId: String,
+        role: DeviceRole,
+    ): Result<RoleUpdate> {
+        if (!isSafeSegment(deviceId)) return invalidDeviceId()
+        return send("PUT", listOf("roster", deviceId, "role"), adminKey, json.encodeToString(RoleRequest(role))) {
+            json.decodeFromString<RoleUpdate>(it)
+        }
+    }
+
+    /** A paired phone asking what the owner has set it up as. Device bearer only; the admin key gets a 401. */
+    suspend fun getMe(sessionToken: String): Result<Me> =
+        send("GET", listOf("me"), sessionToken, null) {
+            json.decodeFromString<Me>(it)
+        }
 
     /** [auth] is the owner's admin key or a paired phone's session token; the Worker accepts either. */
     suspend fun getStations(auth: String): Result<List<Station>> =
