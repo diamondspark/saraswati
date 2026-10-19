@@ -11,6 +11,10 @@ const HEALTH_MAX_REPORTS = 1;
 // whose attempts are spent stays blocked until it would have expired anyway.
 const CLAIM_WINDOW_SECONDS = 15 * 60;
 const CLAIM_MAX_ATTEMPTS = 10;
+// Every admin-authenticated request, across all routes, shares one budget.
+const ADMIN_RATE_KEY = "admin";
+const ADMIN_WINDOW_SECONDS = 60;
+const ADMIN_MAX_REQUESTS = 20;
 // Storage hygiene for the free-text fields of a health report.
 const MAX_HEALTH_TEXT_LENGTH = 128;
 
@@ -350,10 +354,31 @@ export class FamilyHub extends DurableObject<Env> {
     });
   }
 
+  /**
+   * Spends one request from the shared admin budget and returns the 429 to
+   * send once it is gone. Call it only after authenticate() succeeded, so a
+   * request with a bad bearer can never use up the owner's budget; device
+   * requests are not admin requests and are never counted.
+   */
+  private throttleAdmin(auth: AuthResult): Response | null {
+    if (
+      auth?.role !== "admin" ||
+      this.rateLimit(ADMIN_RATE_KEY, ADMIN_WINDOW_SECONDS, ADMIN_MAX_REQUESTS)
+    ) {
+      return null;
+    }
+    return json({ error: "too many requests" }, 429);
+  }
+
   private async handlePairingCreate(request: Request): Promise<Response> {
     const auth = await this.authenticate(request, this.env);
     if (auth?.role !== "admin") {
       return json({ error: "unauthorized" }, 401);
+    }
+
+    const throttled = this.throttleAdmin(auth);
+    if (throttled) {
+      return throttled;
     }
 
     const token = randomHex(32);
@@ -429,6 +454,11 @@ export class FamilyHub extends DurableObject<Env> {
       return json({ error: "unauthorized" }, 401);
     }
 
+    const throttled = this.throttleAdmin(auth);
+    if (throttled) {
+      return throttled;
+    }
+
     const devices = this.ctx.storage.sql
       .exec<RosterRow>(
         "SELECT deviceId, deviceName, status, sessionToken, approvedAt FROM roster",
@@ -451,6 +481,11 @@ export class FamilyHub extends DurableObject<Env> {
     const auth = await this.authenticate(request, this.env);
     if (auth?.role !== "admin") {
       return json({ error: "unauthorized" }, 401);
+    }
+
+    const throttled = this.throttleAdmin(auth);
+    if (throttled) {
+      return throttled;
     }
 
     const rows = this.ctx.storage.sql
@@ -483,6 +518,11 @@ export class FamilyHub extends DurableObject<Env> {
     const auth = await this.authenticate(request, this.env);
     if (auth?.role !== "admin") {
       return json({ error: "unauthorized" }, 401);
+    }
+
+    const throttled = this.throttleAdmin(auth);
+    if (throttled) {
+      return throttled;
     }
 
     const rows = this.ctx.storage.sql
@@ -536,6 +576,11 @@ export class FamilyHub extends DurableObject<Env> {
       return json({ error: "unauthorized" }, 401);
     }
 
+    const throttled = this.throttleAdmin(auth);
+    if (throttled) {
+      return throttled;
+    }
+
     return json({ stations: this.readStations() });
   }
 
@@ -543,6 +588,11 @@ export class FamilyHub extends DurableObject<Env> {
     const auth = await this.authenticate(request, this.env);
     if (auth?.role !== "admin") {
       return json({ error: "unauthorized" }, 401);
+    }
+
+    const throttled = this.throttleAdmin(auth);
+    if (throttled) {
+      return throttled;
     }
 
     const body = await readStrictJsonObject(request);
@@ -577,6 +627,11 @@ export class FamilyHub extends DurableObject<Env> {
       return json({ error: "unauthorized" }, 401);
     }
 
+    const throttled = this.throttleAdmin(auth);
+    if (throttled) {
+      return throttled;
+    }
+
     return json(this.readKillSwitches());
   }
 
@@ -584,6 +639,11 @@ export class FamilyHub extends DurableObject<Env> {
     const auth = await this.authenticate(request, this.env);
     if (auth?.role !== "admin") {
       return json({ error: "unauthorized" }, 401);
+    }
+
+    const throttled = this.throttleAdmin(auth);
+    if (throttled) {
+      return throttled;
     }
 
     const body = await readStrictJsonObject(request);
@@ -666,6 +726,11 @@ export class FamilyHub extends DurableObject<Env> {
     const auth = await this.authenticate(request, this.env);
     if (auth?.role !== "admin") {
       return json({ error: "unauthorized" }, 401);
+    }
+
+    const throttled = this.throttleAdmin(auth);
+    if (throttled) {
+      return throttled;
     }
 
     const devices = this.ctx.storage.sql
