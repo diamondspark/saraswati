@@ -1,6 +1,13 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "./index";
+import type { HubContext, RouteHandler } from "./hubContext";
 import { isNonEmptyString, json, readJsonBody, readStrictJsonObject } from "./http";
+import {
+  addFamilyPlaylist,
+  deleteFamilyPlaylist,
+  listFamilyPlaylists,
+} from "./routes/familyPlaylists";
+import { listParivaarPlaylists, putParivaarPlaylist } from "./routes/parivaar";
 import { CLOSE_DEVICE_REVOKED, CLOSE_SANGAT_DISABLED } from "./sangat/limits";
 import { Sangat, type LiveRoom } from "./sangat/Sangat";
 import { createSangatTables } from "./sangat/schema";
@@ -33,7 +40,7 @@ const FAMILY_FEATURE_KEYS = [
   "family_playlists",
   "cast_relay",
 ] as const;
-type FamilyFeatureKey = (typeof FAMILY_FEATURE_KEYS)[number];
+export type FamilyFeatureKey = (typeof FAMILY_FEATURE_KEYS)[number];
 
 // What the owner has set a phone up as. Not to be confused with AuthResult's
 // "admin" | "device" `role`, which says who is calling.
@@ -42,7 +49,7 @@ type DeviceRole = (typeof DEVICE_ROLES)[number];
 const DEFAULT_DEVICE_ROLE: DeviceRole = "adult";
 const ROLE_ERROR = `role must be one of: ${DEVICE_ROLES.join(", ")}`;
 
-type AuthResult =
+export type AuthResult =
   | { role: "admin" }
   | { role: "device"; deviceId: string }
   | null;
@@ -217,6 +224,15 @@ function isFamilyFeatureKey(key: string): key is FamilyFeatureKey {
   return (FAMILY_FEATURE_KEYS as readonly string[]).includes(key);
 }
 
+/** A path segment, decoded; one with a broken escape stays as it is and matches no stored id. */
+function decodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
 /** A room as the hub's JSON routes show it: LiveRoom with startedAt as an ISO time. */
 function liveRoomJson(room: LiveRoom) {
   return { ...room, startedAt: new Date(room.startedAt).toISOString() };
@@ -231,10 +247,18 @@ function liveRoomJson(room: LiveRoom) {
  */
 export class FamilyHub extends DurableObject<Env> {
   private readonly sangat: Sangat;
+  private readonly hubContext: HubContext;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sangat = new Sangat(ctx);
+    this.hubContext = {
+      sql: ctx.storage.sql,
+      rateLimit: (key, windowSeconds, max) =>
+        this.rateLimit(key, windowSeconds, max),
+      featureEnabled: (key) => this.readKillSwitches()[key],
+      now: () => Date.now(),
+    };
 
     ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS pairing_tokens (
       token TEXT PRIMARY KEY,
@@ -272,6 +296,21 @@ export class FamilyHub extends DurableObject<Env> {
       key TEXT PRIMARY KEY,
       windowStart INTEGER,
       count INTEGER
+    )`);
+    // Parivaar Mix: each phone's own playlist. family_playlists: the ones the whole family
+    // shares. Times are epoch milliseconds; the routes show them as ISO strings.
+    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS parivaar_playlists (
+      deviceId TEXT PRIMARY KEY,
+      memberName TEXT NOT NULL,
+      playlistId TEXT NOT NULL,
+      updatedAt INTEGER NOT NULL
+    )`);
+    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS family_playlists (
+      id TEXT PRIMARY KEY,
+      playlistId TEXT NOT NULL UNIQUE,
+      title TEXT NOT NULL,
+      addedByDeviceId TEXT NOT NULL,
+      addedAt INTEGER NOT NULL
     )`);
     createSangatTables(ctx.storage.sql);
     // INSERT OR IGNORE keeps any key the owner has already flipped; a feature
@@ -698,6 +737,12 @@ export class FamilyHub extends DurableObject<Env> {
     // authenticate the device in the gap. Its sockets close at once (4001) and its seats,
     // and with them its reconnect tokens, go; waiting for a reconnect would be too late.
     this.sangat.closeDevice(deviceId, CLOSE_DEVICE_REVOKED, "revoked");
+    // Its Parivaar row goes too (the list hides it anyway). Its family playlists stay: they
+    // belong to the family, and only the admin can remove them now.
+    this.ctx.storage.sql.exec(
+      "DELETE FROM parivaar_playlists WHERE deviceId = ?",
+      deviceId,
+    );
 
     return json({ deviceId, status: "revoked" });
   }
@@ -985,6 +1030,30 @@ export class FamilyHub extends DurableObject<Env> {
     return room ? json(liveRoomJson(room)) : json({ error: "room not found" }, 404);
   }
 
+  /**
+   * Runs one of the Parivaar / family-playlist handlers. "device" routes are closed to the
+   * admin bearer, so an admin never reaches them or spends the shared admin budget on them;
+   * "any" routes take a device or the admin, and the admin's call is counted as everywhere
+   * else. The handler does the rest: kill switch, body, per-device write limit.
+   */
+  private async runRoute(
+    request: Request,
+    access: "device" | "any",
+    handler: RouteHandler,
+  ): Promise<Response> {
+    const auth = await this.authenticate(request, this.env);
+    if (!auth || (access === "device" && auth.role !== "device")) {
+      return json({ error: "unauthorized" }, 401);
+    }
+
+    const throttled = this.throttleAdmin(auth);
+    if (throttled) {
+      return throttled;
+    }
+
+    return handler(this.hubContext, request, auth);
+  }
+
   async webSocketMessage(
     ws: WebSocket,
     message: string | ArrayBuffer,
@@ -1027,6 +1096,31 @@ export class FamilyHub extends DurableObject<Env> {
 
     if (request.method === "PUT" && pathname === "/sangat/car") {
       return this.handleSangatCar(request);
+    }
+
+    if (request.method === "PUT" && pathname === "/parivaar/playlist") {
+      return this.runRoute(request, "device", putParivaarPlaylist);
+    }
+
+    if (request.method === "GET" && pathname === "/parivaar/playlists") {
+      return this.runRoute(request, "any", listParivaarPlaylists);
+    }
+
+    if (pathname === "/family-playlists") {
+      if (request.method === "GET") {
+        return this.runRoute(request, "any", listFamilyPlaylists);
+      }
+      if (request.method === "POST") {
+        return this.runRoute(request, "device", addFamilyPlaylist);
+      }
+    }
+
+    const familyPlaylistMatch = /^\/family-playlists\/([^/]+)$/.exec(pathname);
+    if (request.method === "DELETE" && familyPlaylistMatch) {
+      const id = decodeSegment(familyPlaylistMatch[1]);
+      return this.runRoute(request, "any", (ctx, req, auth) =>
+        deleteFamilyPlaylist(ctx, req, auth, id),
+      );
     }
 
     if (request.method === "GET" && pathname === "/ping") {
