@@ -1,0 +1,11 @@
+name = "saraswati-sangat"
+main = "src/index.ts"
+compatibility_date = "2026-10-18"
+
+[[durable_objects.bindings]]
+name = "FAMILY_HUB"
+class_name = "FamilyHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["FamilyHub"]

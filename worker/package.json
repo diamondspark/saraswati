@@ -1,0 +1,18 @@
+{
+  "name": "saraswati-sangat",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cloudflare Worker backing the Saraswati family hub (FamilyHub Durable Object).",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.4.4",
+    "@cloudflare/workers-types": "5.20261018.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.12",
+    "wrangler": "4.151.1"
+  }
+}
