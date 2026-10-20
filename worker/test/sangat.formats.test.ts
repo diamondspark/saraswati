@@ -8,6 +8,7 @@ import { RoomStateSchema, TrackInfoSchema } from "../src/gen/listentogether_pb";
 import { newRoomCode, newSessionToken, newSuggestionId, newUserId } from "../src/sangat/ids";
 import { ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from "../src/sangat/limits";
 import { livePosition } from "../src/sangat/roomOps";
+import { sha256Hex } from "../src/secrets";
 import {
   closeAllClients,
   createRoom,
@@ -89,13 +90,14 @@ describe("session tokens", () => {
     expect(tokens.size).toBe(1000);
   });
 
-  it("the token a room hands out is not the user id it belongs to, and is stored beside it", async () => {
+  it("the token a room hands out is not the user id it belongs to, and only its hash is stored beside it", async () => {
     const hub = hubStub();
     const room = await createRoom(hub, await seedDevice(hub, "a"));
     expect(room.token).toMatch(/^[0-9a-f]{64}$/);
     expect(room.token).not.toBe(room.userId);
-    const row = await sql(hub, (db) => db.exec("SELECT userId, sessionToken FROM sangat_members").one());
-    expect(row).toEqual({ userId: room.userId, sessionToken: room.token });
+    const row = await sql(hub, (db) => db.exec("SELECT userId, sessionTokenHash FROM sangat_members").one());
+    expect(row).toEqual({ userId: room.userId, sessionTokenHash: await sha256Hex(room.token) });
+    expect(row.sessionTokenHash).not.toBe(room.token);
   });
 });
 
