@@ -342,4 +342,61 @@ class SaralAskVoiceExplanationTest {
 
         assertEquals(VoicePhase.IDLE, vm.voice.value)
     }
+
+    // SARASWATI: security-ask-explanation (fifth-round audit fix 1, blocks merge, confirmed by running it) —
+    // the wall clock (System.currentTimeMillis()) can move backwards (NTP correction, a manual clock change);
+    // a naive `nowMs() - explanationClosedAtMs < DISMISS_DEBOUNCE_MS` check would then go negative and satisfy
+    // the debounce for as long as the gap, freezing tap-to-cancel for that whole time. The production default
+    // is now elapsedRealtime() (monotonic, cannot do this), and the check itself also treats any negative
+    // delta as "the window has passed" rather than "still inside it", so a backwards jump — simulated here via
+    // the injectable nowMs, since this test cannot move the real clock — must not freeze cancellation.
+    @Test
+    fun `a clock that jumps backwards right after declining does not freeze tap-to-cancel`() {
+        answer(AskIntent.PlayStation(bhajan.id))
+        val explanationGate = FakeAskVoiceExplanationGate(seen = false)
+        var clockMs = 10_000_000L
+        val vm = newVm(explanationGate, nowMs = { clockMs })
+        search.gate = CompletableDeferred()
+
+        vm.heard("bhajan lagao")
+        vm.onOverlayDismissed()
+        assertEquals(VoicePhase.SEARCHING, vm.voice.value)
+
+        // The clock jumps backwards by an hour (what an NTP correction or a manual clock change can do to
+        // System.currentTimeMillis(), and what elapsedRealtime() by platform contract cannot).
+        clockMs -= 3_600_000L
+        vm.onOverlayDismissed()
+
+        assertEquals("a backwards clock jump must not freeze tap-to-cancel", VoicePhase.IDLE, vm.voice.value)
+    }
+
+    // SARASWATI: security-ask-explanation (fifth-round audit fix 2, recommended, confirmed by running it) —
+    // when Ask Saraswati is off, willReachHub() returns without a real suspension, so the whole surrounding
+    // launch block (including the old searchFor's own nested voiceJob = launch { ... }) ran synchronously
+    // end to end before the *outer* launch{} call returned and overwrote voiceJob back to that outer, already-
+    // finished job — silently losing the reference to the real, still-running search. A cancel then cancelled
+    // nothing. Checked through status, not just voice: voice.value flips to IDLE unconditionally inside
+    // onOverlayDismissed regardless of whether the real coroutine was actually cancelled, so only the search
+    // genuinely finishing (and reporting NOT_FOUND through status) would catch the bug; voice alone would not.
+    @Test
+    fun `cancelling a fallback search when Ask Saraswati is off actually stops it`() {
+        hub.killSwitches = hub.killSwitches + (FamilyFeature.ASK_SARASWATI.key to false)
+        runBlocking { gate.refresh() }
+        val vm = newVm(explanationGate = FakeAskVoiceExplanationGate(seen = false))
+        search.gate = CompletableDeferred()
+
+        vm.heard("bhajan lagao")
+        assertEquals(VoicePhase.SEARCHING, vm.voice.value)
+
+        vm.onOverlayDismissed()
+        assertEquals(VoicePhase.IDLE, vm.voice.value)
+
+        // If the search were not actually cancelled, letting it finish here would report NOT_FOUND.
+        search.gate?.complete(Unit)
+        assertEquals(
+            "the fallback search itself must be cancelled, not just a stale job reference",
+            SaralStatus.Idle,
+            vm.status.value,
+        )
+    }
 }

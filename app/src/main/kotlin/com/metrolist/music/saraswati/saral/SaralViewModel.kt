@@ -262,9 +262,13 @@ class SaralViewModel
         // SARASWATI: security-ask-explanation — null skips the one-time explanation (treated as already seen),
         // so tests that do not care about it are unaffected.
         private val explanationGate: AskVoiceExplanationGate? = null,
-        // SARASWATI: security-ask-explanation (fourth-round audit fix 2) — overridable only so a test can move
-        // time without a real 600ms delay; real callers always get the wall clock.
-        private val nowMs: () -> Long = { System.currentTimeMillis() },
+        // SARASWATI: security-ask-explanation (fourth-round audit fix 2; fifth-round audit fix 1) — overridable
+        // only so a test can move time without a real 600ms delay. SystemClock.elapsedRealtime(), not
+        // System.currentTimeMillis(): the debounce in onOverlayDismissed compares two readings of this, and the
+        // wall clock can jump backwards (NTP correction, a manual clock change, not rare on an older phone) —
+        // confirmed by running it, a 1-hour backward jump would make every tap-to-cancel a no-op for an hour.
+        // elapsedRealtime() is monotonic (time since boot, including sleep) and immune to that.
+        private val nowMs: () -> Long = { android.os.SystemClock.elapsedRealtime() },
     ) : ViewModel(scope) {
         @Inject
         constructor(
@@ -445,7 +449,11 @@ class SaralViewModel
             // SARASWATI: security-ask-explanation (fourth-round audit fix 2) — see explanationClosedAtMs: a
             // stray second tap landing on the overlay that appears the instant Okay/Not now closes the
             // explanation must not cancel the fallback search or hub call that tap just started.
-            if (explanationClosedAtMs?.let { nowMs() - it < DISMISS_DEBOUNCE_MS } == true) return
+            // SARASWATI: security-ask-explanation (fifth-round audit fix 1) — a negative delta (nowMs() read
+            // before explanationClosedAtMs) is treated as "the window has passed", not "still inside it": the
+            // clock source is now elapsedRealtime(), which cannot go backwards, but this keeps the debounce
+            // from ever getting stuck if it somehow did.
+            if (explanationClosedAtMs?.let { nowMs() - it in 0 until DISMISS_DEBOUNCE_MS } == true) return
             if (_voice.value != VoicePhase.SEARCHING) return
             voiceJob?.cancel()
             _voice.value = VoicePhase.IDLE
@@ -540,14 +548,21 @@ class SaralViewModel
                 viewModelScope.launch {
                     // SARASWATI: security-ask-explanation (third-round audit fix 1; fourth-round audit fix 3) —
                     // the explanation's claim ("sends the words to a computer helper") must be true when it is
-                    // shown: Ask Saraswati off, or no session, means the hub must not be asked at all. Calling
-                    // searchFor directly here, instead of runAsk (which would call asker.resolve -> repo.ask,
-                    // re-checking willReachHub a second time), makes "no explanation shown -> never reaches the
-                    // hub" structural rather than a timing coincidence: gate/session state flipping true between
+                    // shown: Ask Saraswati off, or no session, means the hub must not be asked at all. Resolving
+                    // directly here, instead of runAsk (which would call asker.resolve -> repo.ask, re-checking
+                    // willReachHub a second time), makes "no explanation shown -> never reaches the hub"
+                    // structural rather than a timing coincidence: gate/session state flipping true between
                     // this check and a second one inside ask() could otherwise let a question through with no
                     // explanation ever having been shown.
+                    //
+                    // SARASWATI: security-ask-explanation (fifth-round audit fix 2) — performSearch/searchQueries
+                    // directly, not searchFor: this coroutine IS voiceJob (resolveVoice assigned it below),
+                    // so calling searchFor here (which does its own `voiceJob = launch { ... }`) risked that
+                    // assignment being overwritten right back the moment this outer launch itself returns — see
+                    // performSearch's own comment for exactly when that happens.
                     if (!asker.willReachHub()) {
-                        searchFor(guesses)
+                        val queries = searchQueries(guesses)
+                        if (queries.isEmpty()) endVoice(VoiceNotice.NOT_HEARD) else performSearch(queries)
                         return@launch
                     }
                     val gate = explanationGate
@@ -641,38 +656,52 @@ class SaralViewModel
 
         /** [guesses] are the recogniser's, best first. */
         private fun searchFor(guesses: List<String>?) {
-            val queries =
-                guesses
-                    .orEmpty()
-                    .map { it.trim() }
-                    .filter { it.isNotEmpty() }
-                    .distinct()
-                    .take(MAX_GUESSES)
+            val queries = searchQueries(guesses)
             if (queries.isEmpty()) {
                 endVoice(VoiceNotice.NOT_HEARD)
                 return
             }
             _voice.value = VoicePhase.SEARCHING
-            voiceJob =
-                viewModelScope.launch {
-                    var found: SongItem? = null
-                    var failure: Throwable? = null
-                    for (query in queries) {
-                        val answer = search.firstSong(query)
-                        answer.onSuccess { found = it }.onFailure { failure = it }
-                        if (found != null || failure != null) break
-                    }
-                    // A search that was dismissed may still hand back a (wrapped) failure; it must not speak.
-                    coroutineContext.ensureActive()
-                    _voice.value = VoicePhase.IDLE
-                    val song = found
-                    val error = failure
-                    when {
-                        song != null -> startSong(song)
-                        error != null -> notice.value = if (PlaybackFailures.isOffline(error)) VoiceNotice.OFFLINE else VoiceNotice.FAILED
-                        else -> notice.value = VoiceNotice.NOT_FOUND
-                    }
-                }
+            voiceJob = viewModelScope.launch { performSearch(queries) }
+        }
+
+        private fun searchQueries(guesses: List<String>?): List<String> =
+            guesses
+                .orEmpty()
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct()
+                .take(MAX_GUESSES)
+
+        // SARASWATI: security-ask-explanation (fifth-round audit fix 2) — a suspend function with no launch
+        // and no voiceJob assignment of its own, so it is safe to call directly from inside a coroutine that
+        // is already [voiceJob] itself (see resolveVoice's willReachHub()-false branch). Calling searchFor
+        // there instead — which does its own `voiceJob = launch { ... }` — looked right but wasn't: when
+        // willReachHub() returns without a real suspension (true whenever Ask Saraswati is off or there is no
+        // session, since neither check ever reaches the network), the whole surrounding launch block runs
+        // synchronously end to end, including searchFor's nested reassignment of voiceJob to its own new job
+        // — and then the *outer* launch{} call (resolveVoice's own `voiceJob = viewModelScope.launch { ... }`)
+        // finally returns and overwrites voiceJob back to that outer, now-already-finished job, silently
+        // clobbering the inner job that is the one actually running the search. onOverlayDismissed's
+        // voiceJob?.cancel() then cancels nothing, while the real search keeps going. Confirmed by running it.
+        private suspend fun performSearch(queries: List<String>) {
+            var found: SongItem? = null
+            var failure: Throwable? = null
+            for (query in queries) {
+                val answer = search.firstSong(query)
+                answer.onSuccess { found = it }.onFailure { failure = it }
+                if (found != null || failure != null) break
+            }
+            // A search that was dismissed may still hand back a (wrapped) failure; it must not speak.
+            coroutineContext.ensureActive()
+            _voice.value = VoicePhase.IDLE
+            val song = found
+            val error = failure
+            when {
+                song != null -> startSong(song)
+                error != null -> notice.value = if (PlaybackFailures.isOffline(error)) VoiceNotice.OFFLINE else VoiceNotice.FAILED
+                else -> notice.value = VoiceNotice.NOT_FOUND
+            }
         }
 
         private fun startStation(tile: SaralTile) {

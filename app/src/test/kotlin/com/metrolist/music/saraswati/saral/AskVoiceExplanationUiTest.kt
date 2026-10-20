@@ -41,6 +41,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -131,6 +132,25 @@ class AskVoiceExplanationUiTest {
         assertFalse(
             "the card must be its own accessibility boundary; its text must not merge into the scrim's node",
             scrimText.contains("Each time"),
+        )
+    }
+
+    // SARASWATI: security-ask-explanation (fifth-round audit fix 3) — onClickLabel alone only supplies the
+    // "double-tap to ..." hint, not the element's own name: without a contentDescription, TalkBack announced
+    // an unnamed "Button" here.
+    @Test
+    fun `the scrim has its own accessible name, and the card's text still merges separately`() {
+        renderRealExplanation()
+
+        val scrimNode = compose.onNodeWithTag(ASK_VOICE_EXPLANATION_SCRIM_TAG).fetchSemanticsNode()
+        val scrimDescription = scrimNode.config.getOrNull(SemanticsProperties.ContentDescription)?.joinToString(" ")
+
+        assertEquals("Close", scrimDescription)
+        // Fix 3 is `semantics { contentDescription = ... }`, not clearAndSetSemantics: the latter would also
+        // wipe the card's own (correctly isolated, see the test above) text.
+        assertTrue(
+            "the card's own text must still be readable; a clearAndSetSemantics on the scrim would have wiped it",
+            compose.onAllNodesWithTag(ASK_VOICE_EXPLANATION_BODY_TAG, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty(),
         )
     }
 

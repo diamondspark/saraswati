@@ -86,6 +86,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
@@ -161,6 +162,11 @@ internal fun AskVoiceExplanationScrim(
             .fillMaxSize()
             .background(Color(0xEB0A0806))
             .testTag(ASK_VOICE_EXPLANATION_SCRIM_TAG)
+            // Fix (fifth-round audit 3) — onClickLabel alone only supplies the "double-tap to ..." hint, not the
+            // element's own name: without a contentDescription TalkBack announced an unnamed "Button". Set here
+            // on the scrim specifically (not clearAndSetSemantics, which would also wipe the card's own text,
+            // now correctly isolated from this node — see AskVoiceExplanationCard's semantics() fix).
+            .semantics { contentDescription = closeLabel }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
