@@ -35,6 +35,7 @@ import com.metrolist.music.saraswati.localmedia.ContentResolverFileOpener
 import com.metrolist.music.saraswati.localmedia.LocalAwareExtractorsFactory
 import com.metrolist.music.saraswati.localmedia.LocalRoutingDataSource
 import com.metrolist.music.saraswati.localmedia.LocalSangatPolicy
+import com.metrolist.music.saraswati.localmedia.LocalServingPolicy
 import com.metrolist.music.saraswati.localmedia.LocalSongIds
 import com.metrolist.music.saraswati.family.FamilyFeature
 import com.metrolist.music.saraswati.family.PlaybackStatsPlan
@@ -449,6 +450,10 @@ class MusicService :
     private var cachedNormalizationEnabled: Boolean = false
 
     @Volatile private var isScreenOff = false
+
+    // SARASWATI: fix wave P5a C1 — whether songs on this phone may be played now (Local files switch on, access
+    // granted). Kept up to date from the repository; false until it has said otherwise.
+    @Volatile private var localServing = false
     private var lastPlaybackSpeed = 1.0f
 
     @Volatile
@@ -760,6 +765,16 @@ class MusicService :
         scope.launch {
             mediaLibrarySessionCallback.homeChanges.collect { count ->
                 mediaSession?.notifyChildrenChanged(MusicService.CAR_HOME, count, null)
+            }
+        }
+        // SARASWATI: fix wave P5a C1 — when the Local files switch goes off (or access goes), songs on this phone
+        // leave the queue, the one playing stops with them, and the car is told to ask for its folders again.
+        scope.launch {
+            localSongsRepository.serving.collect { serving ->
+                localServing = serving
+                if (!serving) dropLocalSongsFromQueue()
+                mediaSession?.notifyChildrenChanged(MusicService.CAR_LOCAL, 0, null)
+                mediaSession?.notifyChildrenChanged(MusicService.CAR_LIBRARY, 0, null)
             }
         }
         player.repeatMode = startupPrefs!![RepeatModeKey] ?: REPEAT_MODE_OFF
@@ -1676,6 +1691,12 @@ class MusicService :
         }
     }
 
+    private fun dropLocalSongsFromQueue() {
+        if (!::player.isInitialized) return
+        val ids = List(player.mediaItemCount) { player.getMediaItemAt(it).mediaId }
+        LocalServingPolicy.localIndicesLastFirst(ids).forEach { player.removeMediaItem(it) }
+    }
+
     fun playQueue(
         queue: Queue,
         playWhenReady: Boolean = true,
@@ -1694,6 +1715,12 @@ class MusicService :
         // SARASWATI: Phase 5 Task 4 — a song on this phone that would start the queue cannot join a Sangat.
         if (listenTogetherManager.isInRoom && queue.preloadItem?.let { LocalSangatPolicy.mayShare(it.id) } == false) {
             Toast.makeText(this, R.string.local_songs_cant_join_sangat, Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // SARASWATI: fix wave P5a C1 — with the Local files switch off a local song cannot start a queue.
+        if (!localServing && queue.preloadItem?.let { LocalSongIds.isLocal(it.id) } == true) {
+            Toast.makeText(this, R.string.local_song_cant_play, Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -1719,10 +1746,16 @@ class MusicService :
                 }
             // SARASWATI: Phase 5 Task 4 — songs on this phone never join a Sangat: dropped here, once, with a toast.
             val inRoom = listenTogetherManager.isInRoom
-            val initialStatus = LocalSangatPolicy.filterForRoom(unfiltered, inRoom)
+            val serving = localSongsRepository.canServe()
+            val initialStatus = LocalServingPolicy.startableQueue(unfiltered, serving, inRoom)
             if (inRoom && (initialStatus == null || initialStatus.items.size < unfiltered.items.size)) {
                 withContext(Dispatchers.Main) {
                     Toast.makeText(this@MusicService, R.string.local_songs_cant_join_sangat, Toast.LENGTH_SHORT).show()
+                }
+            }
+            if (!serving && !inRoom && !restoringQueue && (initialStatus == null || initialStatus.items.size < unfiltered.items.size)) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MusicService, R.string.local_song_cant_play, Toast.LENGTH_SHORT).show()
                 }
             }
             if (initialStatus == null) return@launch

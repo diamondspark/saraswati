@@ -69,6 +69,7 @@ import javax.inject.Inject
 import com.metrolist.music.constants.AndroidAutoSectionsOrderKey
 import com.metrolist.music.constants.AutoRadioQueueKey
 import com.metrolist.music.playback.queues.ListQueue
+import com.metrolist.music.playback.queues.Queue
 import com.metrolist.music.playback.queues.YouTubeQueue
 import com.metrolist.music.saraswati.car.CarBrowseTree
 import com.metrolist.music.saraswati.car.CarLocalTree
@@ -661,7 +662,12 @@ constructor(
     ): ListenableFuture<LibraryResult<MediaItem>> =
         scope.future(Dispatchers.IO) {
             try {
-                database.song(mediaId).first()?.toMediaItem()?.let {
+                // SARASWATI: fix wave P5a C1 — a song on this phone is answered only while the Local files switch allows it.
+                com.metrolist.music.saraswati.localmedia.LocalServingPolicy.lookup(
+                    mediaId = mediaId,
+                    canServe = localSongs::canServe,
+                    find = { id -> database.song(id).first()?.toMediaItem() },
+                )?.let {
                     LibraryResult.ofItem(it, null)
                 } ?: LibraryResult.ofError(SessionError.ERROR_UNKNOWN)
             } catch (e: Exception) {
@@ -910,12 +916,28 @@ constructor(
                 MusicService.CAR_LOCAL -> {
                     val selected = path.getOrNull(1) ?: return@future defaultResult
                     val songs = localSongs.songs.first()
-                    if (selected == MusicService.SHUFFLE_ACTION) {
-                        MediaItemsWithStartPosition(CarLocalTree.shuffleQueue(songs).map { it.toMediaItem() }, 0, C.TIME_UNSET)
-                    } else {
-                        val queue = CarLocalTree.queueFrom(songs, selected) ?: return@future defaultResult
-                        MediaItemsWithStartPosition(queue.songs.map { it.toMediaItem() }, queue.startIndex, startPositionMs)
+                    val (items, startAt, startMs) =
+                        if (selected == MusicService.SHUFFLE_ACTION) {
+                            Triple(CarLocalTree.shuffleQueue(songs).map { it.toMediaItem() }, 0, C.TIME_UNSET)
+                        } else {
+                            val queue = CarLocalTree.queueFrom(songs, selected) ?: return@future defaultResult
+                            Triple(queue.songs.map { it.toMediaItem() }, queue.startIndex, startPositionMs)
+                        }
+                    // SARASWATI: fix wave P5a I1 — this branch bypasses MusicService.playQueue, so the Sangat rule is
+                    // applied here: in a room no song on this phone starts, and the car is told why.
+                    val inRoom = service.listenTogetherManager.isInRoom
+                    val allowed =
+                        com.metrolist.music.saraswati.localmedia.LocalSangatPolicy.filterForRoom(
+                            Queue.Status(title = null, items = items, mediaItemIndex = startAt, position = startMs),
+                            inRoom,
+                        )
+                    if (inRoom) {
+                        withContext(Dispatchers.Main) {
+                            android.widget.Toast.makeText(context, R.string.local_songs_cant_join_sangat, android.widget.Toast.LENGTH_SHORT).show()
+                        }
                     }
+                    if (allowed == null) return@future defaultResult
+                    MediaItemsWithStartPosition(allowed.items, allowed.mediaItemIndex, allowed.position)
                 }
 
                 MusicService.CAR_STATIONS -> {

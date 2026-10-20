@@ -179,4 +179,22 @@ class LocalSongsRepositoryTest {
             repo.setEnabled(true)
             assertEquals(0, repo.count.first())
         }
+
+    // SARASWATI: fix wave P5a C1 — the flag MusicService follows to drop local songs from the queue, and the answer
+    // the data source and the car ask for.
+    @Test
+    fun `serving and canServe follow the switch and access`() =
+        runBlocking {
+            val repo = repository()
+            assertTrue(repo.canServe())
+            assertTrue(repo.serving.first())
+            repo.setEnabled(false)
+            assertFalse(repo.canServe())
+            assertFalse(repo.serving.first())
+            repo.setEnabled(true)
+            assertTrue(repo.canServe())
+            access = LocalAccess.NOT_GRANTED
+            assertFalse(repo.canServe())
+            assertFalse(repo.serving.first())
+        }
 }

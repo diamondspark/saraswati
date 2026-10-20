@@ -74,6 +74,10 @@ class LocalSongsRepository
         /** Whether songs on this phone may be read and served right now: access granted and the switch not off. */
         suspend fun canServe(): Boolean = LocalFiles.enabled(storedSwitch.first(), access())
 
+        /** Whether songs on this phone are in use, now and each time that changes. */
+        val serving: Flow<Boolean> =
+            storedSwitch.map { LocalFiles.enabled(it, access()) }.distinctUntilChanged()
+
         @OptIn(ExperimentalCoroutinesApi::class)
         val songs: Flow<List<Song>> =
             storedSwitch.flatMapLatest { stored ->
