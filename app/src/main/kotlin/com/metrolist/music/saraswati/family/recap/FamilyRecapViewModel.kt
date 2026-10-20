@@ -62,7 +62,8 @@ class FamilyRecapViewModel
         /** This week's recap, or null when there is none to show (no snapshots, no pairing, or the mix is switched off). */
         val recap: StateFlow<FamilyRecap?> =
             combine(store.snapshots, features, myDeviceId) { snapshots, switches, me ->
-                val on = switches[FamilyFeature.PARIVAAR_MIX] ?: true
+                // SARASWATI: Phase 6 fix (DEF-M12) — hidden until the switches have loaded (fail closed).
+                val on = switches[FamilyFeature.PARIVAAR_MIX] == true
                 val current = snapshots.firstOrNull()
                 if (!on || me == null || current == null) {
                     null

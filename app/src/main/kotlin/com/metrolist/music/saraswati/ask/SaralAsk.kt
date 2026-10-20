@@ -56,7 +56,8 @@ class SaralAsk(
 
     /** The mix Saral plays for [SaralAction.ParivaarMix]: empty while the feature is off or nothing is cached. */
     suspend fun cachedMixTracks(): List<MixTrack> {
-        mixStore.awaitHydrated()
+        // SARASWATI: Phase 6 fix (C-M2) — a slow read of the stored mix falls back to a search inside the 3 s budget.
+        withTimeoutOrNull(SARAL_TIMEOUT_MS) { mixStore.awaitHydrated() } ?: return emptyList()
         return if (gate.isEnabled(FamilyFeature.PARIVAAR_MIX)) mixStore.cached().tracks else emptyList()
     }
 }

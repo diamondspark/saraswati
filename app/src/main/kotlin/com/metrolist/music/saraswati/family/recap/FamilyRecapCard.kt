@@ -25,7 +25,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -121,7 +121,8 @@ private fun Section(
 
 @Composable
 private fun SharedWithMe(recap: FamilyRecap) {
-    var selected by remember { mutableStateOf<String?>(null) }
+    // SARASWATI: Phase 6 fix (DEF-M13) — the chosen member survives rotation.
+    var selected by rememberSaveable { mutableStateOf<String?>(null) }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         recap.sharedWithMe.forEach { entry ->
             FilterChip(

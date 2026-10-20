@@ -115,14 +115,28 @@ class RadioTunerTest {
     }
 
     @Test
-    fun `selecting the selected chip makes no call`() = runBlocking {
+    fun `tapping the selected chip clears the selection and makes no call`() = runBlocking {
         val player = FakePlayer(index = 0, ids = listOf("a"))
         val h = Harness(player, Result.success(radio("x")))
+        h.state.publish(listOf(chip("One", selected = true), chip("Two")))
 
-        assertEquals(TuneResult.Unchanged, h.tuner.select(chip(selected = true)))
+        assertEquals(TuneResult.Unchanged, h.tuner.select(chip("One", selected = true)))
 
         assertEquals(0, h.calls)
         assertEquals(listOf("a"), player.ids)
+        assertEquals(listOf(false, false), h.state.chips.value.map { it.selected })
+        assertEquals(listOf("One", "Two"), h.state.chips.value.map { it.label })
+    }
+
+    @Test
+    fun `the tuned queue continues past its first batch`() = runBlocking {
+        val player = FakePlayer(index = 0, ids = listOf("a"))
+        val tuned = NextResult(items = listOf(song("x")), continuation = "page-2", endpoint = WatchEndpoint(videoId = "x"))
+        val h = Harness(player, Result.success(tuned))
+
+        h.tuner.select(chip())
+
+        assertTrue((player.adopted.single() as YouTubeQueue).hasNextPage())
     }
 
     @Test

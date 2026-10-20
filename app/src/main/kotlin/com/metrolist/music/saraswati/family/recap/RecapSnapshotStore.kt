@@ -3,8 +3,8 @@
  * Licensed under GPL-3.0 | See git history for contributors
  */
 
-// SARASWATI: Phase 6 Task 14 — the family's top-songs lists as this phone saw them, kept for the recap. At most two
-// snapshots: the newest, and the newest one at least RECAP_PERIOD_DAYS older than it (the week to compare against).
+// SARASWATI: Phase 6 Task 14 — the family's top-songs lists as this phone saw them, kept for the recap. Eight days of
+// snapshots (about nine with daily refreshes), plus the newest one older than that, so the week to compare against is held.
 // Local songs are dropped before anything is written. Takes no network port: the lists come from the Parivaar refresh.
 //
 // Storage that cannot be read reads as no snapshots; a failed write keeps the snapshots in memory for this run.
@@ -95,9 +95,11 @@ class RecapSnapshotStore(
 
     companion object {
         const val RECAP_PERIOD_DAYS = 7L
+        const val RETAIN_DAYS = 8L
         private const val DAY_MS = 24L * 60 * 60 * 1000
         private const val LOCAL_PREFIX = "local:"
-        private val SnapshotsKey = stringPreferencesKey("familyRecapSnapshots")
+        /** Stored snapshots. Public so BackupPolicy keeps other members' top songs out of backups. */
+        val SnapshotsKey = stringPreferencesKey("familyRecapSnapshots")
         private val LIST = ListSerializer(RecapSnapshot.serializer())
         private val json = Json { ignoreUnknownKeys = true }
 
@@ -109,15 +111,16 @@ class RecapSnapshotStore(
         }
 
         /**
-         * Newest first: the newest snapshot, then the newest one at least [RECAP_PERIOD_DAYS] older than it. When none
-         * is that old yet, the oldest one still inside the window is kept, since it is the one that will become old enough.
+         * Newest first: every snapshot within [RETAIN_DAYS] of the newest, then the newest one older than that. Daily
+         * refreshes therefore keep the one at least [RECAP_PERIOD_DAYS] old that "New this week" compares against.
          */
         internal fun retain(all: List<RecapSnapshot>): List<RecapSnapshot> {
-            val newest = all.maxByOrNull { it.takenAt } ?: return emptyList()
-            val others = all.filter { it !== newest }
-            val cutoff = newest.takenAt - RECAP_PERIOD_DAYS * DAY_MS
-            val second = others.filter { it.takenAt <= cutoff }.maxByOrNull { it.takenAt } ?: others.minByOrNull { it.takenAt }
-            return listOfNotNull(newest, second)
+            val newestFirst = all.sortedByDescending { it.takenAt }
+            val newest = newestFirst.firstOrNull() ?: return emptyList()
+            val windowStart = newest.takenAt - RETAIN_DAYS * DAY_MS
+            val inWindow = newestFirst.filter { it.takenAt >= windowStart }
+            val older = newestFirst.firstOrNull { it.takenAt < windowStart }
+            return inWindow + listOfNotNull(older)
         }
     }
 }

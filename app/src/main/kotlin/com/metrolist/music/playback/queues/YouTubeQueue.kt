@@ -16,8 +16,10 @@ import kotlinx.coroutines.withContext
 class YouTubeQueue(
     private var endpoint: WatchEndpoint,
     override val preloadItem: MediaMetadata? = null,
+    // SARASWATI: Phase 6 fix (DEF-I3) — a queue adopted from a tuned radio picks up where that radio's first batch ended.
+    initialContinuation: String? = null,
 ) : Queue {
-    private var continuation: String? = null
+    private var continuation: String? = initialContinuation
     private var retryCount = 0
     private val maxRetries = 3
 

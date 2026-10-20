@@ -14,7 +14,7 @@ import kotlin.random.Random
 class SmartShuffleController(
     private val player: ShufflePlayer,
     private val picks: suspend (currentId: String) -> Result<List<MediaItem>>,
-    private val snooze: () -> Set<String>,
+    private val snooze: suspend () -> Set<String>,
     private val clock: () -> Long,
     private val random: Random = Random.Default,
 ) {
@@ -109,7 +109,8 @@ class SmartShuffleController(
             } catch (e: Exception) {
                 Result.failure(e)
             }
-        lastFetch = Fetch(currentId, now, result)
+        // Only a success is kept, so a failed fetch is retried the next time smart shuffle is turned on.
+        if (result.isSuccess) lastFetch = Fetch(currentId, now, result)
         return result
     }
 

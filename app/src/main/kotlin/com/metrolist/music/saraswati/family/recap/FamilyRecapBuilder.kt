@@ -16,7 +16,9 @@ package com.metrolist.music.saraswati.family.recap
 
 import com.metrolist.music.saraswati.family.parivaar.MemberTopSongs
 import com.metrolist.music.saraswati.family.parivaar.MixTrack
+import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.temporal.TemporalAdjusters
 
 object FamilyRecapBuilder {
     const val NEW_MAX = 3
@@ -33,7 +35,8 @@ object FamilyRecapBuilder {
         val anthem = anthem(members)
 
         return FamilyRecap(
-            weekOf = today,
+            // SARASWATI: Phase 6 fix (DEF-M11) — the week the recap covers starts on its Monday.
+            weekOf = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)),
             anthem = anthem?.first,
             anthemMembers = anthem?.second ?: 0,
             favourites = members.map { MemberFavourite(it.memberName, it.tracks.first()) },

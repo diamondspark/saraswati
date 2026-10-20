@@ -18,6 +18,9 @@ import java.util.Locale
 
 const val ASK_TIMEOUT_MS = 6000L
 
+// SARASWATI: Phase 6 fix (C-M3) — the Worker refuses longer questions, so the phone sends no more than this.
+const val ASK_QUESTION_MAX = 200
+
 /** The hub's side of one ask; HubClient is the only implementation. */
 interface AskHub {
     suspend fun ask(
@@ -49,8 +52,9 @@ class AskRepository(
         question: String,
         timeoutMs: Long = ASK_TIMEOUT_MS,
     ): AskOutcome {
-        val text = question.trim()
-        if (text.isEmpty() || !gate.isEnabled(FamilyFeature.ASK_SARASWATI)) return AskOutcome.Unavailable
+        val text = question.trim().take(ASK_QUESTION_MAX)
+        // SARASWATI: Phase 6 fix (C-I1) — the question leaves the phone, so the switch must be known to be on (fail closed).
+        if (text.isEmpty() || !gate.allows(FamilyFeature.ASK_SARASWATI)) return AskOutcome.Unavailable
         val token = identity.sessionToken() ?: return AskOutcome.Unavailable
         val answer =
             withTimeoutOrNull(timeoutMs) { hub.ask(token, text, appLocale(Locale.getDefault())) }

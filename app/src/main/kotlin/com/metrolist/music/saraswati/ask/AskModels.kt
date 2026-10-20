@@ -72,7 +72,7 @@ internal object AskWire {
     private fun intentFrom(obj: JsonObject?): AskIntent? {
         if (obj == null) return null
         return when (text(obj, "kind")) {
-            "search" -> clean(text(obj, "query"), QUERY_MAX)?.let { AskIntent.Search(it) }
+            "search" -> clean(text(obj, "query"), QUERY_MAX)?.takeIf { !BIDI.containsMatchIn(it) }?.let { AskIntent.Search(it) }
             "play_station" ->
                 text(obj, "stationId")
                     ?.takeIf { it.isNotEmpty() && it.length <= STATION_ID_MAX && !CONTROL.containsMatchIn(it) }

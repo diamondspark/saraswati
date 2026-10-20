@@ -57,18 +57,23 @@ class RecapSnapshotStoreTest {
         )
 
     @Test
-    fun `the store keeps at most two snapshots`() =
+    fun `daily refreshes keep the week to compare against for ever`() =
         runBlocking {
             val store = store()
-            repeat(10) {
+            repeat(40) {
                 store.record(members("s$it"))
                 clock.advance(day)
             }
+            clock.advance(-day)
 
-            assertTrue(store.snapshots.value.size <= 2)
+            // Steady state: the previous snapshot is the newest one at least 7 days old, never the install-time one.
+            val previous = store.previous()!!
+            val age = store.current()!!.takenAt - previous.takenAt
+            assertTrue("age was $age", age in 7 * day..8 * day)
+            assertTrue(store.snapshots.value.size <= 10)
             val reloaded = store()
             reloaded.ensureLoaded()
-            assertTrue(reloaded.snapshots.value.size <= 2)
+            assertEquals(previous.takenAt, reloaded.previous()!!.takenAt)
             assertEquals(store.current()!!.takenAt, reloaded.current()!!.takenAt)
         }
 

@@ -40,7 +40,7 @@ class RadioTuner(
     val state: RadioTuningState,
     private val next: suspend (WatchEndpoint) -> Result<NextResult>,
     private val player: TunablePlayer,
-    private val snooze: () -> Set<String>,
+    private val snooze: suspend () -> Set<String>,
     private val clock: () -> Long,
     private val api: RadioTuningApi = UnconfirmedRadioTuningApi,
 ) {
@@ -48,7 +48,11 @@ class RadioTuner(
     private var inFlight = false
 
     suspend fun select(chip: TuningChip): TuneResult {
-        if (chip.selected) return TuneResult.Unchanged
+        // One chip at a time: tapping the selected chip again clears the selection. No call is made.
+        if (chip.selected) {
+            state.publish(state.chips.value.map { it.copy(selected = false) })
+            return TuneResult.Unchanged
+        }
         if (inFlight) return TuneResult.Busy
         val now = clock()
         lastTapAt?.let { if (now - it < TAP_DEBOUNCE_MS) return TuneResult.Busy }
@@ -66,7 +70,8 @@ class RadioTuner(
             if (items.isEmpty()) return TuneResult.Unchanged
 
             player.replaceAfterCurrent(items)
-            player.adoptQueue(YouTubeQueue(chip.endpoint))
+            // SARASWATI: Phase 6 fix (DEF-I3) — the tuned radio continues from its own first batch, so nothing repeats.
+            player.adoptQueue(YouTubeQueue(result.endpoint, initialContinuation = result.continuation))
             state.publish(api.chips(result))
             return TuneResult.Tuned
         } finally {

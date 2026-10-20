@@ -127,6 +127,8 @@ object BackupPolicy {
                 // SARASWATI: Phase 6 fix (AB-I3) — snoozed songs and resume points are this person's listening history.
                 com.metrolist.music.saraswati.craft.snooze.SnoozeStore.Key,
                 com.metrolist.music.saraswati.craft.resume.ResumeStore.Key,
+                // SARASWATI: Phase 6 fix (DEF-C2) — other members' top songs, kept for the recap, are never backed up.
+                com.metrolist.music.saraswati.family.recap.RecapSnapshotStore.SnapshotsKey,
                 // SARASWATI: Phase 5 Task 9 — offline Station songs belong to this phone's stations and downloads.
                 StationOfflineSetsKey,
                 // SARASWATI: Phase 5 Task 10 — the smart-download ledger lists this phone's own downloads.

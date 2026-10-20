@@ -346,7 +346,7 @@ class MusicService :
         SmartShuffleController(
             player = Media3ShufflePlayer { player },
             picks = ::fetchSmartPicks,
-            snooze = { snoozeStore.activeIds() },
+            snooze = { snoozeStore.awaitActiveIds() },
             clock = System::currentTimeMillis,
         )
     }
@@ -364,10 +364,13 @@ class MusicService :
             override val currentMediaId: String? get() = player.currentMetadata?.id
 
             override fun replaceAfterCurrent(items: List<MediaItem>) {
+                // SARASWATI: Phase 6 fix (DEF-M8) — a chip tapped after the timeline was cleared has nothing to replace.
+                if (player.mediaItemCount == 0) return
                 val from = player.currentMediaItemIndex + 1
                 if (player.mediaItemCount > from) player.removeMediaItems(from, player.mediaItemCount)
                 player.addMediaItems(from, items)
-                if (player.shuffleModeEnabled) {
+                // SARASWATI: Phase 6 fix (DEF-M7) — smart order is kept; a plain reshuffle would undo it.
+                if (player.shuffleModeEnabled && smartShuffle.mode.value != ShuffleMode.SMART) {
                     applyShuffleOrder(player.currentMediaItemIndex, player.mediaItemCount, dataStore.get(ShufflePlaylistFirstKey, false))
                 }
             }
@@ -383,7 +386,7 @@ class MusicService :
             next = { YouTube.next(it) },
             player = tunablePlayer,
             // SARASWATI: Phase 6 Task 2 — snoozed songs never enter a radio the tuner builds.
-            snooze = { snoozeStore.activeIds() },
+            snooze = { snoozeStore.awaitActiveIds() },
             clock = System::currentTimeMillis,
             api = radioTuningApi,
         )
@@ -2003,8 +2006,8 @@ class MusicService :
         recordResume(force = true)
         currentQueue = queue
         queueTitle = null
-        // SARASWATI: Phase 6 Task 16 — tuning chips belong to one radio, so any other queue clears them.
-        if (queue !is YouTubeQueue) radioTuningState.clear()
+        // SARASWATI: Phase 6 Task 16 — tuning chips belong to one radio, so any new queue clears them (DEF-I4).
+        radioTuningState.clear()
         val persistShuffleAcrossQueues = dataStore.get(PersistentShuffleAcrossQueuesKey, false)
         if (!persistShuffleAcrossQueues && !restoringQueue) {
             player.shuffleModeEnabled = false

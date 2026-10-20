@@ -74,6 +74,8 @@ class PlayerConnection(
     val shuffleMode: StateFlow<ShuffleMode> get() = service.smartShuffle.mode
 
     fun setShuffleMode(mode: ShuffleMode) {
+        // SARASWATI: Phase 6 fix (DEF-M9) — a Listen Together guest cannot change shuffle here, as with the chip.
+        if (shouldBlockPlaybackChanges?.invoke() == true) return
         shuffleScope.launch { service.smartShuffle.setMode(mode) }
     }
 
