@@ -105,6 +105,41 @@ class SpotifyImportRunnerTest {
         assertEquals(listOf("yt-known"), store.persisted.map { it.song.id })
     }
 
+    @Test
+    fun `matched counts only songs the store actually appended`() {
+        val known = song(id = "yt-known", title = "Known Song", artist = "Known Artist")
+        val store = LaggingStore()
+        val runner =
+            SpotifyImportRunner(
+                store = store,
+                youtubeSearch = ImportYouTubeSongSearch { listOf(known) },
+                nowMillis = { 0L },
+                sleepMillis = {},
+            )
+
+        val report =
+            runner.run(playlistOf(listOf(ImportedTrack("Known Song", listOf("Known Artist"), null, null)))) { _, _ -> }
+
+        // The playlist write has not landed yet, so nothing was appended and nothing may be reported as matched.
+        assertEquals(emptyList<String>(), report.matched)
+        assertEquals(1, report.unresolved.size)
+    }
+
+    /** A store whose playlist write has not landed yet, so appends to it find no playlist. */
+    private class LaggingStore : SpotifyImportStore {
+
+        override fun localSongs(): List<Song> = emptyList()
+
+        override fun persistSong(song: Song) {}
+
+        override fun createPlaylist(name: String): String = "playlist-1"
+
+        override fun appendSongs(
+            playlistId: String,
+            songIds: List<String>,
+        ): Int = 0
+    }
+
     private fun playlistOf(tracks: List<ImportedTrack>) = ImportedPlaylist(name = "Road Trip", tracks = tracks)
 
     private fun tracks(count: Int): List<ImportedTrack> =
@@ -141,8 +176,9 @@ class SpotifyImportRunnerTest {
         override fun appendSongs(
             playlistId: String,
             songIds: List<String>,
-        ) {
+        ): Int {
             appended += songIds
+            return songIds.size
         }
     }
 }

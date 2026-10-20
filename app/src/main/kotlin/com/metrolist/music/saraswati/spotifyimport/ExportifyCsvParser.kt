@@ -41,9 +41,13 @@ object ExportifyCsvParser {
                             album = row.cell(albumIndex),
                             durationMs = row.cell(durationIndex)?.toLongOrNull(),
                         )
-                    }.take(SpotifyImportLimits.MAX_TRACKS)
+                    }
 
-            ImportedPlaylist(name = name, tracks = tracks)
+            ImportedPlaylist(
+                name = name,
+                tracks = tracks.take(SpotifyImportLimits.MAX_TRACKS),
+                truncated = tracks.size > SpotifyImportLimits.MAX_TRACKS,
+            )
         }
 
     private fun List<String>.cell(index: Int): String? = if (index < 0) null else getOrNull(index)?.trim()?.takeIf(String::isNotEmpty)

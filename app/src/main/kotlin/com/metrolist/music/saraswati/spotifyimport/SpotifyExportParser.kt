@@ -17,6 +17,8 @@ import java.util.zip.ZipInputStream
 data class ImportedPlaylist(
     val name: String,
     val tracks: List<ImportedTrack>,
+    /** True when the 10,000-track cap cut this playlist short. */
+    val truncated: Boolean = false,
 )
 
 data class ImportedTrack(
@@ -138,7 +140,8 @@ object SpotifyExportParser {
                         durationMs = null,
                     )
                 }
-            ImportedPlaylist(name = name, tracks = tracks.take(cap.take(tracks.size)))
+            val granted = cap.take(tracks.size)
+            ImportedPlaylist(name = name, tracks = tracks.take(granted), truncated = granted < tracks.size)
         }
     }
 
@@ -158,7 +161,8 @@ object SpotifyExportParser {
                     durationMs = null,
                 )
             }
-        return ImportedPlaylist(name = LIKED_SONGS_NAME, tracks = tracks.take(cap.take(tracks.size)))
+        val granted = cap.take(tracks.size)
+        return ImportedPlaylist(name = LIKED_SONGS_NAME, tracks = tracks.take(granted), truncated = granted < tracks.size)
     }
 }
 
