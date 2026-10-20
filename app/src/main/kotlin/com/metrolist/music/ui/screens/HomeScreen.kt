@@ -132,6 +132,9 @@ import com.metrolist.music.saraswati.culture.radioEndpointFor
 import com.metrolist.music.saraswati.family.parivaar.ParivaarMixCard
 import com.metrolist.music.saraswati.family.parivaar.ParivaarUiState
 import com.metrolist.music.saraswati.family.parivaar.ParivaarViewModel
+// SARASWATI: Phase 6 Task 8 — Prahar card imports (own block).
+import com.metrolist.music.saraswati.craft.prahar.PraharCard
+import com.metrolist.music.saraswati.craft.prahar.PraharViewModel
 import com.metrolist.music.saraswati.culture.rememberCurrentFestival
 import com.metrolist.music.saraswati.saral.YouTubeSaralSearch
 import com.metrolist.music.saraswati.update.SaraswatiUpdateHttpFetcher
@@ -825,6 +828,9 @@ fun HomeScreen(
     // SARASWATI: Phase 4 Task 20 — the Parivaar Mix card's state (Hidden or NeedsTwoMembers show no card).
     val parivaarViewModel: ParivaarViewModel = hiltViewModel()
     val parivaarState by parivaarViewModel.state.collectAsStateWithLifecycle()
+    // SARASWATI: Phase 6 Task 8 — Prahar card state (own block).
+    val praharViewModel: PraharViewModel = hiltViewModel()
+    val praharMix by praharViewModel.mix.collectAsStateWithLifecycle()
     val festival by rememberCurrentFestival()
     val festivalRadio = remember { FestivalRadio(YouTubeSaralSearch()) }
     var festivalStarting by remember { mutableStateOf(false) }
@@ -1378,6 +1384,21 @@ fun HomeScreen(
                                 }
                             },
                         )
+                    }
+                }
+
+                // SARASWATI: Phase 6 Task 8 — the Prahar card sits above the Parivaar Mix card (own block). Hidden without a
+                // mix for the current window; off for a Listen Together guest, like the Parivaar card.
+                praharMix?.let { mix ->
+                    if (!isListenTogetherGuest) {
+                        item(key = "prahar_card") {
+                            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                                PraharCard(
+                                    mix = mix,
+                                    onPlay = { praharViewModel.play { playerConnection?.playQueue(it) } },
+                                )
+                            }
+                        }
                     }
                 }
 
