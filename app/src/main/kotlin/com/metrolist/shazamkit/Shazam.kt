@@ -25,6 +25,7 @@ import timber.log.Timber
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.random.Random
+import com.metrolist.innertube.saraswati.LocalIdEgressGuard
 
 object Shazam {
     private const val TAG = "ShazamApi"
@@ -39,6 +40,7 @@ object Shazam {
 
     private val client by lazy {
         HttpClient(OkHttp) {
+            install(LocalIdEgressGuard)
             install(ContentNegotiation) {
                 json(
                     Json {

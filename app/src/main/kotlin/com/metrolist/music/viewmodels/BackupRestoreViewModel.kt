@@ -34,6 +34,7 @@ import com.metrolist.music.playback.MusicService.Companion.PERSISTENT_PLAYER_STA
 import com.metrolist.music.playback.MusicService.Companion.PERSISTENT_QUEUE_FILE
 import com.metrolist.music.saraswati.backup.BackupPolicy
 import com.metrolist.music.saraswati.backup.BackupTooLargeException
+import com.metrolist.music.saraswati.backup.LocalRowScrubber
 import com.metrolist.music.saraswati.backup.RestoredDbValidator
 import com.metrolist.music.utils.dataStore
 import com.metrolist.music.utils.reportException
@@ -99,23 +100,21 @@ class BackupRestoreViewModel @Inject constructor(
                     }
                     val dbPath = database.openHelper.writableDatabase.path
                     if (dbPath != null) {
-                        FileInputStream(dbPath).use { inputStream ->
-                            outputStream.putNextEntry(ZipEntry(InternalDatabase.DB_NAME))
-                            inputStream.copyTo(outputStream)
-                        }
-                        val walFile = File("$dbPath-wal")
-                        if (walFile.exists()) {
-                            FileInputStream(walFile).use { inputStream ->
-                                outputStream.putNextEntry(ZipEntry("${InternalDatabase.DB_NAME}-wal"))
+                        // SARASWATI: fix pass 2 (O-2) — the database is exported as a scrubbed copy, never the live
+                        // file: local-song rows (`local:<id>`) name files on this phone and must not leave it. The copy
+                        // keeps the WAL so it holds every committed row, then LocalRowScrubber rewrites it without them.
+                        val scratch = File(context.cacheDir, "backup-export-${System.nanoTime()}").apply { mkdirs() }
+                        try {
+                            val copy = File(scratch, InternalDatabase.DB_NAME)
+                            File(dbPath).copyTo(copy)
+                            File("$dbPath-wal").takeIf { it.exists() }?.copyTo(File("${copy.path}-wal"))
+                            check(LocalRowScrubber.scrubFile(copy)) { "could not remove local-song rows from the export copy" }
+                            FileInputStream(copy).use { inputStream ->
+                                outputStream.putNextEntry(ZipEntry(InternalDatabase.DB_NAME))
                                 inputStream.copyTo(outputStream)
                             }
-                        }
-                        val shmFile = File("$dbPath-shm")
-                        if (shmFile.exists()) {
-                            FileInputStream(shmFile).use { inputStream ->
-                                outputStream.putNextEntry(ZipEntry("${InternalDatabase.DB_NAME}-shm"))
-                                inputStream.copyTo(outputStream)
-                            }
+                        } finally {
+                            scratch.deleteRecursively()
                         }
                     }
                 }
@@ -257,6 +256,16 @@ class BackupRestoreViewModel @Inject constructor(
                         }
                         return@launch
                     }
+                }
+
+                // SARASWATI: fix pass 2 (O-2) — a backup from another phone can carry `local:<n>` rows that name this
+                // phone's unrelated files. They are dropped from the restored file before it can replace the live one.
+                if (foundDb && !LocalRowScrubber.scrubFile(File(restoreDbPath))) {
+                    Timber.tag("RESTORE").e("Could not remove local-song rows from the restored database")
+                    kotlinx.coroutines.withContext(Dispatchers.Main) {
+                        Toast.makeText(context, R.string.restore_failed, Toast.LENGTH_SHORT).show()
+                    }
+                    return@launch
                 }
 
                 // === Proceed with restore ===

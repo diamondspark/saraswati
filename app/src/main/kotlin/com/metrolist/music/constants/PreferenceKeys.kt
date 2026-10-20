@@ -173,24 +173,14 @@ val DisableScreenshotKey = booleanPreferencesKey("disableScreenshot")
 
 val EnableDynamicIconKey = booleanPreferencesKey("enableDynamicIcon")
 
-val EnableDiscordRPCKey = booleanPreferencesKey("discordRPCEnable")
-val DiscordInfoDismissedKey = booleanPreferencesKey("discordInfoDismissed")
+// SARASWATI: Discord and Last.fm were removed (owner decision). These keys stay only so that an old backup or
+// datastore carrying them is recognised: SecretPreferenceKeys scrubs them on every start and BackupPolicy never
+// exports or restores them. Nothing reads them.
 val DiscordUsernameKey = stringPreferencesKey("discordUsername")
 val DiscordNameKey = stringPreferencesKey("discordName")
 val DiscordAvatarKey = stringPreferencesKey("discordAvatar")
-
-val DiscordAdvancedModeKey = booleanPreferencesKey("discordAdvancedMode")
-val DiscordActivityTypeKey = stringPreferencesKey("discordActivityType")
-val DiscordActivityNameKey = stringPreferencesKey("discordActivityName")
-val DiscordStateTemplateKey = stringPreferencesKey("discordStateTemplate")
-val DiscordDetailsTemplateKey = stringPreferencesKey("discordDetailsTemplate")
-val DiscordButton1EnabledKey = booleanPreferencesKey("discordButton1Enabled")
-val DiscordButton1LabelKey = stringPreferencesKey("discordButton1Label")
 val DiscordButton1UrlKey = stringPreferencesKey("discordButton1Url")
-val DiscordButton2EnabledKey = booleanPreferencesKey("discordButton2Enabled")
-val DiscordButton2LabelKey = stringPreferencesKey("discordButton2Label")
 val DiscordButton2UrlKey = stringPreferencesKey("discordButton2Url")
-val DiscordUserStatusKey = stringPreferencesKey("discordUserStatus")
 
 // Google Cast
 val EnableGoogleCastKey = booleanPreferencesKey("enableGoogleCast")
@@ -213,14 +203,6 @@ val ListenTogetherSessionTimestampKey = longPreferencesKey("listenTogetherSessio
 
 val LastFMSessionKey = stringPreferencesKey("lastfmSession")
 val LastFMUsernameKey = stringPreferencesKey("lastfmUsername")
-val EnableLastFMScrobblingKey = booleanPreferencesKey("lastfmScrobblingEnable")
-val LastFMUseNowPlaying = booleanPreferencesKey("lastfmUseNowPlaying")
-
-val LastFMUseSendLikes = booleanPreferencesKey("lastfmUseSendLikes")
-
-val ScrobbleDelayPercentKey = floatPreferencesKey("scrobbleDelayPercent")
-val ScrobbleMinSongDurationKey = intPreferencesKey("scrobbleMinSongDuration")
-val ScrobbleDelaySecondsKey = intPreferencesKey("scrobbleDelaySeconds")
 
 val ChipSortTypeKey = stringPreferencesKey("chipSortType")
 val SongSortTypeKey = stringPreferencesKey("songSortType")
@@ -592,6 +574,10 @@ val SangatCarRoomCodeKey = stringPreferencesKey("saraswatiSangatCarRoomCode")
 // the family's listening, so a restored backup must not plant one (BackupPolicy).
 val ParivaarMixKey = stringPreferencesKey("parivaarMix")
 
+// SARASWATI: Phase 5 Task 9 — the songs saved for each family Station to play with no network, as JSON
+// (StationOfflineStore). Derived from the hub's stations and this phone's downloads, so a restored backup must not plant any.
+val StationOfflineSetsKey = stringPreferencesKey("stationOfflineSets")
+
 // SARASWATI: Phase 4 Task 12 — this phone's own Parivaar top-songs playlist on YouTube (its id) and when the weekly
 // sync last finished and was registered with the hub (epoch ms). Both belong to this phone's YouTube account and hub
 // registration, so a restored backup must not point a phone at another account's playlist (BackupPolicy).
@@ -803,3 +789,17 @@ val CountryCodeToName =
         "YE" to "Yemen",
         "ZW" to "Zimbabwe",
     )
+
+// SARASWATI: Phase 5 Task 3 — when this phone last finished scanning its own audio files (epoch ms), so the
+// launch-time rescan runs at most every six hours (LocalSongsRepository).
+val LocalLastScanKey = longPreferencesKey("saraswatiLocalLastScan")
+
+// SARASWATI: Phase 5 Task 3 — the "Local files" switch. Absent means "on once the person has allowed access";
+// false means no scanning, no reads, no car entry, and the songs already found are hidden.
+val LocalFilesEnabledKey = booleanPreferencesKey("saraswatiLocalFilesEnabled")
+// SARASWATI: Phase 5 Task 10 — what the nightly smart downloads have done on this phone, as JSON
+// (SmartDownloadLedger). It describes this phone's own downloads, so a restored backup must not plant one (BackupPolicy).
+val SmartDownloadLedgerKey = stringPreferencesKey("saraswatiSmartDownloadLedger")
+
+// SARASWATI: Phase 5 Task 11 — the "Raat ke Gaane" (smart downloads) switch in Storage settings. On unless turned off.
+val SmartDownloadsEnabledKey = booleanPreferencesKey("saraswatiSmartDownloads")

@@ -27,13 +27,14 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
+import com.metrolist.innertube.saraswati.LocalIdEgressInterceptor
 
 private val translationJson = Json { ignoreUnknownKeys = true }
 
 object OpenRouterService {
     private val client =
         OkHttpClient
-            .Builder()
+            .Builder().addInterceptor(LocalIdEgressInterceptor)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(90, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)

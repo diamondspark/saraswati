@@ -17,7 +17,9 @@ import { sha256Hex } from "./secrets";
 //   v3  the family features' own tables: Parivaar playlists, the shared family
 //       playlists and the Sangat rooms. Nothing else changes, so a v2 hub with
 //       its roster keeps every row.
-export const LATEST_SCHEMA_VERSION = 3;
+//   v4  Ask Saraswati's daily counters (`ask_usage`). Counts only, never the
+//       question. Nothing else changes, so a v3 hub keeps every row.
+export const LATEST_SCHEMA_VERSION = 4;
 
 type Row = Record<string, SqlStorageValue>;
 
@@ -213,6 +215,28 @@ function applyV3(storage: DurableObjectStorage): void {
 }
 
 /**
+ * Idempotent, like v1 and v3. How many asks each phone and the whole family
+ * have used on a UTC day; the question itself is never stored.
+ */
+function applyV4(storage: DurableObjectStorage): void {
+  const sql = storage.sql;
+  storage.transactionSync(() => {
+    // Checked again inside the transaction that does the work.
+    if (readVersion(sql) !== 3) {
+      return;
+    }
+
+    sql.exec(`CREATE TABLE IF NOT EXISTS ask_usage (
+      day TEXT,
+      key TEXT,
+      count INTEGER NOT NULL,
+      PRIMARY KEY (day, key)
+    )`);
+    writeVersion(sql, 4);
+  });
+}
+
+/**
  * Brings the database up to LATEST_SCHEMA_VERSION. Safe to call on every
  * start: a database already at (or beyond) the latest version is not touched.
  */
@@ -226,5 +250,8 @@ export async function migrate(storage: DurableObjectStorage): Promise<void> {
   }
   if (version < 3) {
     applyV3(storage);
+  }
+  if (version < 4) {
+    applyV4(storage);
   }
 }

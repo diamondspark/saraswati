@@ -4,6 +4,7 @@ import com.metrolist.kugou.models.DownloadLyricsResponse
 import com.metrolist.kugou.models.Keyword
 import com.metrolist.kugou.models.SearchLyricsResponse
 import com.metrolist.kugou.models.SearchSongResponse
+import com.metrolist.innertube.saraswati.LocalIdEgressGuard
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.plugins.compression.ContentEncoding
@@ -22,6 +23,7 @@ import kotlin.math.abs
 
 @OptIn(ExperimentalSerializationApi::class, ExperimentalEncodingApi::class)
 private val client = HttpClient {
+    install(LocalIdEgressGuard)
     expectSuccess = true
 
     install(ContentNegotiation) {

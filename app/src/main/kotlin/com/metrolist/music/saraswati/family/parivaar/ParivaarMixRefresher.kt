@@ -18,6 +18,7 @@
 package com.metrolist.music.saraswati.family.parivaar
 
 import com.metrolist.music.saraswati.family.HubIdentity
+import com.metrolist.music.saraswati.family.recap.RecapSnapshotStore
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import java.time.Instant
@@ -30,6 +31,8 @@ class ParivaarMixRefresher(
     private val store: ParivaarMixStore,
     private val downloader: MixDownloader,
     private val enabled: suspend () -> Boolean = { true },
+    // SARASWATI: Phase 6 Task 14 — the members this refresh read are handed to the Family Recap as they are.
+    private val recap: RecapSnapshotStore? = null,
 ) {
     private val running = Mutex()
     private val backoff = AttemptBackoff(RETRY_GAP_MS)
@@ -59,6 +62,7 @@ class ParivaarMixRefresher(
                         MemberTopSongs(row.deviceId, row.memberName, entries.map { it.track })
                     }
                 }
+            recap?.record(members)
             val seed = ParivaarMixBuilder.radioSeed(members)
             val radio = seed?.let { port.radio(it).getOrNull() }.orEmpty()
             val tracks = ParivaarMixBuilder.build(members, radio)

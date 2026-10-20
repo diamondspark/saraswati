@@ -112,6 +112,14 @@ import com.metrolist.music.extensions.move
 import com.metrolist.music.extensions.toggleRepeatMode
 import com.metrolist.music.listentogether.RoomRole
 import com.metrolist.music.models.MediaMetadata
+// SARASWATI: Task 13 — Chatur shuffle button and smart pick mark.
+import com.metrolist.music.saraswati.craft.shuffle.ChaturLabel
+import com.metrolist.music.saraswati.craft.shuffle.ChaturShuffleUi
+import com.metrolist.music.saraswati.craft.shuffle.ShuffleMode
+import com.metrolist.music.saraswati.craft.shuffle.isSmartPick
+// SARASWATI: Phase 6 Task 17 — radio tuning chip row (phone-only; this sheet is never shown in the car).
+import com.metrolist.music.saraswati.craft.tuning.TuningChipRow
+import com.metrolist.music.saraswati.craft.tuning.TuningChipRowState
 import com.metrolist.music.ui.component.ActionPromptDialog
 import com.metrolist.music.ui.component.BottomSheet
 import com.metrolist.music.ui.component.BottomSheetState
@@ -173,6 +181,15 @@ fun Queue(
     val isListenTogetherGuest = listenTogetherRoleState?.value == RoomRole.GUEST
 
     val playerConnection = LocalPlayerConnection.current ?: return
+    // SARASWATI: Phase 6 Task 17 — radio tuning chips above the upcoming list; the row is hidden until a chip is confirmed.
+    val tuningChipRowState =
+        remember(playerConnection, isListenTogetherGuest) {
+            TuningChipRowState(
+                chips = playerConnection.service.radioTuningState.chips,
+                isListenTogetherGuest = isListenTogetherGuest,
+                select = { playerConnection.service.radioTuner.select(it) },
+            )
+        }
     val isPlaying by playerConnection.isEffectivelyPlaying.collectAsStateWithLifecycle()
     val repeatMode by playerConnection.repeatMode.collectAsStateWithLifecycle()
 
@@ -330,14 +347,15 @@ fun Queue(
                         playerBackground = playerBackground,
                     )
 
-                    val shuffleModeEnabled by playerConnection.shuffleModeEnabled.collectAsStateWithLifecycle()
+                    // SARASWATI: Task 13 — Chatur shuffle: one button cycles off, shuffle, smart.
+                    val shuffleMode by playerConnection.shuffleMode.collectAsStateWithLifecycle()
+                    val chatur = ChaturShuffleUi.buttonState(shuffleMode, isListenTogetherGuest)
                     PlayerQueueButton(
-                        icon = R.drawable.shuffle,
-                        onClick = {
-                            playerConnection.player.shuffleModeEnabled = !shuffleModeEnabled
-                        },
-                        isActive = shuffleModeEnabled,
-                        enabled = !isListenTogetherGuest,
+                        icon = if (chatur.sparkle) R.drawable.saraswati_ic_sparkle else R.drawable.shuffle,
+                        text = stringResource(chaturLabelRes(chatur.label)),
+                        onClick = { chatur.tapTo?.let(playerConnection::setShuffleMode) },
+                        isActive = shuffleMode != ShuffleMode.OFF,
+                        enabled = chatur.enabled,
                         shape = middleShape,
                         modifier = Modifier.size(buttonSize),
                         textButtonColor = textButtonColor,
@@ -769,6 +787,11 @@ fun Queue(
                     )
                 }
 
+                // SARASWATI: Phase 6 Task 17 — the chip row sits above the upcoming list and draws nothing without chips.
+                item(key = "tuning_chip_row") {
+                    TuningChipRow(state = tuningChipRowState)
+                }
+
                 itemsIndexed(
                     items = mutableQueueWindows,
                     key = { _, item -> item.uid.hashCode() },
@@ -845,6 +868,14 @@ fun Queue(
                                                 onCheckedChange = onCheckedChange,
                                             )
                                         } else {
+                                            // SARASWATI: Task 13 — the sparkle mark on smart picks.
+                                            if (window.mediaItem.isSmartPick()) {
+                                                Icon(
+                                                    painter = painterResource(R.drawable.saraswati_ic_sparkle),
+                                                    contentDescription = stringResource(R.string.saraswati_chatur_smart_pick),
+                                                    modifier = Modifier.padding(end = 4.dp),
+                                                )
+                                            }
                                             if (!isListenTogetherGuest) {
                                                 IconButton(
                                                     onClick = {
@@ -1174,7 +1205,9 @@ fun Queue(
             }
         }
 
-        val shuffleModeEnabled by playerConnection.shuffleModeEnabled.collectAsStateWithLifecycle()
+        // SARASWATI: Task 13 — the bottom Chatur button cycles the same mode as the top one.
+        val shuffleMode by playerConnection.shuffleMode.collectAsStateWithLifecycle()
+        val chatur = ChaturShuffleUi.buttonState(shuffleMode, isListenTogetherGuest)
 
         Box(
             modifier =
@@ -1211,12 +1244,11 @@ fun Queue(
                                 if (playerConnection.player.shuffleModeEnabled) playerConnection.player.currentMediaItemIndex else 0,
                             )
                         }.invokeOnCompletion {
-                            playerConnection.player.shuffleModeEnabled =
-                                !playerConnection.player.shuffleModeEnabled
+                            chatur.tapTo?.let(playerConnection::setShuffleMode)
                         }
                 },
             ) {
-                val baseAlpha = if (shuffleModeEnabled) 1f else 0.5f
+                val baseAlpha = if (shuffleMode != ShuffleMode.OFF) 1f else 0.5f
                 val finalAlpha = if (!isListenTogetherGuest) baseAlpha else 0.3f
                 Icon(
                     painter = painterResource(R.drawable.shuffle),
@@ -1267,6 +1299,14 @@ fun Queue(
         )
     }
 }
+
+// SARASWATI: Task 13 — label text for the Chatur shuffle button.
+private fun chaturLabelRes(label: ChaturLabel): Int =
+    when (label) {
+        ChaturLabel.OFF -> R.string.saraswati_chatur_off
+        ChaturLabel.SHUFFLE -> R.string.saraswati_chatur_shuffle
+        ChaturLabel.SMART -> R.string.saraswati_chatur_smart
+    }
 
 @Composable
 private fun PlayerQueueButton(

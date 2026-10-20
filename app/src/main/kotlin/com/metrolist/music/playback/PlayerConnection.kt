@@ -35,6 +35,8 @@ import com.metrolist.music.models.keepingOriginOf
 import com.metrolist.music.models.toMediaMetadata
 import com.metrolist.music.playback.MusicService.MusicBinder
 import com.metrolist.music.playback.queues.Queue
+// SARASWATI: Task 13 — Chatur shuffle mode types for the player connection.
+import com.metrolist.music.saraswati.craft.shuffle.ShuffleMode
 import com.metrolist.music.utils.dataStore
 import com.metrolist.music.utils.get
 import com.metrolist.music.utils.reportException
@@ -42,6 +44,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
@@ -65,6 +68,16 @@ class PlayerConnection(
 
     val service = binder.service
     private val playerReadinessFlow = service.isPlayerReady
+
+    // SARASWATI: Task 13 — the Chatur shuffle button reads and sets the service's smart shuffle mode.
+    private val shuffleScope = scope
+    val shuffleMode: StateFlow<ShuffleMode> get() = service.smartShuffle.mode
+
+    fun setShuffleMode(mode: ShuffleMode) {
+        // SARASWATI: Phase 6 fix (DEF-M9) — a Listen Together guest cannot change shuffle here, as with the chip.
+        if (shouldBlockPlaybackChanges?.invoke() == true) return
+        shuffleScope.launch { service.smartShuffle.setMode(mode) }
+    }
 
     private fun getPlayerSafe(): ExoPlayer {
         check(playerReadinessFlow.value) {

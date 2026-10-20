@@ -23,6 +23,7 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import timber.log.Timber
+import com.metrolist.innertube.saraswati.LocalIdEgressGuard
 
 @Serializable
 private data class AgentInfo(
@@ -150,6 +151,7 @@ object LyricsPlusProvider : LyricsProvider {
 
     private val client by lazy {
         HttpClient(OkHttp) {
+            install(LocalIdEgressGuard)
             install(ContentNegotiation) {
                 json(Json {
                     isLenient = true

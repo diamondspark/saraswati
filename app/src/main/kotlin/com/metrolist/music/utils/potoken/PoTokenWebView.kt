@@ -36,6 +36,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import com.metrolist.innertube.saraswati.LocalIdEgressInterceptor
 
 class PoTokenWebView private constructor(
     context: Context,
@@ -470,7 +471,7 @@ class PoTokenWebView private constructor(
         // A live renderer mints a poToken in well under a second.
         private const val GENERATE_TIMEOUT_MS = 15_000L
 
-        private val httpClient = OkHttpClient.Builder()
+        private val httpClient = OkHttpClient.Builder().addInterceptor(LocalIdEgressInterceptor)
             .proxy(YouTube.proxy)
             .build()
 

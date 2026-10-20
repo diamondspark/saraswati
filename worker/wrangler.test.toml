@@ -1,0 +1,16 @@
+# What vitest loads. Identical to wrangler.toml minus [ai]: the Workers AI binding is
+# remote-only, so with it the test pool signs in with whatever Cloudflare login is on the
+# machine and opens a remote session. Tests use a fake AiRunner instead and never need it.
+# test/ask.units.test.ts:283 (describe "wrangler.test.toml") fails if the two files drift apart,
+# or if vitest.config.ts stops loading this file or drops remoteBindings: false.
+name = "saraswati-sangat"
+main = "src/index.ts"
+compatibility_date = "2026-10-18"
+
+[[durable_objects.bindings]]
+name = "FAMILY_HUB"
+class_name = "FamilyHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["FamilyHub"]

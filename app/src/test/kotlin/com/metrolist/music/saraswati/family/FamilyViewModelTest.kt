@@ -855,7 +855,7 @@ class FamilyViewModelTest {
     @Test
     fun `kill-switches start with every feature on`() {
         assertEquals(
-            mapOf("sangat" to true, "parivaar_mix" to true, "family_playlists" to true, "cast_relay" to true),
+            mapOf("sangat" to true, "parivaar_mix" to true, "family_playlists" to true, "cast_relay" to true, "ask_saraswati" to true),
             vm.killSwitches.value,
         )
     }
@@ -879,16 +879,16 @@ class FamilyViewModelTest {
                 "parivaar_mix" to true,
                 "family_playlists" to true,
                 "cast_relay" to true,
-                "ask_saraswati" to false,
+                "a_future_switch" to false,
             )
 
         vm.loadSettings()
 
-        assertEquals(setOf("sangat", "parivaar_mix", "family_playlists", "cast_relay"), vm.killSwitches.value.keys)
+        assertEquals(setOf("sangat", "parivaar_mix", "family_playlists", "cast_relay", "ask_saraswati"), vm.killSwitches.value.keys)
         assertEquals(false, vm.killSwitches.value["sangat"])
 
         vm.toggleKillSwitch("sangat", true)
-        assertEquals(setOf("sangat", "parivaar_mix", "family_playlists", "cast_relay"), vm.killSwitches.value.keys)
+        assertEquals(setOf("sangat", "parivaar_mix", "family_playlists", "cast_relay", "ask_saraswati"), vm.killSwitches.value.keys)
     }
 
     @Test
@@ -936,9 +936,9 @@ class FamilyViewModelTest {
     }
 
     @Test
-    fun `the four features are exactly the hub's keys, on unless the hub says otherwise`() {
+    fun `the five features are exactly the hub's keys, on unless the hub says otherwise`() {
         assertEquals(
-            listOf("sangat", "parivaar_mix", "family_playlists", "cast_relay"),
+            listOf("sangat", "parivaar_mix", "family_playlists", "cast_relay", "ask_saraswati"),
             FamilyFeature.entries.map { it.key },
         )
         assertTrue(FamilyFeature.entries.all { FamilyFeature.isEnabled(emptyMap(), it) })

@@ -30,7 +30,8 @@ import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.WatchEndpoint
 import com.metrolist.music.models.toMediaMetadata
-import com.metrolist.music.saraswati.culture.radioEndpointFor
+import com.metrolist.music.saraswati.family.parivaar.MixTrack
+import com.metrolist.music.saraswati.family.parivaar.ParivaarMixQueue
 import com.metrolist.music.playback.PlayerConnection
 import com.metrolist.music.playback.queues.Queue
 import com.metrolist.music.playback.queues.YouTubeQueue
@@ -106,11 +107,15 @@ internal class PlayerConnectionPlayback(
     override fun hasQueue(): Boolean = runCatching { connection.player.currentMediaItem != null }.getOrDefault(false)
 
     override fun playRadio(seedVideoId: String) {
-        start("playRadio", YouTubeQueue(radioEndpointFor(seedVideoId)))
+        start("playRadio", connection.service.stationQueue(seedVideoId)) // SARASWATI: Phase 5 Task 9 — offline-first Station
     }
 
     override fun playSong(song: SongItem) {
         start("playSong", YouTubeQueue(WatchEndpoint(videoId = song.id), song.toMediaMetadata()))
+    }
+
+    override fun playParivaarMix(tracks: List<MixTrack>) {
+        start("playParivaarMix", ParivaarMixQueue(tracks))
     }
 
     override fun togglePlayPause() = connection.togglePlayPause()

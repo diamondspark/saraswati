@@ -31,6 +31,7 @@ import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
@@ -336,4 +337,20 @@ internal data class HealthReportRequest(
     val versionCode: Int,
     val versionName: String,
     val timezone: String,
+)
+
+// SARASWATI: Phase 6 Task 10 — POST /ask. The question is the person's own words; the hub gets nothing else
+// about them. The reply's intent is read as a raw object and checked by ask/AskModels.kt.
+@Serializable
+internal data class AskWireRequest(
+    val question: String,
+    val locale: String,
+) {
+    override fun toString(): String = "AskWireRequest(question=<redacted>, locale=$locale)"
+}
+
+@Serializable
+internal data class AskWireReply(
+    val intent: JsonObject? = null,
+    val fallback: Boolean = false,
 )

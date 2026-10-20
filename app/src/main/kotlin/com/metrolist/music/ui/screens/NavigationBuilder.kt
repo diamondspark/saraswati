@@ -28,10 +28,13 @@ import com.metrolist.music.constants.PureBlackKey
 import com.metrolist.music.saraswati.family.FamilyRoutes
 import com.metrolist.music.saraswati.family.FamilyScreen
 import com.metrolist.music.saraswati.family.parivaar.TasteHistoryScreen
+import com.metrolist.music.saraswati.localmedia.LOCAL_SONGS_ROUTE
+import com.metrolist.music.saraswati.localmedia.LocalSongsScreen
 import com.metrolist.music.saraswati.family.playlists.FamilyPlaylistScreen
 import com.metrolist.music.saraswati.family.JoinFamilyScreen
 import com.metrolist.music.saraswati.family.sangat.RemoteControllerScreen
 import com.metrolist.music.saraswati.spotifyimport.SpotifyImportScreen
+import com.metrolist.music.saraswati.craft.snooze.SnoozedSongsScreen
 import com.metrolist.music.saraswati.family.ManageFamilyScreen
 import com.metrolist.music.ui.screens.artist.ArtistAlbumsScreen
 import com.metrolist.music.ui.screens.artist.ArtistItemsScreen
@@ -64,9 +67,6 @@ import com.metrolist.music.ui.screens.settings.SettingsScreen
 import com.metrolist.music.ui.screens.settings.StorageSettings
 import com.metrolist.music.ui.screens.settings.ThemeScreen
 import com.metrolist.music.ui.screens.settings.UpdaterScreen
-import com.metrolist.music.ui.screens.settings.integrations.DiscordSettings
-import com.metrolist.music.ui.screens.settings.integrations.IntegrationScreen
-import com.metrolist.music.ui.screens.settings.integrations.LastFMSettings
 import com.metrolist.music.ui.screens.settings.integrations.ListenTogetherSettings
 
 import com.metrolist.music.ui.screens.wrapped.WrappedScreen
@@ -129,6 +129,11 @@ fun NavGraphBuilder.navigationBuilder(
         SpotifyImportScreen(navController)
     }
 
+    // SARASWATI: Phase 6 Task 3 — the Library menu's "Snoozed songs" list.
+    composable(Screens.Snoozed.route) {
+        SnoozedSongsScreen(navController)
+    }
+
     // SARASWATI: Phase 4 Task 19 — a car passenger's remote-controller screen.
     composable(Screens.SangatRemote.route) {
         RemoteControllerScreen(navController)
@@ -137,6 +142,11 @@ fun NavGraphBuilder.navigationBuilder(
     // SARASWATI: Phase 4 Task 20 — Taste & history.
     composable(FamilyRoutes.TASTE) {
         TasteHistoryScreen(navController)
+    }
+
+    // SARASWATI: Phase 5 Task 14 — songs on this phone (opened from the Library entry).
+    composable(LOCAL_SONGS_ROUTE) {
+        LocalSongsScreen(navController)
     }
 
     // SARASWATI: Phase 4 Task 20 — one family playlist, by its YouTube playlist id.
@@ -428,18 +438,7 @@ fun NavGraphBuilder.navigationBuilder(
         BackupAndRestore(navController)
     }
 
-    composable("settings/integrations") {
-        IntegrationScreen(navController)
-    }
-
-    composable("settings/integrations/discord") {
-        DiscordSettings(navController)
-    }
-
-    composable("settings/integrations/lastfm") {
-        LastFMSettings(navController)
-    }
-
+    // SARASWATI: Discord and Last.fm removed; the Integrations hub and their settings routes went with them.
     composable(route = "settings/integrations/listen_together") {
         ListenTogetherSettings(navController)
     }

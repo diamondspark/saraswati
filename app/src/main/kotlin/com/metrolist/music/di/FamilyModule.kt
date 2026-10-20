@@ -25,9 +25,11 @@ import com.metrolist.music.saraswati.family.HubClient
 import com.metrolist.music.saraswati.family.HubConfig
 import com.metrolist.music.saraswati.family.HubIdentity
 import com.metrolist.music.saraswati.family.parivaar.DatabaseTopSongsSource
+import com.metrolist.music.saraswati.family.recap.RecapSnapshotStore
 import com.metrolist.music.saraswati.family.parivaar.HubClientParivaarHub
 import com.metrolist.music.saraswati.family.parivaar.InnerTubePlaylistPort
 import com.metrolist.music.saraswati.family.parivaar.MixDownloader
+import com.metrolist.music.saraswati.offline.StationOfflineStore
 import com.metrolist.music.saraswati.family.parivaar.ParivaarHub
 import com.metrolist.music.saraswati.family.parivaar.ParivaarMixRefresher
 import com.metrolist.music.saraswati.family.parivaar.ParivaarMixStore
@@ -68,6 +70,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
+import com.metrolist.innertube.saraswati.LocalIdEgressInterceptor
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -84,7 +87,7 @@ object FamilyModule {
         HubClient(
             config.baseUrl,
             OkHttpClient
-                .Builder()
+                .Builder().addInterceptor(LocalIdEgressInterceptor)
                 .connectTimeout(10, TimeUnit.SECONDS)
                 .readTimeout(15, TimeUnit.SECONDS)
                 .callTimeout(30, TimeUnit.SECONDS)
@@ -191,6 +194,13 @@ object FamilyModule {
         @ApplicationContext context: Context,
     ): ParivaarMixStore = ParivaarMixStore(context.dataStore, CoroutineScope(SupervisorJob() + Dispatchers.IO))
 
+    // SARASWATI: Phase 5 Task 9 — the songs saved for each Station to play offline.
+    @Provides
+    @Singleton
+    fun provideStationOfflineStore(
+        @ApplicationContext context: Context,
+    ): StationOfflineStore = StationOfflineStore(context.dataStore, CoroutineScope(SupervisorJob() + Dispatchers.IO))
+
     @Provides
     @Singleton
     fun provideTopSongsPlaylistSync(
@@ -220,6 +230,7 @@ object FamilyModule {
         downloadUtil: DownloadUtil,
         database: MusicDatabase,
         gate: FamilyFeatureGate,
+        recap: RecapSnapshotStore,
         @ApplicationContext context: Context,
     ): ParivaarMixRefresher =
         ParivaarMixRefresher(
@@ -229,6 +240,8 @@ object FamilyModule {
             store,
             MixDownloader.create(context, downloadUtil, database),
             enabled = { gate.allows(FamilyFeature.PARIVAAR_MIX) },
+            // SARASWATI: Phase 6 Task 14 — the Family Recap gets each refresh's members.
+            recap = recap,
         )
 
     // SARASWATI: Phase 4 Task 14 — the family's shared playlists. Collaboration stays the "unavailable" stand-in

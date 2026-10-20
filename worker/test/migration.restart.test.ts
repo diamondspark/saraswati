@@ -52,7 +52,7 @@ it("a deployed v2 hub migrates itself on restart, before it answers anything", a
     expect(
       sql.exec<{ version: number }>("SELECT version FROM schema_version").one()
         .version,
-    ).toBe(3);
+    ).toBe(4);
     expect(
       sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM family_playlists").one()
         .n,

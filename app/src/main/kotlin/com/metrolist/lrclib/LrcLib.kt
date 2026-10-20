@@ -15,10 +15,12 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.Json
 import kotlin.math.abs
+import com.metrolist.innertube.saraswati.LocalIdEgressGuard
 
 object LrcLib {
     private val client by lazy {
         HttpClient(OkHttp) {
+            install(LocalIdEgressGuard)
             install(ContentNegotiation) {
                 json(
                     Json {

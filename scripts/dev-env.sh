@@ -40,14 +40,14 @@ _sar_path_front "$ANDROID_HOME/platform-tools"
 _sar_path_front "$JAVA_HOME/bin"
 export PATH
 
-# Gradle heap 3 GB, Kotlin daemon 2 GB, low CPU priority: the dev machine has
+# Gradle heap 4 GB, Kotlin daemon 4 GB, low CPU priority: the dev machine has
 # about 8 GB of RAM to spare, so always build through this wrapper.
 sar_gradle() {
   if [ ! -x ./gradlew ]; then
     echo "sar_gradle: no executable ./gradlew in $PWD; run it from the repo root" >&2
     return 1
   fi
-  nice -n 10 ./gradlew --console=plain "-Dorg.gradle.jvmargs=-Xmx3g -Dkotlin.daemon.jvm.options=-Xmx2g -XX:+UseParallelGC" "$@"
+  nice -n 10 ./gradlew --console=plain "-Dorg.gradle.jvmargs=-Xmx4g -Dkotlin.daemon.jvm.options=-Xmx4g -XX:+UseParallelGC" "$@"
 }
 
 # Upstream hard-wires ~/.android/debug.keystore for debug signing, so a fresh

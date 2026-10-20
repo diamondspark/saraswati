@@ -246,6 +246,18 @@ class FamilyPlaylistsRepositoryTest {
         }
 
     @Test
+    fun `a song on this phone is never sent to YouTube as a family playlist add`() =
+        runBlocking {
+            port.seed("PLaaaaaaaaaa")
+            val mine = fp("a", "PLaaaaaaaaaa", "dev-me")
+
+            val result = repo().addSong(mine, "local:42")
+
+            assertTrue(result.isFailure)
+            assertTrue(port.calls.isEmpty())
+        }
+
+    @Test
     fun `the creator can add`() =
         runBlocking {
             port.seed("PLaaaaaaaaaa")

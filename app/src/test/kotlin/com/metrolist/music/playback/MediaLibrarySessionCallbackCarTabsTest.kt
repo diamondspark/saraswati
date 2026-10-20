@@ -107,7 +107,8 @@ class MediaLibrarySessionCallbackCarTabsTest {
         assertTrue("onSetMediaItems must have a station branch", branch >= 0)
         val rest = onSetMediaItems.substring(branch)
         val check = rest.indexOf("CarStations.seedFrom(")
-        val radio = rest.indexOf("radioEndpointFor(")
+        // SARASWATI: Phase 5 Task 9 — the radio (or its offline fallback) is built by MusicService.stationQueue.
+        val radio = rest.indexOf("service.stationQueue(")
         assertTrue("the seed is read through seedFrom", check >= 0)
         assertTrue("and only then is a radio built", radio > check)
     }
@@ -119,7 +120,7 @@ class MediaLibrarySessionCallbackCarTabsTest {
 
     @Test
     fun `the Home tab is answered from the snapshot, never from the fetch itself`() {
-        assertTrue(callback.contains("homeShelves = { homeSnapshot.current() }"))
+        assertTrue(callback.contains("homeShelves = { listOfNotNull(CarPraharRow.item(praharStore.cached(), LocalDateTime.now(), carResources)) + homeSnapshot.current() }"))
         assertFalse("the tree is not handed the fetch", callback.contains("homeShelves = ::loadHomeShelves"))
         val fetchSite = Regex("""fetch\s*=\s*::loadHomeShelves""").findAll(callback).count()
         assertEquals("the fetch is only the snapshot's background refresh", 1, fetchSite)

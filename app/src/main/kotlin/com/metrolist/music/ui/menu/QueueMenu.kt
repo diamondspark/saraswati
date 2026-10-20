@@ -68,6 +68,9 @@ import com.metrolist.music.models.MediaMetadata
 import com.metrolist.music.models.toMediaMetadata
 import com.metrolist.music.playback.ExoDownloadService
 import com.metrolist.music.playback.queues.YouTubeQueue
+import com.metrolist.music.saraswati.localmedia.LocalSongIds
+import com.metrolist.music.saraswati.localmedia.LocalSongMenuPolicy
+import com.metrolist.music.saraswati.localmedia.SongAction
 import com.metrolist.music.ui.component.BottomSheetState
 import com.metrolist.music.ui.component.ListDialog
 import com.metrolist.music.ui.component.Material3MenuGroup
@@ -91,6 +94,7 @@ fun QueueMenu(
     val context = LocalContext.current
     val database = LocalDatabase.current
     val playerConnection = LocalPlayerConnection.current ?: return
+    val isLocal = LocalSongIds.isLocal(mediaMetadata.id)
     val coroutineScope = rememberCoroutineScope()
     val syncUtils = LocalSyncUtils.current
 
@@ -226,11 +230,11 @@ fun QueueMenu(
                                 }
                             } else {
                                 // Regular song: toggle like
-                                val s = songEntity.toggleLike()
+                                val s = songEntity.toggleLike(syncToYouTube = !isLocal)
                                 database.query {
                                     update(s)
                                 }
-                                syncUtils.likeSong(s)
+                                if (!isLocal) syncUtils.likeSong(s)
                             }
                         }
                     }
@@ -267,8 +271,8 @@ fun QueueMenu(
         // Quick actions grid
         item {
             NewActionGrid(
-                actions = listOf(
-                    NewAction(
+                actions = listOfNotNull(
+                    if (LocalSongMenuPolicy.visible(SongAction.START_RADIO, isLocal)) NewAction(
                         icon = {
                             Icon(
                                 painter = painterResource(R.drawable.radio),
@@ -291,7 +295,7 @@ fun QueueMenu(
                                 )
                             }
                         }
-                    ),
+                    ) else null,
                     NewAction(
                         icon = {
                             Icon(
@@ -304,7 +308,7 @@ fun QueueMenu(
                         text = stringResource(R.string.add_to_playlist),
                         onClick = { showChoosePlaylistDialog = true }
                     ),
-                    NewAction(
+                    if (LocalSongMenuPolicy.visible(SongAction.SHARE, isLocal)) NewAction(
                         icon = {
                             Icon(
                                 painter = painterResource(R.drawable.share),
@@ -326,7 +330,7 @@ fun QueueMenu(
                             }
                             context.startActivity(Intent.createChooser(intent, null))
                         }
-                    )
+                    ) else null
                 ),
                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 16.dp)
             )
@@ -379,7 +383,7 @@ fun QueueMenu(
         item { Spacer(modifier = Modifier.height(12.dp)) }
 
         // Download section
-        item {
+        if (LocalSongMenuPolicy.visible(SongAction.DOWNLOAD, isLocal)) item {
             Material3MenuGroup(
                 items = listOf(
                     when (download?.state) {

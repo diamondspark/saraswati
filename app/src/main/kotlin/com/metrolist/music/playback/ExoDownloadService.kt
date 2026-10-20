@@ -12,7 +12,6 @@ import android.graphics.drawable.Icon
 import androidx.media3.common.util.Util
 import androidx.media3.exoplayer.offline.Download
 import androidx.media3.exoplayer.offline.DownloadService
-import androidx.media3.exoplayer.scheduler.PlatformScheduler
 import androidx.media3.exoplayer.scheduler.Scheduler
 import com.metrolist.music.R
 import dagger.hilt.android.AndroidEntryPoint
@@ -41,7 +40,9 @@ class ExoDownloadService : DownloadService(
 
     override fun getDownloadManager() = downloadUtil.downloadManager
 
-    override fun getScheduler(): Scheduler = PlatformScheduler(this, JOB_ID)
+    // SARASWATI: Phase 5 Task 11 — PlatformScheduler builds persisted jobs, which need RECEIVE_BOOT_COMPLETED, a
+    // permission this build removes; the call could not succeed. Nightly smart downloads have their own job.
+    override fun getScheduler(): Scheduler? = null
 
     override fun getForegroundNotification(
         downloads: MutableList<Download>,

@@ -25,6 +25,7 @@ import timber.log.Timber
 import java.net.URLEncoder
 import java.util.Locale
 import kotlin.math.abs
+import com.metrolist.innertube.saraswati.LocalIdEgressGuard
 
 object Paxsenix {
     @Volatile
@@ -48,6 +49,7 @@ object Paxsenix {
             Timber.d("Initializing Paxsenix with version: $appVersion")
             
             client = HttpClient(OkHttp) {
+            install(LocalIdEgressGuard)
                 install(HttpTimeout) {
                     requestTimeoutMillis = 15000
                     connectTimeoutMillis = 10000

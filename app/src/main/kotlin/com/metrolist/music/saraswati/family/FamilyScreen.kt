@@ -47,6 +47,8 @@ import com.metrolist.music.ui.component.Material3SettingsItem
 import com.metrolist.music.saraswati.family.parivaar.ParivaarMixCard
 import com.metrolist.music.saraswati.family.parivaar.ParivaarUiState
 import com.metrolist.music.saraswati.family.parivaar.ParivaarViewModel
+import com.metrolist.music.saraswati.family.recap.FamilyRecapCard
+import com.metrolist.music.saraswati.family.recap.FamilyRecapViewModel
 import com.metrolist.music.saraswati.family.playlists.FamilyPlaylistsSection
 import com.metrolist.music.saraswati.family.playlists.FamilyPlaylistsViewModel
 import com.metrolist.music.utils.rememberPreference
@@ -60,6 +62,8 @@ fun FamilyScreen(
     val isMember by viewModel.isMember.collectAsStateWithLifecycle()
     val hasPendingClaim by viewModel.hasPendingClaim.collectAsStateWithLifecycle()
     val claimCode by viewModel.pendingClaimCode.collectAsStateWithLifecycle()
+    // SARASWATI: Phase 6 Task 15 — one lambda for the route to Manage Family, shared by Parivaar Saar's link.
+    val openManage: () -> Unit = { navController.navigate(FamilyRoutes.MANAGE) }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshMembership() }
 
@@ -159,20 +163,35 @@ fun FamilyScreen(
         // SARASWATI: Phase 4 Task 20 — the shared sections need this phone's session, so only the owner's and a
         // paired phone see them.
         if (isOwner || isMember) {
-            FamilySharedSections(navController)
+            FamilySharedSections(navController, openManage)
         }
     }
 }
 
 @Composable
-private fun FamilySharedSections(navController: NavController) {
+private fun FamilySharedSections(
+    navController: NavController,
+    openManage: () -> Unit,
+) {
     val parivaarViewModel: ParivaarViewModel = hiltViewModel()
     val playlistsViewModel: FamilyPlaylistsViewModel = hiltViewModel()
     val playerConnection = LocalPlayerConnection.current
     val parivaarState by parivaarViewModel.state.collectAsStateWithLifecycle()
     val tasteVisible by parivaarViewModel.tasteVisible.collectAsStateWithLifecycle()
+    // SARASWATI: Phase 6 Task 15 — Parivaar Saar is the first card in the Family tab (approved mockup).
+    val recapViewModel: FamilyRecapViewModel = hiltViewModel()
+    val recap by recapViewModel.recap.collectAsStateWithLifecycle()
 
     Spacer(Modifier.height(14.dp))
+    recap?.let { current ->
+        // SARASWATI: Phase 6 Task 15 — the anthem's radio starts on the same queue path as the Parivaar Mix.
+        FamilyRecapCard(
+            recap = current,
+            onPlayAnthem = { recapViewModel.playAnthem { playerConnection?.playQueue(it) } },
+            onManage = openManage,
+        )
+        Spacer(Modifier.height(14.dp))
+    }
     val mixShown = parivaarState !is ParivaarUiState.Hidden
     if (mixShown) {
         Text(stringResource(R.string.parivaar_mix_title), style = MaterialTheme.typography.titleMedium)

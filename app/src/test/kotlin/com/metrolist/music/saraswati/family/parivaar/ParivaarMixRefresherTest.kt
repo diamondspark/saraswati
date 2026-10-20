@@ -10,6 +10,7 @@ package com.metrolist.music.saraswati.family.parivaar
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
+import com.metrolist.music.saraswati.family.recap.RecapSnapshotStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -24,6 +25,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.IOException
+import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 
@@ -103,6 +105,18 @@ class ParivaarMixRefresherTest {
 
             assertTrue(result.isSuccess)
             assertEquals(setOf("a1", "m1", "shared"), held().tracks.map { it.videoId }.toSet())
+        }
+
+    @Test
+    fun `the members read are handed to the family recap`() =
+        runBlocking {
+            val recap = RecapSnapshotStore(dataStore, Clock.systemUTC())
+            member("dev-me", "Mohit", "a1", "shared")
+            member("dev-mummy", "Mummy", "m1", "shared")
+
+            ParivaarMixRefresher(hub, port, identity, store, downloader, recap = recap).refreshIfDue(t0)
+
+            assertEquals(setOf("Mohit", "Mummy"), recap.current()!!.members.map { it.memberName }.toSet())
         }
 
     @Test

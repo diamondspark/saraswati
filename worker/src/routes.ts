@@ -25,7 +25,8 @@ export type RouteName =
   | "parivaarPlaylistsList"
   | "familyPlaylistsList"
   | "familyPlaylistsAdd"
-  | "familyPlaylistsDelete";
+  | "familyPlaylistsDelete"
+  | "ask";
 
 export interface Route {
   name: RouteName;
@@ -120,6 +121,8 @@ export function matchRoute(method: string, pathname: string): Route | null {
       return method === "GET"
         ? { name: "parivaarPlaylistsList", needsBearer: true }
         : null;
+    case "/ask":
+      return method === "POST" ? { name: "ask", needsBearer: true } : null;
     case "/family-playlists":
       if (method === "GET") {
         return { name: "familyPlaylistsList", needsBearer: true };

@@ -37,6 +37,8 @@ import com.metrolist.music.constants.ListenTogetherServerUrlKey
 import com.metrolist.music.constants.OpenRouterApiKey
 import com.metrolist.music.constants.OpenRouterBaseUrlKey
 import com.metrolist.music.constants.ParivaarMixKey
+import com.metrolist.music.constants.SmartDownloadLedgerKey
+import com.metrolist.music.constants.StationOfflineSetsKey
 import com.metrolist.music.constants.ParivaarPlaylistIdKey
 import com.metrolist.music.constants.ParivaarTopSongsSyncedAtKey
 import com.metrolist.music.constants.ProxyPasswordKey
@@ -153,12 +155,8 @@ class BackupPolicyTest {
         assertNull(sanitized[DeeplApiKey])
         assertNull(sanitized[LastFMSessionKey])
         assertNull(sanitized[DiscordAvatarKey])
-        // SARASWATI (fix round 1): these two are NOT dead config — DiscordRpcManager
-        // reconnects automatically from a Keystore-persisted token on every
-        // MusicService creation, with no SaraswatiFeatures.DISCORD check, and
-        // publishes whatever is in DataStore as the Rich Presence buttons on the
-        // next song play. A restored value here really does reach a live Discord
-        // presence with no fresh login required.
+        // SARASWATI: Discord was removed, so nothing reads these any more; an old backup's values are still
+        // dropped rather than copied onto the phone.
         assertNull(sanitized[DiscordButton1UrlKey])
         assertNull(sanitized[DiscordButton2UrlKey])
     }
@@ -271,6 +269,8 @@ class BackupPolicyTest {
                 FamilyStationsCacheKey to "{}",
                 FamilyFeaturesDisabledKey to setOf("sangat"),
                 ParivaarMixKey to "{}",
+                StationOfflineSetsKey to "{}",
+                SmartDownloadLedgerKey to "{}",
                 FamilyPlaylistsCacheKey to "[]",
                 ParivaarPlaylistIdKey to "PLabcdefghij",
                 ParivaarTopSongsSyncedAtKey to 1L,
@@ -282,6 +282,8 @@ class BackupPolicyTest {
         assertNull(sanitized[FamilyStationsCacheKey])
         assertNull(sanitized[FamilyFeaturesDisabledKey])
         assertNull(sanitized[ParivaarMixKey])
+        assertNull(sanitized[StationOfflineSetsKey])
+        assertNull(sanitized[SmartDownloadLedgerKey])
         assertNull(sanitized[FamilyPlaylistsCacheKey])
         assertNull(sanitized[ParivaarPlaylistIdKey])
         assertNull(sanitized[ParivaarTopSongsSyncedAtKey])

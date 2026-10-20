@@ -37,6 +37,8 @@ import com.metrolist.music.di.DownloadCache
 import com.metrolist.music.di.PlayerCache
 import com.metrolist.music.models.MediaMetadata
 import com.metrolist.music.models.toMediaMetadata
+import com.metrolist.music.saraswati.localmedia.LocalSongIds
+import com.metrolist.music.saraswati.offline.SmartDownloadLedger
 import com.metrolist.music.utils.InnerTubeXPlayer
 import com.metrolist.music.utils.enumPreference
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -61,6 +63,7 @@ import java.time.LocalDateTime
 import java.util.concurrent.Executor
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.metrolist.innertube.saraswati.LocalIdEgressInterceptor
 
 @Singleton
 class DownloadUtil
@@ -71,13 +74,14 @@ constructor(
     val databaseProvider: DatabaseProvider,
     @DownloadCache val downloadCache: Cache,
     @PlayerCache val playerCache: Cache,
+    private val smartLedger: SmartDownloadLedger,
 ) {
     private val TAG = "DownloadUtil"
     private val connectivityManager = context.getSystemService<ConnectivityManager>()!!
     private val audioQuality by enumPreference(context, AudioQualityKey, AudioQuality.AUTO)
     private val songUrlCache = StreamUrlCache()
     private val streamHttpClient =
-        OkHttpClient.Builder()
+        OkHttpClient.Builder().addInterceptor(LocalIdEgressInterceptor)
             .proxy(YouTube.proxy)
             .proxyAuthenticator { _, response ->
                 YouTube.proxyAuth?.let { auth ->
@@ -318,77 +322,98 @@ constructor(
 
     fun getDownload(songId: String): Flow<Download?> = downloads.map { it[songId] }
 
-    fun download(song: Song) = download(song.toMediaMetadata())
+    // SARASWATI: Phase 5 Task 2 — both overloads end in download(MediaMetadata), whose local-id guard runs first;
+    // the explicit checks here keep a local song from even being converted.
+    fun download(song: Song) {
+        if (LocalSongIds.isLocal(song.id)) return
+        download(song.toMediaMetadata())
+    }
 
-    fun download(song: SongItem) = download(song.toMediaMetadata())
+    fun download(song: SongItem) {
+        if (LocalSongIds.isLocal(song.id)) return
+        download(song.toMediaMetadata())
+    }
 
-    fun download(mediaMetadata: MediaMetadata) {
-        scope.launch {
-            downloadPreparations.withPermit {
-                if (!shouldPrepareDownload(downloads.value[mediaMetadata.id]?.state)) return@withPermit
+    // SARASWATI: Phase 5 Task 11 — the database and artwork half of download(), split out so the nightly smart
+    // downloads can queue a request on the DownloadManager directly, with no foreground service. download() keeps
+    // its behaviour: it sends the returned request to ExoDownloadService. Null when the song is already
+    // downloaded, or is a local file (those never leave the phone).
+    suspend fun prepareDownload(mediaMetadata: MediaMetadata): DownloadRequest? =
+        downloadPreparations.withPermit {
+            if (LocalSongIds.isLocal(mediaMetadata.id)) return@withPermit null
+            if (!shouldPrepareDownload(downloads.value[mediaMetadata.id]?.state)) return@withPermit null
 
-                mediaMetadata.album?.let { album ->
-                    if (database.albumEntity(album.id) == null) {
-                        database.insert(
-                            AlbumEntity(
-                                id = album.id,
-                                title = album.title,
-                                thumbnailUrl = mediaMetadata.thumbnailUrl,
-                                songCount = 0,
-                                duration = 0,
-                            ),
-                        )
-                    }
-                }
-
-                val existing = database.getSongByIdBlocking(mediaMetadata.id)
-                if (existing == null) {
-                    database.insert(mediaMetadata)
-                } else {
-                    database.update(
-                        existing,
-                        mediaMetadata,
-                        overwriteTitle = false,
-                        overwriteArtists = false,
+            mediaMetadata.album?.let { album ->
+                if (database.albumEntity(album.id) == null) {
+                    database.insert(
+                        AlbumEntity(
+                            id = album.id,
+                            title = album.title,
+                            thumbnailUrl = mediaMetadata.thumbnailUrl,
+                            songCount = 0,
+                            duration = 0,
+                        ),
                     )
                 }
+            }
 
-                if (!shouldPrepareDownload(downloadManager.downloadIndex.getDownload(mediaMetadata.id)?.state)) {
-                    return@withPermit
-                }
-
-                val request =
-                    DownloadRequest
-                        .Builder(mediaMetadata.id, mediaMetadata.id.toUri())
-                        .setCustomCacheKey(mediaMetadata.id)
-                        .setData(mediaMetadata.title.toByteArray())
-                        .build()
-                DownloadService.sendAddDownload(
-                    context,
-                    ExoDownloadService::class.java,
-                    request,
-                    false,
+            val existing = database.getSongByIdBlocking(mediaMetadata.id)
+            if (existing == null) {
+                database.insert(mediaMetadata)
+            } else {
+                database.update(
+                    existing,
+                    mediaMetadata,
+                    overwriteTitle = false,
+                    overwriteArtists = false,
                 )
+            }
 
-                val albumArtwork = database.getSongByIdBlocking(mediaMetadata.id)?.album?.thumbnailUrl
-                downloadArtworkUrls(mediaMetadata.thumbnailUrl, albumArtwork).forEach { artworkUrl ->
-                    runCatching {
-                        context.imageLoader.execute(
-                            ImageRequest
-                                .Builder(context)
-                                .data(artworkUrl)
-                                .memoryCachePolicy(CachePolicy.DISABLED)
-                                .diskCachePolicy(CachePolicy.ENABLED)
-                                .networkCachePolicy(CachePolicy.ENABLED)
-                                .build(),
-                        )
-                    }
+            if (!shouldPrepareDownload(downloadManager.downloadIndex.getDownload(mediaMetadata.id)?.state)) {
+                return@withPermit null
+            }
+
+            val albumArtwork = database.getSongByIdBlocking(mediaMetadata.id)?.album?.thumbnailUrl
+            downloadArtworkUrls(mediaMetadata.thumbnailUrl, albumArtwork).forEach { artworkUrl ->
+                runCatching {
+                    context.imageLoader.execute(
+                        ImageRequest
+                            .Builder(context)
+                            .data(artworkUrl)
+                            .memoryCachePolicy(CachePolicy.DISABLED)
+                            .diskCachePolicy(CachePolicy.ENABLED)
+                            .networkCachePolicy(CachePolicy.ENABLED)
+                            .build(),
+                    )
                 }
             }
+
+            DownloadRequest
+                .Builder(mediaMetadata.id, mediaMetadata.id.toUri())
+                .setCustomCacheKey(mediaMetadata.id)
+                .setData(mediaMetadata.title.toByteArray())
+                .build()
+        }
+
+    fun download(mediaMetadata: MediaMetadata) {
+        // SARASWATI: Phase 5 Task 2 — a song on this phone is already on this phone; nothing to enqueue or resolve.
+        if (LocalSongIds.isLocal(mediaMetadata.id)) return
+        scope.launch {
+            // SARASWATI: Phase 5 Task 11 — a song the person asks for is theirs: the nightly smart downloads must never evict it.
+            smartLedger.remove(listOf(mediaMetadata.id))
+            val request = prepareDownload(mediaMetadata) ?: return@launch
+            DownloadService.sendAddDownload(
+                context,
+                ExoDownloadService::class.java,
+                request,
+                false,
+            )
         }
     }
 
     fun download(songId: String) {
+        // SARASWATI: Phase 5 Task 2 — see download(MediaMetadata).
+        if (LocalSongIds.isLocal(songId)) return
         scope.launch {
             database.getSongByIdBlocking(songId)?.let { song ->
                 download(song)

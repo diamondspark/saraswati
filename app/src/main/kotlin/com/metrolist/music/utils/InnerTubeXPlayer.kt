@@ -24,7 +24,9 @@ import com.metrolist.innertubex.extraction.YtConfigParserImpl
 import com.metrolist.innertubex.extraction.generateClientPlaybackNonce
 import com.metrolist.innertubex.extraction.strategy.PoTokenProviderKind
 import com.metrolist.music.constants.AudioQuality
+import com.metrolist.innertube.saraswati.LocalSongEgressException
 import com.metrolist.music.saraswati.SaraswatiFeatures
+import com.metrolist.music.saraswati.localmedia.LocalSongIds
 import com.metrolist.music.utils.potoken.PoTokenGenerator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
@@ -63,6 +65,8 @@ object InnerTubeXPlayer {
         allowBoundedRange: Boolean = true,
     ): Result<PlaybackData> =
         try {
+            // SARASWATI: Phase 5 Task 2 — a song on this phone has no stream to resolve; refuse before any I/O.
+            if (LocalSongIds.isLocal(videoId)) throw LocalSongEgressException()
             val hints =
                 contentHints.copy(
                     isUploaded =

@@ -81,6 +81,35 @@ class FamilyFeatureGateTest {
         }
 
     @Test
+    fun `ask_saraswati is enabled before any answer`() {
+        val gate = gate()
+
+        assertTrue(gate.isEnabled(FamilyFeature.ASK_SARASWATI))
+        assertEquals("ask_saraswati", FamilyFeature.ASK_SARASWATI.key)
+    }
+
+    @Test
+    fun `a fetched false disables only ask_saraswati, and a key this build does not know is ignored`() =
+        runBlocking {
+            val gate = gate()
+            hub.killSwitches =
+                mapOf(
+                    "sangat" to true,
+                    "parivaar_mix" to true,
+                    "family_playlists" to true,
+                    "cast_relay" to true,
+                    "ask_saraswati" to false,
+                    "a_future_switch" to false,
+                )
+
+            gate.refresh()
+
+            assertFalse(gate.isEnabled(FamilyFeature.ASK_SARASWATI))
+            assertTrue(gate.enabled.value.filterKeys { it != FamilyFeature.ASK_SARASWATI }.values.all { it })
+            assertEquals(FamilyFeature.entries.toSet(), gate.enabled.value.keys)
+        }
+
+    @Test
     fun `a later true turns the feature back on`() =
         runBlocking {
             val gate = gate()

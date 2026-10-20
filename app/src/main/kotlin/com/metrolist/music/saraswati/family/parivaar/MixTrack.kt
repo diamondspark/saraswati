@@ -17,7 +17,9 @@ data class MixTrack(
     val durationMs: Long?,
 )
 
+// SARASWATI: Phase 6 Task 14 — serializable so the Family Recap can keep a snapshot of it on the phone.
 /** One member's most-played songs, best first. */
+@Serializable
 data class MemberTopSongs(
     val deviceId: String,
     val memberName: String,

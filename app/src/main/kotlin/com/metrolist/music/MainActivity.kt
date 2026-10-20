@@ -138,6 +138,9 @@ import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.WatchEndpoint
 import com.metrolist.music.saraswati.SaraswatiDeepLinkPolicy
+// SARASWATI: Phase 6 Task 3 — the snooze undo snackbar.
+import com.metrolist.music.saraswati.craft.snooze.SnoozeActions
+import com.metrolist.music.saraswati.craft.snooze.SnoozeUndo
 import com.metrolist.music.saraswati.SaraswatiFeatures
 import com.metrolist.music.saraswati.family.FamilyRoutes
 import com.metrolist.music.saraswati.family.FamilyFeatureGate
@@ -250,6 +253,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.time.Instant
+// SARASWATI: Phase 6 Task 7 — for the Prahar launch refresh.
+import java.time.LocalDateTime
 import java.util.Locale
 import javax.inject.Inject
 
@@ -276,6 +281,10 @@ class MainActivity : FragmentActivity() {
 
     @Inject
     lateinit var database: MusicDatabase
+
+    // SARASWATI: Phase 6 Task 3 — Undo on the snooze snackbar.
+    @Inject
+    lateinit var snoozeActions: SnoozeActions
 
     @Inject
     lateinit var downloadUtil: DownloadUtil
@@ -312,12 +321,21 @@ class MainActivity : FragmentActivity() {
     @Inject
     lateinit var healthReporter: HealthReporter
 
+    // SARASWATI: Phase 5 Task 3 — rescans the songs on this phone (at most every six hours, and only while access
+    // is granted and the Local files switch is on).
+    @Inject
+    lateinit var localSongsRepository: com.metrolist.music.saraswati.localmedia.LocalSongsRepository
+
     // SARASWATI: Phase 4 Task 12
     @Inject
     lateinit var topSongsPlaylistSync: TopSongsPlaylistSync
 
     @Inject
     lateinit var parivaarMixRefresher: ParivaarMixRefresher
+
+    // SARASWATI: Phase 6 Task 7 — the Prahar mix, refreshed at launch.
+    @Inject
+    lateinit var praharRepository: com.metrolist.music.saraswati.craft.prahar.PraharRepository
 
     // SARASWATI: Phase 4 Task 9 — the owner's four kill-switches, and the poll for family members who are
     // driving with Sangat on. The watcher runs only between onStart and onStop, never in Saral.
@@ -536,6 +554,8 @@ class MainActivity : FragmentActivity() {
                 launch { familyPlaylistsRepository.refresh() }
                 // SARASWATI: fix wave B1 (I2) — its own job too, so a slow hub holds up neither of the others.
                 launch { healthReporter.report() }
+                // SARASWATI: Phase 5 Task 3 — off the main thread; reads nothing without access or with the switch off.
+                launch(Dispatchers.IO) { localSongsRepository.syncIfDue(Instant.now()) }
                 // SARASWATI: Phase 4 Task 12 — this phone's weekly top-songs playlist, then the daily Parivaar Mix
                 // built from everyone's. One job, in that order; each is a no-op until it is due and never throws.
                 // SARASWATI: final fix wave (I2, M1) — the switches are refreshed first in this job: nothing is written to
@@ -547,6 +567,8 @@ class MainActivity : FragmentActivity() {
                     val memberName = ParivaarMemberName.of(saved, Build.MODEL)
                     topSongsPlaylistSync.syncIfDue(Instant.now(), memberName)
                     parivaarMixRefresher.refreshIfDue(Instant.now())
+                    // SARASWATI: Phase 6 Task 7 — the Prahar mix for this window, on the same launch refresh (no WorkManager).
+                    praharRepository.refreshIfDue(LocalDateTime.now())
                 }
                 // SARASWATI: Phase 4 Task 9 — (owner phone only, once) a device session; the kill-switches refresh above.
                 // (the self-pair refreshes the gate again itself once it has a session — review fix M7)
@@ -1141,6 +1163,8 @@ class MainActivity : FragmentActivity() {
                     mutableStateOf(null)
                 }
                 val snackbarHostState = remember { SnackbarHostState() }
+                // SARASWATI: Phase 6 Task 3 — "Snoozed for 30 days · Undo" from any snooze menu.
+                SnoozeUndo.Host(snackbarHostState) { videoId -> lifecycleScope.launch { snoozeActions.undo(videoId) } }
 
                 LaunchedEffect(Unit) {
                     // SARASWATI (audit A9.3): a malformed link must never crash the app.

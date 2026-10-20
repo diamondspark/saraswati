@@ -16,7 +16,12 @@ const TEST_ADMIN_KEY =
 export default defineConfig({
   plugins: [
     cloudflareTest({
-      wrangler: { configPath: "./wrangler.toml" },
+      // wrangler.test.toml is wrangler.toml minus [ai]. The AI binding is remote-only: the pool
+      // would sign in with the machine's Cloudflare login to reach it. Tests fake it.
+      // remoteBindings: false is the second lock: even a config that had a remote binding
+      // would get no remote session. test/ask.units.test.ts checks both lines.
+      wrangler: { configPath: "./wrangler.test.toml" },
+      remoteBindings: false,
       miniflare: {
         // TRACE_QUIET_MS is the quiet window between trace steps, read by
         // test/traces/replay.ts: TRACE_QUIET_MS=<ms> npx vitest run test/sangat.traces.test.ts

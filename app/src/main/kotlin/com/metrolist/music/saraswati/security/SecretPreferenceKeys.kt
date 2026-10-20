@@ -20,11 +20,17 @@ package com.metrolist.music.saraswati.security
 
 import androidx.datastore.preferences.core.Preferences
 import com.metrolist.music.constants.DeeplApiKey
+import com.metrolist.music.constants.DiscordAvatarKey
+import com.metrolist.music.constants.DiscordButton1UrlKey
+import com.metrolist.music.constants.DiscordButton2UrlKey
+import com.metrolist.music.constants.DiscordNameKey
+import com.metrolist.music.constants.DiscordUsernameKey
 import com.metrolist.music.constants.FamilyAdminKeyKey
 import com.metrolist.music.constants.FamilyHubClaimSecretKey
 import com.metrolist.music.constants.FamilyHubSessionTokenKey
 import com.metrolist.music.constants.InnerTubeCookieKey
 import com.metrolist.music.constants.LastFMSessionKey
+import com.metrolist.music.constants.LastFMUsernameKey
 import com.metrolist.music.constants.ListenTogetherSessionTimestampKey
 import com.metrolist.music.constants.ListenTogetherSessionTokenKey
 import com.metrolist.music.constants.OpenRouterApiKey
@@ -45,8 +51,16 @@ object SecretPreferenceKeys {
             // legacy backup could still carry a live key.
             OpenRouterApiKey,
             DeeplApiKey,
-            // Last.fm scrobbling session (SaraswatiFeatures.LASTFM = false).
+            // Last.fm and Discord were removed outright (owner decision). A legacy backup or datastore may still
+            // carry a Last.fm session, or a family member's Discord identity and the presence-button URLs; wiped
+            // on every start, never exported or restored.
             LastFMSessionKey,
+            LastFMUsernameKey,
+            DiscordUsernameKey,
+            DiscordNameKey,
+            DiscordAvatarKey,
+            DiscordButton1UrlKey,
+            DiscordButton2UrlKey,
             // Listen Together's reconnection bearer token. The feature
             // stays visible (it's woven through HomeScreen) but, per audit
             // A9.1/NEW-5, must not connect anywhere until Phase 4 adds a

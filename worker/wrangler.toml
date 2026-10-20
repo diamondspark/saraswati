@@ -9,3 +9,9 @@ class_name = "FamilyHub"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["FamilyHub"]
+
+# Ask Saraswati. A binding holds no key. On the Workers Free plan usage past the daily
+# allowance fails instead of being billed. vitest loads wrangler.test.toml, which is this
+# file minus this section.
+[ai]
+binding = "AI"

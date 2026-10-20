@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import com.metrolist.innertube.saraswati.LocalIdEgressGuard
 
 data class ReleaseInfo(
     val tagName: String,
@@ -31,7 +32,7 @@ data class ReleaseAsset(
 )
 
 object Updater {
-    private val client = HttpClient()
+    private val client = HttpClient { install(LocalIdEgressGuard) }
     var lastCheckTime = -1L
         private set
     

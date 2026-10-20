@@ -10,6 +10,7 @@ import okhttp3.Request
 import timber.log.Timber
 import java.io.File
 import java.util.concurrent.TimeUnit
+import com.metrolist.innertube.saraswati.LocalIdEgressInterceptor
 
 /**
  * GitHub-backed search interface for AutoEq data.
@@ -32,7 +33,7 @@ class GitHubAutoEqSearch(private val context: Context) {
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    private val client = OkHttpClient.Builder()
+    private val client = OkHttpClient.Builder().addInterceptor(LocalIdEgressInterceptor)
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .build()

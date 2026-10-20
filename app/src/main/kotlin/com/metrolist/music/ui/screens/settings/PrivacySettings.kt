@@ -218,6 +218,11 @@ fun PrivacySettings(
 
         Spacer(modifier = Modifier.height(27.dp))
 
+        // SARASWATI: Phase 5 Task 3 — the Local files switch (songs stored on this phone).
+        com.metrolist.music.saraswati.localmedia.LocalFilesSettingsGroup()
+
+        Spacer(modifier = Modifier.height(27.dp))
+
         Material3SettingsGroup(
             title = stringResource(R.string.misc),
             items = listOf(

@@ -7,6 +7,8 @@ export { FamilyHub };
 
 export interface Env {
   FAMILY_HUB: DurableObjectNamespace;
+  // Workers AI, for POST /ask. A binding holds no key; wrangler.toml declares it with [ai].
+  AI: Ai;
   // Worker secret, set with `wrangler secret put ADMIN_KEY`; the owner's own
   // 64-hex-character value, which no agent ever sees. `authenticate()` in
   // FamilyHub.ts checks bearer tokens against it first, and treats a value

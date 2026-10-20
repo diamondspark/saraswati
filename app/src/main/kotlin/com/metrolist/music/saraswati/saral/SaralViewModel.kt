@@ -34,11 +34,15 @@ import com.metrolist.music.R
 import com.metrolist.music.saraswati.culture.Festival
 import com.metrolist.music.saraswati.culture.FestivalClock
 import com.metrolist.music.saraswati.culture.FestivalRadio
+import com.metrolist.music.saraswati.ask.SaralAction
+import com.metrolist.music.saraswati.ask.SaralAsk
 import com.metrolist.music.saraswati.culture.FestivalSeed
 import com.metrolist.music.saraswati.family.FamilyViewModel
 import com.metrolist.music.saraswati.family.Station
 import com.metrolist.music.saraswati.family.StationsCache
 import com.metrolist.music.saraswati.family.StationsRefresher
+import com.metrolist.music.saraswati.family.parivaar.MixTrack
+import com.metrolist.music.saraswati.family.parivaar.ParivaarMixQueue
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -71,6 +75,9 @@ interface SaralPlayback {
     fun playRadio(seedVideoId: String)
 
     fun playSong(song: SongItem)
+
+    /** The Parivaar Mix, in order, as a queue of its own. */
+    fun playParivaarMix(tracks: List<MixTrack>)
 
     fun togglePlayPause()
 
@@ -171,6 +178,8 @@ internal sealed interface SaralRequest {
     data class Festival(
         val festival: com.metrolist.music.saraswati.culture.Festival,
     ) : SaralRequest
+
+    data object Mix : SaralRequest
 }
 
 internal object SaralStatusRules {
@@ -200,6 +209,7 @@ internal object SaralStatusRules {
             when (request) {
                 is SaralRequest.Station -> SaralSubject.Station(request.tile)
                 is SaralRequest.Festival -> SaralSubject.Festival(request.festival)
+                is SaralRequest.Mix -> SaralSubject.Track(if (player.ours) player.title ?: ParivaarMixQueue.TITLE else ParivaarMixQueue.TITLE)
                 // A song's radio moves on, so the name follows the track the player really has.
                 is SaralRequest.Song -> SaralSubject.Track(if (player.ours) player.title ?: request.title else request.title)
             }
@@ -243,10 +253,17 @@ class SaralViewModel
         signIn: YouTubeSignIn,
         scope: CoroutineScope,
         festivalClock: FestivalClock = FestivalClock(),
+        // SARASWATI: Phase 6 Task 10 — null keeps the voice path exactly as it was: the recogniser's words go to search.
+        private val ask: SaralAsk? = null,
     ) : ViewModel(scope) {
         @Inject
-        constructor(cache: StationsCache, refresher: StationsRefresher, search: SaralSearch, signIn: YouTubeSignIn) :
-            this(cache, refresher, search, signIn, CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate))
+        constructor(
+            cache: StationsCache,
+            refresher: StationsRefresher,
+            search: SaralSearch,
+            signIn: YouTubeSignIn,
+            ask: SaralAsk,
+        ) : this(cache, refresher, search, signIn, CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate), ask = ask)
 
         private val playback = MutableStateFlow<SaralPlayback?>(null)
         private var pending: ((SaralPlayback) -> Unit)? = null
@@ -386,7 +403,7 @@ class SaralViewModel
                 VoiceOutcome.NotHeard -> endVoice(VoiceNotice.NOT_HEARD)
                 VoiceOutcome.Offline -> endVoice(VoiceNotice.OFFLINE)
                 VoiceOutcome.Failed -> endVoice(VoiceNotice.FAILED)
-                is VoiceOutcome.Heard -> searchFor(outcome.guesses)
+                is VoiceOutcome.Heard -> resolveVoice(outcome.guesses)
             }
         }
 
@@ -446,6 +463,44 @@ class SaralViewModel
             notice.value = result
         }
 
+        /** The recogniser's first guess goes to Saral's ask; without one, or without the ask, the guesses are searched as before. */
+        private fun resolveVoice(guesses: List<String>?) {
+            val spoken = guesses.orEmpty().map { it.trim() }.firstOrNull { it.isNotEmpty() }
+            val asker = ask
+            if (spoken == null || asker == null) {
+                searchFor(guesses)
+                return
+            }
+            _voice.value = VoicePhase.SEARCHING
+            voiceJob =
+                viewModelScope.launch {
+                    val action = asker.resolve(spoken)
+                    coroutineContext.ensureActive()
+                    when (action) {
+                        is SaralAction.PlayStation -> {
+                            val tile = tiles.value.firstOrNull { it.station.id == action.stationId }
+                            if (tile == null) {
+                                searchFor(listOf(spoken))
+                            } else {
+                                _voice.value = VoicePhase.IDLE
+                                startStation(tile)
+                            }
+                        }
+                        SaralAction.ParivaarMix -> {
+                            val tracks = asker.cachedMixTracks()
+                            if (tracks.isEmpty()) {
+                                searchFor(listOf(spoken))
+                            } else {
+                                _voice.value = VoicePhase.IDLE
+                                startMix(tracks)
+                            }
+                        }
+                        is SaralAction.VoiceSearch ->
+                            searchFor(if (action.text == spoken) guesses else listOf(action.text))
+                    }
+                }
+        }
+
         /** [guesses] are the recogniser's, best first. */
         private fun searchFor(guesses: List<String>?) {
             val queries =
@@ -488,6 +543,12 @@ class SaralViewModel
             clearMessages()
             begin(SaralRequest.Station(tile))
             whenPlayerReady { it.playRadio(seed) }
+        }
+
+        private fun startMix(tracks: List<MixTrack>) {
+            clearMessages()
+            begin(SaralRequest.Mix)
+            whenPlayerReady { it.playParivaarMix(tracks) }
         }
 
         private fun startSong(song: SongItem) {

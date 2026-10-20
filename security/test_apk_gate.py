@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import io
 import json
 import os
@@ -1016,6 +1017,45 @@ class CliTests(unittest.TestCase):
         self.assertNotIn("references", snapshot, "raw ids must never be copied into the name pins")
         self.assertEqual("@ref/0x7f150006", snapshot["reference_ids"]["networkSecurityConfig"])
         self.assertIn("aapt2", err.getvalue())
+
+
+class ShippedPermissionPinTests(unittest.TestCase):
+    """Phase 5: songs on this phone add exactly one permission, READ_MEDIA_AUDIO (runtime only).
+
+    Anything else added to security/manifest-allowlist.json fails here until the owner re-reviews it.
+    """
+
+    PINNED = {
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.WAKE_LOCK",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+        "android.permission.READ_MEDIA_AUDIO",
+        "dev.diamondspark.saraswati.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
+    }
+
+    def _shipped(self) -> dict:
+        return json.loads((SECURITY / "manifest-allowlist.json").read_text(encoding="utf-8"))
+
+    def test_the_shipped_allowlist_holds_exactly_the_pinned_permissions(self) -> None:
+        self.assertEqual(self.PINNED, set(self._shipped()["permissions"]))
+
+    def test_other_storage_and_media_permissions_stay_forbidden(self) -> None:
+        forbidden = set(self._shipped()["forbidden_permissions"])
+        for name in ("READ_EXTERNAL_STORAGE", "MANAGE_EXTERNAL_STORAGE", "READ_MEDIA_IMAGES", "READ_MEDIA_VIDEO"):
+            self.assertIn("android.permission." + name, forbidden)
+        self.assertNotIn("android.permission.READ_MEDIA_AUDIO", forbidden)
+
+    def test_a_manifest_that_adds_a_photo_permission_fails_the_gate(self) -> None:
+        base = parse_manifest(_read_fixture("clean_manifest.xml"))
+        facts = dataclasses.replace(base, permissions=base.permissions | {"android.permission.READ_MEDIA_IMAGES"})
+        self.assertIn(
+            "forbidden permission: android.permission.READ_MEDIA_IMAGES",
+            check(facts, self._shipped()),
+        )
 
 
 if __name__ == "__main__":
