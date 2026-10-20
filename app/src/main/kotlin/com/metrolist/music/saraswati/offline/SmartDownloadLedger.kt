@@ -60,6 +60,13 @@ class SmartDownloadLedger(
     /** Starts [night] if the ledger is still on an earlier one, keeping last night's count. */
     suspend fun rollTo(night: String) = change { it.rolledTo(night) }
 
+    /** A station's radio could not be asked. It counts as a failure of [night], like a song that did not download. */
+    suspend fun markFetchFailed(night: String) =
+        change {
+            val rolled = it.rolledTo(night)
+            rolled.copy(failuresInARow = rolled.failuresInARow + 1)
+        }
+
     suspend fun remove(ids: Collection<String>) {
         if (ids.isEmpty()) return
         change { it.copy(entries = it.entries - ids.toSet()) }

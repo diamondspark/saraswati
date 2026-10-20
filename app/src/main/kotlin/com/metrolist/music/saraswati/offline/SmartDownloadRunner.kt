@@ -53,11 +53,19 @@ class SmartDownloadRunner(
                 ledger.rollTo(night)
                 reconcile(night)
                 executor.resume(ledger.pendingIds())
-                val gathered = candidates.gather(now())
-                keep = gathered.mapTo(HashSet()) { it.id }
+                // Gathering (radio fetches, paced SPACING_MS apart) shares the run's budget with the downloads.
+                var gathered: List<Candidate>? = null
                 cause =
-                    withTimeoutOrNull(budgetMs) { download(gathered, night) { downloaded++ } }
-                        ?: afterBudget(gathered, night)
+                    withTimeoutOrNull(budgetMs) {
+                        val found = candidates.gather(now())
+                        gathered = found
+                        keep = found.mapTo(HashSet()) { it.id }
+                        if (ledger.snapshot().rolledTo(night).failuresInARow >= STOP_AFTER_FAILURES) {
+                            StopCause.FAILURES
+                        } else {
+                            download(found, night) { downloaded++ }
+                        }
+                    } ?: gathered?.let { afterBudget(it, night) } ?: StopCause.BUDGET
             }
         } catch (e: CancellationException) {
             withContext(NonCancellable) {

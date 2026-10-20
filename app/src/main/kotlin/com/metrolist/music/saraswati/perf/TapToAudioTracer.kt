@@ -21,6 +21,11 @@ class TapToAudioTracer(
     /** Synchronous: true when the song is local, or its first chunk is in the download or player cache. */
     private val isOfflineNow: (String) -> Boolean,
 ) : AnalyticsListener {
+    // At most one async section is open: a tap replaces the one before it, and a pause, audio or a dropped tap ends it.
+    private var openName: String? = null
+    private var openCookie = 0
+    private var cookies = 0
+
     override fun onMediaItemTransition(
         eventTime: AnalyticsListener.EventTime,
         mediaItem: MediaItem?,
@@ -32,9 +37,10 @@ class TapToAudioTracer(
         ) {
             return
         }
+        endOpenSection()
         val offline = isOfflineNow(mediaItem.mediaId)
         clock.onTap(mediaItem.mediaId, offline)
-        Trace.beginAsyncSection(sectionName(offline), 0)
+        beginSection(sectionName(offline))
     }
 
     override fun onPlayWhenReadyChanged(
@@ -42,18 +48,34 @@ class TapToAudioTracer(
         playWhenReady: Boolean,
         reason: Int,
     ) {
-        if (!playWhenReady) clock.onPause()
+        if (!playWhenReady) {
+            clock.onPause()
+            endOpenSection()
+        }
     }
 
     override fun onAudioPositionAdvancing(
         eventTime: AnalyticsListener.EventTime,
         positionUs: Long,
     ) {
-        val sample = clock.onAudioAdvancing() ?: return
-        Trace.endAsyncSection(sectionName(sample.offline), 0)
+        val sample = clock.onAudioAdvancing()
+        endOpenSection()
+        if (sample == null) return
         if (BuildConfig.DEBUG) {
             Timber.d("tapToAudio offline=${sample.offline} ms=${sample.elapsedMs}")
         }
+    }
+
+    private fun beginSection(name: String) {
+        openName = name
+        openCookie = ++cookies
+        Trace.beginAsyncSection(name, openCookie)
+    }
+
+    private fun endOpenSection() {
+        val name = openName ?: return
+        openName = null
+        Trace.endAsyncSection(name, openCookie)
     }
 
     private fun sectionName(offline: Boolean): String = if (offline) OFFLINE_SECTION else NETWORK_SECTION

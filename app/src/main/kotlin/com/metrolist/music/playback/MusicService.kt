@@ -2717,6 +2717,9 @@ class MusicService :
     // onMediaItemTransition call, so we can decide whether IT finished
     // naturally (and is therefore safe to mark as fully cached).
     private var lastTransitionedMediaId: String? = null
+
+    // SARASWATI: Phase 5 Task 7 — the error of the last player error, read when a song gives up for good.
+    private var lastPlayerError: PlaybackException? = null
     private var previousEpisodePosition: Long = 0L
 
     /**
@@ -2768,8 +2771,11 @@ class MusicService :
         lastTransitionedMediaId = mediaItem?.mediaId
         // SARASWATI: Phase 5 Task 7 — a streamed song while the signal is gone (or YouTube is failing) is skipped at once.
         // Only while playing: a queue restored paused at launch must not start by itself.
+        // An explicit choice (a tap, Next, a seek) is never redirected: only automatic transitions are checked.
+        val explicitChoice =
+            reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED || reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK
         mediaItem?.mediaId?.let { id ->
-            if (player.playWhenReady) {
+            if (player.playWhenReady && !explicitChoice) {
                 launchNeverSilent(decide = { neverSilent.onTransition(id, neverSilentOnline()) })
             }
         }
@@ -3227,6 +3233,17 @@ class MusicService :
         }
     }
 
+    /**
+     * Only a failure that says YouTube itself is unreachable or refusing us (network, timeout, 429, 5xx) makes it look
+     * degraded. A removed, region-blocked or age-restricted video is that video's problem.
+     */
+    private fun isYouTubeHealthFailure(error: PlaybackException?): Boolean {
+        if (error == null) return false
+        if (isNetworkRelatedError(error)) return true
+        val status = (error.cause as? HttpDataSource.InvalidResponseCodeException)?.responseCode ?: return false
+        return status == 429 || status in 500..599
+    }
+
     private fun isNetworkRelatedError(error: PlaybackException): Boolean {
         // Don't treat specific errors as network errors - they need special handling
         if (isExpiredUrlError(error) || isRangeNotSatisfiableError(error) || isPageReloadError(error)) {
@@ -3277,6 +3294,7 @@ class MusicService :
 
     override fun onPlayerError(error: PlaybackException) {
         super.onPlayerError(error)
+        lastPlayerError = error
 
         if (!playerInitialized.value) {
             Timber.tag(TAG).e(error, "Player error occurred but player not initialized")
@@ -3707,8 +3725,9 @@ class MusicService :
             return
         }
         val wasPlaying = player.playWhenReady
+        val youTubeFailed = isYouTubeHealthFailure(lastPlayerError)
         launchNeverSilent(
-            decide = { neverSilent.onFinalFailure(failedId, neverSilentOnline(), wasPlaying) },
+            decide = { neverSilent.onFinalFailure(failedId, neverSilentOnline(), wasPlaying, youTubeFailed) },
             otherwise = ::handleFinalFailureUpstream,
         )
     }

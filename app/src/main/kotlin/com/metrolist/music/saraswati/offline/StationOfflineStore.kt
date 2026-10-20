@@ -36,6 +36,8 @@ data class StationOfflineSet(
     val seedVideoId: String,
     val tracks: List<MixTrack>,
     val refreshedAt: Long,
+    /** When the radio was last asked for this station, answered or not. Zero before the first ask. */
+    val lastAttemptAt: Long = 0L,
 )
 
 class StationOfflineStore(
@@ -73,6 +75,16 @@ class StationOfflineStore(
     fun forSeed(seedVideoId: String): StationOfflineSet? = held.values.firstOrNull { it.seedVideoId == seedVideoId }
 
     suspend fun save(set: StationOfflineSet) = change { it + (set.stationId to set.copy(tracks = set.tracks.take(MAX_TRACKS))) }
+
+    /** Records that the radio was asked for [station] at [at], keeping any tracks already held for it. */
+    suspend fun markAttempted(
+        station: Station,
+        at: Long,
+    ) = change { sets ->
+        val held = sets[station.id]?.takeIf { it.seedVideoId == station.seedVideoId }
+        val base = held ?: StationOfflineSet(station.id, station.seedVideoId, emptyList(), refreshedAt = 0L)
+        sets + (station.id to base.copy(lastAttemptAt = at))
+    }
 
     suspend fun retain(stations: List<Station>) =
         change { sets ->

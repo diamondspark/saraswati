@@ -37,6 +37,7 @@ import com.metrolist.music.di.DownloadCache
 import com.metrolist.music.di.PlayerCache
 import com.metrolist.music.models.MediaMetadata
 import com.metrolist.music.models.toMediaMetadata
+import com.metrolist.music.saraswati.offline.SmartDownloadLedger
 import com.metrolist.music.utils.InnerTubeXPlayer
 import com.metrolist.music.utils.enumPreference
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -71,6 +72,7 @@ constructor(
     val databaseProvider: DatabaseProvider,
     @DownloadCache val downloadCache: Cache,
     @PlayerCache val playerCache: Cache,
+    private val smartLedger: SmartDownloadLedger,
 ) {
     private val TAG = "DownloadUtil"
     private val connectivityManager = context.getSystemService<ConnectivityManager>()!!
@@ -385,6 +387,8 @@ constructor(
 
     fun download(mediaMetadata: MediaMetadata) {
         scope.launch {
+            // SARASWATI: Phase 5 Task 11 — a song the person asks for is theirs: the nightly smart downloads must never evict it.
+            smartLedger.remove(listOf(mediaMetadata.id))
             val request = prepareDownload(mediaMetadata) ?: return@launch
             DownloadService.sendAddDownload(
                 context,

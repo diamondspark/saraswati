@@ -57,6 +57,7 @@ class SmartDownloadCandidates(
     private val topSongs: TopSongsSource,
     private val library: SmartLibrary,
     private val mixEnabled: () -> Boolean,
+    private val onFetchFailed: suspend (Instant) -> Unit = {},
     private val pause: suspend (Long) -> Unit = { delay(it) },
 ) : CandidateGatherer {
     override suspend fun gather(now: Instant): List<Candidate> {
@@ -78,13 +79,17 @@ class SmartDownloadCandidates(
 
         var fetched = false
         stations.forEach { station ->
-            if (!needsRefresh(station, now)) return@forEach
+            if (!needsRefresh(station, now) || attemptedRecently(station, now)) return@forEach
             if (fetched) pause(SmartDownloadRunner.SPACING_MS)
             fetched = true
-            val tracks = port.radio(station.seedVideoId).getOrNull().orEmpty().take(STATION_OFFLINE_TRACKS)
+            // Recorded before the ask, so a fetch that fails or is cut short is not asked again for a day.
+            stationStore.markAttempted(station, now.toEpochMilli())
+            val answer = port.radio(station.seedVideoId)
+            if (answer.isFailure) onFetchFailed(now)
+            val tracks = answer.getOrNull().orEmpty().take(STATION_OFFLINE_TRACKS)
             // A failed or empty answer keeps the set already held; a Station is never left with nothing.
             if (tracks.isNotEmpty()) {
-                stationStore.save(StationOfflineSet(station.id, station.seedVideoId, tracks, now.toEpochMilli()))
+                stationStore.save(StationOfflineSet(station.id, station.seedVideoId, tracks, now.toEpochMilli(), now.toEpochMilli()))
             }
         }
         return stations.flatMap { station ->
@@ -105,6 +110,14 @@ class SmartDownloadCandidates(
 
     private suspend fun likedCandidates(): List<Candidate> = library.liked(LIKED_COUNT).map { Candidate(it, CandidateSource.LIKED) }
 
+    private fun attemptedRecently(
+        station: Station,
+        now: Instant,
+    ): Boolean {
+        val last = stationStore.cached()[station.id]?.takeIf { it.seedVideoId == station.seedVideoId }?.lastAttemptAt ?: return false
+        return now.toEpochMilli() - last < ATTEMPT_BACKOFF_MS
+    }
+
     private fun needsRefresh(
         station: Station,
         now: Instant,
@@ -121,6 +134,7 @@ class SmartDownloadCandidates(
         const val TOP_PLAYED_DAYS = 30L
         const val LIKED_COUNT = 20
         const val STATION_REFRESH_DAYS = 7L
+        private val ATTEMPT_BACKOFF_MS = Duration.ofDays(1).toMillis()
         private const val HYDRATION_WAIT_MS = 5_000L
     }
 }

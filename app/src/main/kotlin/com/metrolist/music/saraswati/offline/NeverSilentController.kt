@@ -56,8 +56,9 @@ class NeverSilentController(
         mediaId: String,
         online: Boolean,
         wasPlaying: Boolean,
+        youTubeFailed: Boolean,
     ): Boolean {
-        state.onFinalFailure(mediaId)
+        if (youTubeFailed) state.onFinalFailure(mediaId)
         return if (state.preferOffline(online)) act(wasPlaying) else false
     }
 

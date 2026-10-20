@@ -234,6 +234,24 @@ class SmartDownloadRunnerTest {
         }
 
     @Test
+    fun `a song the user downloaded is never evicted as a smart download`() =
+        runBlocking {
+            (1..305).forEach { i ->
+                ledger.markPending("old$i", clock)
+                ledger.markDone("old$i", Instant.ofEpochSecond(1_700_000_000L + i), "2026-10-18")
+            }
+            val executor = FakeExecutor()
+            executor.downloaded += (1..305).map { "old$it" }
+            // DownloadUtil.download() disowns old1 when the person asks for it: it is theirs now, and not a candidate.
+            ledger.remove(listOf("old1"))
+
+            runner(executor, listOf(song("other"))).runOnce()
+
+            assertTrue("old1" !in executor.removed)
+            assertTrue("old1" !in executor.stopped)
+        }
+
+    @Test
     fun `disabled does nothing`() =
         runBlocking {
             val executor = FakeExecutor()

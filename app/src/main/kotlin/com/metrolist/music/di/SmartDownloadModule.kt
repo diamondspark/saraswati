@@ -21,6 +21,7 @@ import com.metrolist.music.saraswati.offline.DownloadManagerExecutor
 import com.metrolist.music.saraswati.offline.SmartDownloadCandidates
 import com.metrolist.music.saraswati.offline.SmartDownloadExecutor
 import com.metrolist.music.saraswati.offline.SmartDownloadLedger
+import com.metrolist.music.saraswati.offline.SmartDownloadPlan
 import com.metrolist.music.saraswati.offline.SmartDownloadRunner
 import com.metrolist.music.saraswati.offline.SmartDownloadScheduler
 import com.metrolist.music.saraswati.offline.StationOfflineStore
@@ -32,6 +33,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.flow.first
+import java.time.ZoneId
 import javax.inject.Singleton
 
 @Module
@@ -75,6 +77,7 @@ object SmartDownloadModule {
                     topSongs = DatabaseTopSongsSource(database),
                     library = DatabaseSmartLibrary(database),
                     mixEnabled = { gate.isEnabled(FamilyFeature.PARIVAAR_MIX) },
+                    onFetchFailed = { now -> ledger.markFetchFailed(SmartDownloadPlan.nightKey(now, ZoneId.systemDefault())) },
                 ),
             executor = executor,
             isEnabled = { context.dataStore.data.first()[SmartDownloadsEnabledKey] ?: true },

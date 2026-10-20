@@ -131,8 +131,8 @@ class NeverSilentControllerTest {
         offlineIds = setOf("dl")
         val c = controller(port)
 
-        assertFalse(runBlocking { c.onFinalFailure("a", online = true, wasPlaying = true) })
-        assertTrue(runBlocking { c.onFinalFailure("b", online = true, wasPlaying = true) })
+        assertFalse(runBlocking { c.onFinalFailure("a", online = true, wasPlaying = true, youTubeFailed = true) })
+        assertTrue(runBlocking { c.onFinalFailure("b", online = true, wasPlaying = true, youTubeFailed = true) })
 
         assertEquals(listOf(3), port.jumps)
     }
@@ -146,7 +146,7 @@ class NeverSilentControllerTest {
 
         assertFalse(runBlocking { c.onOffline(wasPlaying = true) })
         assertFalse(runBlocking { c.onTransition("now", online = false) })
-        assertFalse(runBlocking { c.onFinalFailure("now", online = false, wasPlaying = true) })
+        assertFalse(runBlocking { c.onFinalFailure("now", online = false, wasPlaying = true, youTubeFailed = true) })
         assertTrue(port.jumps.isEmpty())
     }
 
@@ -193,6 +193,18 @@ class NeverSilentControllerTest {
         port.current = 0
 
         assertFalse(runBlocking { c.onOffline(wasPlaying = true) })
+    }
+
+    @Test
+    fun `failures that are not YouTube's own do not make it look degraded`() {
+        val port = port("a", "b", "c", "dl")
+        offlineIds = setOf("dl")
+        val c = controller(port)
+
+        assertFalse(runBlocking { c.onFinalFailure("a", online = true, wasPlaying = true, youTubeFailed = false) })
+        assertFalse(runBlocking { c.onFinalFailure("b", online = true, wasPlaying = true, youTubeFailed = false) })
+
+        assertTrue(port.jumps.isEmpty())
     }
 
     @Test

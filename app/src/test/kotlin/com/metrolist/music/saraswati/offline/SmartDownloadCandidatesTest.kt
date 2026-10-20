@@ -94,12 +94,13 @@ class SmartDownloadCandidatesTest {
     }
 
     private fun candidates(
-        port: FakePort = FakePort { emptyList() },
+        port: YouTubePlaylistPort = FakePort { emptyList() },
         stations: List<Station> = emptyList(),
         mixOn: Boolean = true,
         top: List<RankedSong> = emptyList(),
         liked: List<MediaMetadata> = emptyList(),
         pauses: MutableList<Long> = mutableListOf(),
+        onFetchFailed: suspend (Instant) -> Unit = {},
     ) = SmartDownloadCandidates(
         mixStore = mixStore,
         stationsCache = FakeStations(stations),
@@ -119,6 +120,7 @@ class SmartDownloadCandidatesTest {
                 override suspend fun liked(limit: Int) = liked.take(limit)
             },
         mixEnabled = { mixOn },
+        onFetchFailed = onFetchFailed,
         pause = { pauses += it },
     )
 
@@ -154,6 +156,33 @@ class SmartDownloadCandidatesTest {
             val saved = stationStore.cached().getValue("st1")
             assertEquals(8, saved.tracks.size)
             assertEquals(now.toEpochMilli(), saved.refreshedAt)
+        }
+
+    @Test
+    fun `a station whose radio failed is not asked again for a day and counts as a failure`() =
+        runBlocking {
+            val station = Station("st1", "Old songs", "seed0000001", 0)
+            val inner = FakePort { emptyList() }
+            var asks = 0
+            val failing =
+                object : YouTubePlaylistPort by inner {
+                    override suspend fun radio(seedVideoId: String): Result<List<MixTrack>> {
+                        asks++
+                        return Result.failure(IllegalStateException("radio refused"))
+                    }
+                }
+            val failures = mutableListOf<Instant>()
+
+            candidates(failing, listOf(station), onFetchFailed = { failures += it }).gather(now)
+            candidates(failing, listOf(station), onFetchFailed = { failures += it }).gather(now.plusSeconds(3_600))
+
+            assertEquals(1, asks)
+            assertEquals(listOf(now), failures)
+
+            candidates(failing, listOf(station), onFetchFailed = { failures += it }).gather(now.plusSeconds(25 * 3_600L))
+
+            assertEquals(2, asks)
+            assertEquals(2, failures.size)
         }
 
     @Test
