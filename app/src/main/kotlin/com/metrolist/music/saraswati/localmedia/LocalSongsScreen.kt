@@ -158,11 +158,20 @@ fun LocalSongsScreen(
                         text = stringResource(R.string.local_files_desc_off),
                         style = MaterialTheme.typography.bodyLarge,
                     )
-                    Button(
-                        onClick = { if (access == LocalAccess.GRANTED) viewModel.turnOn() else requestAllow() },
-                        modifier = Modifier.padding(top = 16.dp),
-                    ) {
-                        Text(stringResource(R.string.local_songs_turn_on))
+                    // SARASWATI: Phase 5 fix (P5-I2) — without access, the explanation comes before the system prompt.
+                    if (access == LocalAccess.GRANTED) {
+                        Button(
+                            onClick = { viewModel.turnOn() },
+                            modifier = Modifier.padding(top = 16.dp),
+                        ) {
+                            Text(stringResource(R.string.local_songs_turn_on))
+                        }
+                    } else {
+                        LocalAccessPrompt(
+                            deniedCount = 0,
+                            onAllow = requestAllow,
+                            onOpenSettings = { openAppSettings(context) },
+                        )
                     }
                 }
 

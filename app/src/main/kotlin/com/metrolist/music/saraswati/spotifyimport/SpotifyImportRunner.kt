@@ -152,7 +152,8 @@ class MusicDatabaseSpotifyImportStore(
     // Every write runs on the calling thread and returns only once it is committed. The runner
     // already runs on a background thread, so no executor hop is needed, and a later append can
     // never race an earlier insert.
-    override fun localSongs(): List<Song> = runBlocking { database.allSongs().first() }
+    // SARASWATI: Phase 5 fix (P5-I1) — songs on this phone are never matched into an imported playlist.
+    override fun localSongs(): List<Song> = runBlocking { database.allSongs().first().filterNot { it.song.isLocal } }
 
     override fun persistSong(song: Song) {
         database.insert(song.toMediaMetadata())

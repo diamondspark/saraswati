@@ -693,7 +693,8 @@ class MusicService :
                     ?: ContentMetadata.getContentLength(playerCache.getContentMetadata(id)).takeIf { it > 0L }
             },
             isLocal = { LocalSongIds.isLocal(it) },
-            localGranted = { localAccess(this@MusicService) == LocalAccess.GRANTED },
+            // SARASWATI: Phase 5 fix (M-1) — offline playability honours the Local files switch, not just the permission.
+            localGranted = { runBlocking { localSongsRepository.canServe() } },
         )
     }
 

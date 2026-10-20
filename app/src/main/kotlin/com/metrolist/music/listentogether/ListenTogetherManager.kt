@@ -182,7 +182,8 @@ class ListenTogetherManager
                 tickWhilePresent(remoteNowPlaying, PASSENGER_CREDIT_TICK_MS).collect { now ->
                     val id =
                         credit.onRoomState(
-                            videoId = now?.track?.id,
+                            // SARASWATI: Phase 5 fix (M-6) — a song on this phone is never credited to a passenger.
+                            videoId = now?.track?.id?.takeIf { com.metrolist.music.saraswati.localmedia.LocalSangatPolicy.mayShare(it) },
                             suggestedBy = now?.track?.suggestedBy,
                             isPlaying = now?.isPlaying == true,
                             myUsername = username.value,

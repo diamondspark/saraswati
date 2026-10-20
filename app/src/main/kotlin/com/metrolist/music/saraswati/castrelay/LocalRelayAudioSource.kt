@@ -40,7 +40,13 @@ class LocalRelayAudioSource(
 
             val start = range?.first?.coerceAtLeast(0L) ?: 0L
             val input = file.input
-            input.skipFully(start)
+            try {
+                input.skipFully(start)
+            } catch (e: Throwable) {
+                // SARASWATI: Phase 5 fix (M-3) — a failed skip closes the file it opened.
+                input.close()
+                throw e
+            }
             val bounded: InputStream =
                 range?.takeIf { it.last < Long.MAX_VALUE }?.let { LimitedStream(input, it.last - start + 1) } ?: input
             RelayStream(

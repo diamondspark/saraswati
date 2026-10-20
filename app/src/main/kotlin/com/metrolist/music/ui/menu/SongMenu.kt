@@ -582,7 +582,7 @@ fun SongMenu(
                             text = stringResource(R.string.add_to_playlist),
                             onClick = { showChoosePlaylistDialog = true },
                         ),
-                        if (addableFamily.isNotEmpty()) {
+                        if (addableFamily.isNotEmpty() && LocalSongMenuPolicy.visible(SongAction.FAMILY_PLAYLIST, isLocal)) {
                             NewAction(
                                 icon = {
                                     Icon(

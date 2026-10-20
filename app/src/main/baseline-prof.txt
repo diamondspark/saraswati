@@ -34072,7 +34072,6 @@ SPLcom/metrolist/music/constants/PreferenceKeysKt;->getDynamicThemeKey()Landroid
 SPLcom/metrolist/music/constants/PreferenceKeysKt;->getEnableGoogleCastKey()Landroidx/datastore/preferences/core/Preferences$Key;
 SPLcom/metrolist/music/constants/PreferenceKeysKt;->getEnableHighRefreshRateKey()Landroidx/datastore/preferences/core/Preferences$Key;
 SPLcom/metrolist/music/constants/PreferenceKeysKt;->getEnableLandscapeScalingKey()Landroidx/datastore/preferences/core/Preferences$Key;
-SPLcom/metrolist/music/constants/PreferenceKeysKt;->getEnableLastFMScrobblingKey()Landroidx/datastore/preferences/core/Preferences$Key;
 SPLcom/metrolist/music/constants/PreferenceKeysKt;->getForceBottomNavBarKey()Landroidx/datastore/preferences/core/Preferences$Key;
 SPLcom/metrolist/music/constants/PreferenceKeysKt;->getGridItemsSizeKey()Landroidx/datastore/preferences/core/Preferences$Key;
 SPLcom/metrolist/music/constants/PreferenceKeysKt;->getHideExplicitKey()Landroidx/datastore/preferences/core/Preferences$Key;
@@ -34084,9 +34083,6 @@ SPLcom/metrolist/music/constants/PreferenceKeysKt;->getInnerTubeAuthUserKey()Lan
 SPLcom/metrolist/music/constants/PreferenceKeysKt;->getInnerTubeCookieKey()Landroidx/datastore/preferences/core/Preferences$Key;
 SPLcom/metrolist/music/constants/PreferenceKeysKt;->getKeepScreenOn()Landroidx/datastore/preferences/core/Preferences$Key;
 SPLcom/metrolist/music/constants/PreferenceKeysKt;->getLanguageCodeToName()Ljava/util/Map;
-SPLcom/metrolist/music/constants/PreferenceKeysKt;->getLastFMSessionKey()Landroidx/datastore/preferences/core/Preferences$Key;
-SPLcom/metrolist/music/constants/PreferenceKeysKt;->getLastFMUseNowPlaying()Landroidx/datastore/preferences/core/Preferences$Key;
-SPLcom/metrolist/music/constants/PreferenceKeysKt;->getLastFMUseSendLikes()Landroidx/datastore/preferences/core/Preferences$Key;
 SPLcom/metrolist/music/constants/PreferenceKeysKt;->getLastFullSyncKey()Landroidx/datastore/preferences/core/Preferences$Key;
 SPLcom/metrolist/music/constants/PreferenceKeysKt;->getLastSeenVersionKey()Landroidx/datastore/preferences/core/Preferences$Key;
 SPLcom/metrolist/music/constants/PreferenceKeysKt;->getListenTogetherBlockedUsersKey()Landroidx/datastore/preferences/core/Preferences$Key;
@@ -34123,9 +34119,6 @@ SPLcom/metrolist/music/constants/PreferenceKeysKt;->getRememberShuffleAndRepeatK
 SPLcom/metrolist/music/constants/PreferenceKeysKt;->getRepeatModeKey()Landroidx/datastore/preferences/core/Preferences$Key;
 SPLcom/metrolist/music/constants/PreferenceKeysKt;->getSaraswatiLastUpdateCheckKey()Landroidx/datastore/preferences/core/Preferences$Key;
 SPLcom/metrolist/music/constants/PreferenceKeysKt;->getSaraswatiUpdateChannelKey()Landroidx/datastore/preferences/core/Preferences$Key;
-SPLcom/metrolist/music/constants/PreferenceKeysKt;->getScrobbleDelayPercentKey()Landroidx/datastore/preferences/core/Preferences$Key;
-SPLcom/metrolist/music/constants/PreferenceKeysKt;->getScrobbleDelaySecondsKey()Landroidx/datastore/preferences/core/Preferences$Key;
-SPLcom/metrolist/music/constants/PreferenceKeysKt;->getScrobbleMinSongDurationKey()Landroidx/datastore/preferences/core/Preferences$Key;
 SPLcom/metrolist/music/constants/PreferenceKeysKt;->getSearchSourceKey()Landroidx/datastore/preferences/core/Preferences$Key;
 SPLcom/metrolist/music/constants/PreferenceKeysKt;->getSelectedThemeColorKey()Landroidx/datastore/preferences/core/Preferences$Key;
 SPLcom/metrolist/music/constants/PreferenceKeysKt;->getShowLyricsKey()Landroidx/datastore/preferences/core/Preferences$Key;
@@ -35117,7 +35110,6 @@ SPLcom/metrolist/music/playback/MusicService;->access$calculateEffectiveVolume(L
 SPLcom/metrolist/music/playback/MusicService;->access$getAudioQuality$p(Lcom/metrolist/music/playback/MusicService;)Lcom/metrolist/music/constants/AudioQuality;
 PLcom/metrolist/music/playback/MusicService;->access$getCachedPersistentQueue$p(Lcom/metrolist/music/playback/MusicService;)Z
 SPLcom/metrolist/music/playback/MusicService;->access$getCurrentSong$p(Lcom/metrolist/music/playback/MusicService;)Lkotlinx/coroutines/flow/StateFlow;
-SPLcom/metrolist/music/playback/MusicService;->access$getDiscordRpcEnabled$p(Lcom/metrolist/music/playback/MusicService;)Z
 SPLcom/metrolist/music/playback/MusicService;->access$getInstantSilenceSkipEnabled$p(Lcom/metrolist/music/playback/MusicService;)Lkotlinx/coroutines/flow/MutableStateFlow;
 SPLcom/metrolist/music/playback/MusicService;->access$getLoudnessSetupGeneration$p(Lcom/metrolist/music/playback/MusicService;)J
 SPLcom/metrolist/music/playback/MusicService;->access$getNormalizationEnabledCached$p(Lcom/metrolist/music/playback/MusicService;)Z
@@ -35145,14 +35137,11 @@ SPLcom/metrolist/music/playback/MusicService;->access$setCachedShufflePlaylistFi
 SPLcom/metrolist/music/playback/MusicService;->access$setCrossfadeDuration$p(Lcom/metrolist/music/playback/MusicService;F)V
 SPLcom/metrolist/music/playback/MusicService;->access$setCrossfadeEnabled$p(Lcom/metrolist/music/playback/MusicService;Z)V
 SPLcom/metrolist/music/playback/MusicService;->access$setCrossfadeGapless$p(Lcom/metrolist/music/playback/MusicService;Z)V
-SPLcom/metrolist/music/playback/MusicService;->access$setDiscordIntentionalDisconnect$p(Lcom/metrolist/music/playback/MusicService;Z)V
-SPLcom/metrolist/music/playback/MusicService;->access$setDiscordRpcEnabled$p(Lcom/metrolist/music/playback/MusicService;Z)V
 SPLcom/metrolist/music/playback/MusicService;->access$setLoudnessLevelCached$p(Lcom/metrolist/music/playback/MusicService;Lcom/metrolist/music/constants/LoudnessLevel;)V
 SPLcom/metrolist/music/playback/MusicService;->access$setNormalizationEnabledCached$p(Lcom/metrolist/music/playback/MusicService;Z)V
 SPLcom/metrolist/music/playback/MusicService;->access$setPendingWidgetUpdate$p(Lcom/metrolist/music/playback/MusicService;Lkotlin/Pair;)V
 SPLcom/metrolist/music/playback/MusicService;->access$setWidgetUpdateInFlight$p(Lcom/metrolist/music/playback/MusicService;Z)V
 SPLcom/metrolist/music/playback/MusicService;->access$setupAudioNormalization(Lcom/metrolist/music/playback/MusicService;)V
-PLcom/metrolist/music/playback/MusicService;->access$syncDiscordState(Lcom/metrolist/music/playback/MusicService;)V
 SPLcom/metrolist/music/playback/MusicService;->calculateEffectiveVolume(FZFF)F
 SPLcom/metrolist/music/playback/MusicService;->clearPersistedQueueFiles()V
 SPLcom/metrolist/music/playback/MusicService;->createCacheDataSource()Landroidx/media3/datasource/cache/CacheDataSource$Factory;
@@ -35206,7 +35195,6 @@ SPLcom/metrolist/music/playback/MusicService;->setupAudioFocusRequest()V
 SPLcom/metrolist/music/playback/MusicService;->setupAudioNormalization()V
 SPLcom/metrolist/music/playback/MusicService;->startForegroundSafely$default(Lcom/metrolist/music/playback/MusicService;Landroid/app/Notification;Ljava/lang/String;Ljava/lang/String;ZILjava/lang/Object;)Z
 SPLcom/metrolist/music/playback/MusicService;->startForegroundSafely(Landroid/app/Notification;Ljava/lang/String;Ljava/lang/String;Z)Z
-PLcom/metrolist/music/playback/MusicService;->syncDiscordState()V
 SPLcom/metrolist/music/playback/MusicService;->updateNotification$default(Lcom/metrolist/music/playback/MusicService;Ljava/lang/Boolean;ILjava/lang/Object;)V
 SPLcom/metrolist/music/playback/MusicService;->updateNotification(Ljava/lang/Boolean;)V
 SPLcom/metrolist/music/playback/MusicService;->updateWidgetUI$default(Lcom/metrolist/music/playback/MusicService;ZLjava/lang/Boolean;ILjava/lang/Object;)V
@@ -38141,7 +38129,6 @@ SPLcom/metrolist/music/utils/SyncUtils;->access$getContext$p(Lcom/metrolist/musi
 SPLcom/metrolist/music/utils/SyncUtils;->access$getSyncChannel$p(Lcom/metrolist/music/utils/SyncUtils;)Lkotlinx/coroutines/channels/Channel;
 SPLcom/metrolist/music/utils/SyncUtils;->access$isLoggedIn(Lcom/metrolist/music/utils/SyncUtils;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 SPLcom/metrolist/music/utils/SyncUtils;->access$setCachedLastSyncEpoch$p(Lcom/metrolist/music/utils/SyncUtils;J)V
-SPLcom/metrolist/music/utils/SyncUtils;->access$setLastfmSendLikes$p(Lcom/metrolist/music/utils/SyncUtils;Z)V
 SPLcom/metrolist/music/utils/SyncUtils;->isLoggedIn(Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 SPLcom/metrolist/music/utils/SyncUtils;->startProcessingQueue()V
 SPLcom/metrolist/music/utils/SyncUtils;->tryAutoSync()V

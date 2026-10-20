@@ -21,6 +21,8 @@ enum class SongAction {
     ADD_TO_LIBRARY,
     SUGGEST_TO_HOST,
     SNOOZE,
+    // SARASWATI: Phase 5 fix (P5-I3) — adding a song to a family playlist sends its id to YouTube.
+    FAMILY_PLAYLIST,
 }
 
 object LocalSongMenuPolicy {
@@ -33,6 +35,7 @@ object LocalSongMenuPolicy {
             SongAction.ADD_TO_LIBRARY,
             SongAction.SUGGEST_TO_HOST,
             SongAction.SNOOZE,
+            SongAction.FAMILY_PLAYLIST,
         )
 
     fun visible(

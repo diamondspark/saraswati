@@ -87,6 +87,8 @@ class FamilyPlaylistsRepository(
         if (!enabled()) return Result.failure(FamilyPlaylistsDisabled())
         val own = identity.deviceId() ?: return Result.failure(FamilyPlaylistsNotPaired())
         if (p.addedByDeviceId != own) return Result.failure(CollaborationUnavailable)
+        // SARASWATI: Phase 5 fix (P5-I3) — a song on this phone is never sent to YouTube, not even as a refused request.
+        if (com.metrolist.music.saraswati.localmedia.LocalSongIds.isLocal(videoId)) return Result.failure(CollaborationUnavailable)
         return port.add(p.playlistId, videoId)
     }
 
