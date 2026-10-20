@@ -49,6 +49,35 @@ class CreatePlaylistPrivacyTest {
             }
         }
 
+    // SARASWATI: Phase 4 review fix (4) — the same shape innertubex gives its own calls.
+    @Test
+    fun `the overload sends the client user agent, prettyPrint false and the PREF locale cookie to music youtube`() =
+        runBlocking {
+            val engine =
+                MockEngine {
+                    respond("""{"playlistId":"PLabcdefghij"}""", headers = headersOf(HttpHeaders.ContentType, "application/json"))
+                }
+            clientFor(engine).use { client ->
+                val innerTube = InnerTube(client).apply { cookie = "SAPISID=session; SID=x" }
+
+                innerTube.createPlaylist(YouTubeClient.WEB_REMIX, "T", "UNLISTED")
+
+                val request = engine.requestHistory.single()
+                assertEquals(YouTubeClient.WEB_REMIX.userAgent, request.headers[HttpHeaders.UserAgent])
+                assertEquals("false", request.url.parameters["prettyPrint"])
+                val cookie = request.headers[HttpHeaders.Cookie].orEmpty()
+                val locale = innerTube.locale
+                assertTrue(cookie, cookie.contains("PREF=hl=${locale.hl}&gl=${locale.gl}"))
+                assertTrue(cookie.contains("SAPISID=session"))
+            }
+        }
+
+    @Test
+    fun `the PREF cookie keeps its other fields and replaces hl and gl`() {
+        assertEquals("a=b; PREF=hl=en&gl=IN", withPrefCookie("a=b", "en", "IN"))
+        assertEquals("PREF=hl=en&gl=IN&tz=Asia.Kolkata; a=b", withPrefCookie("PREF=hl=fr&tz=Asia.Kolkata&gl=FR; a=b", "en", "IN"))
+    }
+
     @Test
     fun `the old overload still sends PRIVATE`() =
         runBlocking {

@@ -49,9 +49,10 @@ object RemoteControllerStore {
     ) {
         scope.launch(writer) {
             try {
-                if (context.dataStore.data.first()[Key] == true) mode.restore()
+                if (context.dataStore.data.first()[Key] == true) mode.restore() else mode.restoredNothing()
             } catch (e: Exception) {
                 Timber.e(e, "Failed to read the remote-controller flag")
+                mode.restoredNothing()
             }
         }
     }

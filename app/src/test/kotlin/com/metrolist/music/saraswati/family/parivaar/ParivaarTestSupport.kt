@@ -28,6 +28,7 @@ class FakePort : YouTubePlaylistPort {
     val createdTitles = mutableListOf<String>()
     var failCreate: Throwable? = null
     var failAdd: Throwable? = null
+    val rejectedSongs = mutableSetOf<String>()
     val failEntries = HashMap<String, Throwable>()
     val radioSeeds = mutableListOf<String>()
     var radioTracks: List<MixTrack> = emptyList()
@@ -55,6 +56,7 @@ class FakePort : YouTubePlaylistPort {
     ): Result<Unit> {
         calls += "add:$videoId"
         failAdd?.let { return Result.failure(it) }
+        if (videoId in rejectedSongs) return Result.failure(SongRejectedException(videoId))
         playlists[playlistId]?.add(PlaylistEntry("set-$videoId", track(videoId)))
         return Result.success(Unit)
     }

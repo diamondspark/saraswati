@@ -20,11 +20,13 @@ import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.request.header
+import io.ktor.client.request.parameter
 import io.ktor.client.request.url
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import io.ktor.http.userAgent
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.utils.io.jvm.javaio.toByteReadChannel
@@ -51,6 +53,26 @@ private data class CreatePlaylistRequestBody(
     val title: String,
     val privacyStatus: String,
 )
+
+// SARASWATI: Phase 4 review fix — innertubex keeps its injectPrefCookie() internal; same behaviour: the PREF cookie
+// carries the locale (hl, gl) and replaces any hl/gl the cookie already had, keeping the rest of PREF.
+internal fun withPrefCookie(
+    cookie: String,
+    hl: String,
+    gl: String,
+): String {
+    val locale = "hl=$hl&gl=$gl"
+    val parts = cookie.split(";").map { it.trim() }.filter { it.isNotEmpty() }
+    var found = false
+    val rewritten =
+        parts.map { part ->
+            if (!part.startsWith("PREF=")) return@map part
+            found = true
+            val rest = part.substringAfter("=").split("&").filter { it.isNotEmpty() && !it.startsWith("hl=") && !it.startsWith("gl=") }
+            "PREF=" + (listOf(locale) + rest).joinToString("&")
+        }
+    return (if (found) rewritten else rewritten + "PREF=$locale").joinToString("; ")
+}
 
 /**
  * Compatibility facade that keeps Metrolist's parsed response models while InnerTubeX owns
@@ -361,8 +383,12 @@ class InnerTube(
                 header("Referer", "$MUSIC_ORIGIN/")
                 header("X-Goog-AuthUser", session.authUser)
                 header("Accept-Language", session.locale.hl)
+                // SARASWATI: as innertubex's own ytClient() does: the client's User-Agent, prettyPrint=false and the
+                // PREF cookie carrying hl/gl, so YouTube answers this call like the others.
+                parameter("prettyPrint", false)
+                userAgent(client.userAgent)
                 session.visitorData?.takeIf { it.isNotBlank() }?.let { header("X-Goog-Visitor-Id", it) }
-                session.cookie?.takeIf { it.isNotBlank() }?.let { header("Cookie", it) }
+                session.cookie?.takeIf { it.isNotBlank() }?.let { header("Cookie", withPrefCookie(it, session.locale.hl, session.locale.gl)) }
                 session.sapisid?.takeIf { it.isNotBlank() }?.let { header("Authorization", sapisidHash(it)) }
             }
         return response.requireSuccess("createPlaylist")

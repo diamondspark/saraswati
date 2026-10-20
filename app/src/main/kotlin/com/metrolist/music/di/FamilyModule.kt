@@ -186,6 +186,7 @@ object FamilyModule {
         identity: HubIdentity,
         store: ParivaarMixStore,
         downloadUtil: DownloadUtil,
+        database: MusicDatabase,
         gate: FamilyFeatureGate,
         @ApplicationContext context: Context,
     ): ParivaarMixRefresher =
@@ -194,7 +195,7 @@ object FamilyModule {
             port,
             identity,
             store,
-            MixDownloader.create(context, downloadUtil),
+            MixDownloader.create(context, downloadUtil, database),
             enabled = { gate.isEnabled(FamilyFeature.PARIVAAR_MIX) },
         )
 

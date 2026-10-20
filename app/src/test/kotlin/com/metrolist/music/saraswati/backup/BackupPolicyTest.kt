@@ -42,6 +42,7 @@ import com.metrolist.music.constants.ProxyPasswordKey
 import com.metrolist.music.constants.ProxyUrlKey
 import com.metrolist.music.constants.SongSortTypeKey
 import com.metrolist.music.constants.VisitorDataKey
+import com.metrolist.music.saraswati.family.sangat.RemoteControllerStore
 import com.metrolist.music.saraswati.security.SecretPreferenceKeys
 import androidx.datastore.preferences.core.mutablePreferencesOf
 import org.junit.Assert.assertEquals
@@ -386,5 +387,16 @@ class BackupPolicyTest {
             "These family hub preference keys can be exported or restored: " + missing.joinToString(", ") { it.name },
             missing.isEmpty(),
         )
+    }
+
+    // SARASWATI: Phase 4 review fix (6)
+    @Test
+    fun `a backup cannot plant or export the remote-controller flag`() {
+        assertTrue(RemoteControllerStore.Key in BackupPolicy.NEVER_EXPORT_OR_RESTORE)
+        val planted = mutablePreferencesOf(RemoteControllerStore.Key to true, SongSortTypeKey to "NAME").toPreferences()
+
+        val sanitized = BackupPolicy.sanitize(planted)
+
+        assertNull(sanitized[RemoteControllerStore.Key])
     }
 }

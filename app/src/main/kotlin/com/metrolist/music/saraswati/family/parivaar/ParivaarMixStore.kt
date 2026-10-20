@@ -69,11 +69,12 @@ class ParivaarMixStore(
 
     suspend fun save(mix: ParivaarMix) {
         val kept = mix.copy(tracks = mix.tracks.take(ParivaarMixBuilder.MIX_MAX))
+        dataStore.edit { it[ParivaarMixKey] = json.encodeToString(ParivaarMix.serializer(), kept) }
+        // After the write, so a failed write leaves cached() where storage is; still before hydration can undo it.
         synchronized(lock) {
             settled = true
             held = kept
         }
-        dataStore.edit { it[ParivaarMixKey] = json.encodeToString(ParivaarMix.serializer(), kept) }
     }
 
     /** The mix held right now. Never suspends and never touches storage or the network. */

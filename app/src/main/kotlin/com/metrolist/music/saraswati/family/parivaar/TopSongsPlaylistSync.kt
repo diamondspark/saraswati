@@ -15,6 +15,9 @@
 // network, a hub that is down) never makes a second playlist: the next launch reads the playlist, finishes the
 // diff and registers it. A playlist that YouTube says no longer exists is replaced once, by a fresh one.
 //
+// A song YouTube permanently refuses to add (removed, region-blocked: [SongRejectedException]) is skipped and the
+// rest carry on, so one dead video cannot keep a phone out of the Mix.
+//
 // Never throws except to pass on a cancellation. A phone with no session, the Parivaar Mix switched off by the
 // owner, or nothing played yet does nothing and succeeds. After a failure this process waits RETRY_GAP_MS before
 // trying again (this runs on every resume of the app); a new process always tries.
@@ -30,6 +33,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import timber.log.Timber
 import java.time.Duration
 import java.time.Instant
 import kotlin.coroutines.cancellation.CancellationException
@@ -63,6 +67,8 @@ class TopSongsPlaylistSync(
         memberName: String,
     ): Result<Unit> {
         val nowMs = now.toEpochMilli()
+        // One name for the hub and the playlist title; a blank one (an empty Build.MODEL) would be a hub 400 every launch.
+        val name = memberName.trim().ifBlank { FALLBACK_NAME }.take(MAX_MEMBER_NAME)
         return try {
             if (!enabled()) return Result.success(Unit)
             val token = identity.sessionToken() ?: return Result.success(Unit)
@@ -88,7 +94,7 @@ class TopSongsPlaylistSync(
             }
 
             suspend fun create(): String {
-                val id = port.createUnlisted(title(memberName)).getOrThrow()
+                val id = port.createUnlisted(title(name)).getOrThrow()
                 edited = true
                 dataStore.edit {
                     it[ParivaarPlaylistIdKey] = id
@@ -125,10 +131,16 @@ class TopSongsPlaylistSync(
             }
             for (track in add) {
                 spaced()
-                port.add(playlistId, track.videoId).getOrThrow()
+                val added = port.add(playlistId, track.videoId)
+                if (added.exceptionOrNull() is SongRejectedException) {
+                    // A removed or region-blocked video: leave it out rather than fail every launch.
+                    Timber.w("Parivaar top songs: YouTube rejected %s, skipping it", track.videoId)
+                    continue
+                }
+                added.getOrThrow()
             }
 
-            hub.register(token, playlistId, memberName.trim().take(MAX_MEMBER_NAME)).getOrThrow()
+            hub.register(token, playlistId, name).getOrThrow()
             dataStore.edit { it[ParivaarTopSongsSyncedAtKey] = nowMs }
             backoff.finished()
             Result.success(Unit)
@@ -150,6 +162,7 @@ class TopSongsPlaylistSync(
         private const val SYNC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000L
         private const val RETRY_GAP_MS = 30 * 60 * 1000L
         private const val MAX_MEMBER_NAME = 50
+        private const val FALLBACK_NAME = "Phone"
 
         fun title(memberName: String) = "Saraswati · $memberName top songs"
     }

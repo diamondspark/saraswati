@@ -139,6 +139,24 @@ class ParivaarMixStoreTest {
         assertEquals(newer, store.cached())
     }
 
+    // SARASWATI: Phase 4 review fix (13)
+    @Test
+    fun `a failed write leaves cached where storage is`() {
+        val failing =
+            object : DataStore<Preferences> {
+                override val data: Flow<Preferences> = dataStore.data
+
+                override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences = throw java.io.IOException("disk full")
+            }
+        val store = store(failing)
+        awaitHydrated(store)
+
+        val failed = runCatching { runBlocking { store.save(mix) } }
+
+        assertTrue(failed.isFailure)
+        assertEquals(ParivaarMix.EMPTY, store.cached())
+    }
+
     @Test
     fun `a stored mix longer than fifty is cut to fifty`() {
         val long = ParivaarMix(1L, (1..60).map { MixTrack("video%06d".format(it), "T", "A", null, null) })

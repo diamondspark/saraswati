@@ -60,6 +60,7 @@ import com.metrolist.music.constants.ParivaarMixKey
 import com.metrolist.music.constants.ParivaarPlaylistIdKey
 import com.metrolist.music.constants.ParivaarTopSongsSyncedAtKey
 import com.metrolist.music.constants.VisitorDataKey
+import com.metrolist.music.saraswati.family.sangat.RemoteControllerStore
 import com.metrolist.music.saraswati.security.SecretPreferenceKeys
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
@@ -153,6 +154,9 @@ object BackupPolicy {
                 // SARASWATI: Phase 4 Task 12 — this phone's own top-songs playlist and the time of its last sync.
                 ParivaarPlaylistIdKey,
                 ParivaarTopSongsSyncedAtKey,
+                // SARASWATI: Phase 4 review fix (6) — "this phone is a remote controller" is live room state; a restored
+                // `true` would bring the phone up silent in the Sangat, a restored absence would let it play.
+                RemoteControllerStore.Key,
                 // SARASWATI: Task 7/8 fix round 1 — this phone's own hub state,
                 // none of it a credential by name but all of it identity. A
                 // restore must not plant or clear the owner flag (Manage

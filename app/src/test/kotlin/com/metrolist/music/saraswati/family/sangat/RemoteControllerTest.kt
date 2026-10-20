@@ -8,6 +8,7 @@
 // a remote controller's events must reach none of them except the single pause on joining.
 package com.metrolist.music.saraswati.family.sangat
 
+import com.metrolist.music.listentogether.ConnectionState
 import com.metrolist.music.listentogether.ListenTogetherEvent
 import com.metrolist.music.listentogether.PlaybackActionPayload
 import com.metrolist.music.listentogether.PlaybackActions
@@ -20,6 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -70,6 +72,13 @@ class RemoteControllerTest {
     private val router =
         RemoteEventRouter(mode, isHost = { host }, pauseLocalPlayback = { player.pause() })
 
+    /** What the manager does with an event the router lets through: a guest or host handler drives the player. */
+    private fun deliver(event: ListenTogetherEvent): Boolean {
+        val consumed = router.route(event)
+        if (!consumed) player.play()
+        return consumed
+    }
+
     private val guestEvents: List<ListenTogetherEvent> =
         listOf(
             ListenTogetherEvent.JoinApproved("ABC123", "me", room()),
@@ -93,10 +102,10 @@ class RemoteControllerTest {
         mode.enter()
 
         val drivingEvents = guestEvents.filterNot { it is ListenTogetherEvent.JoinApproved }
-        drivingEvents.forEach { assertTrue("$it is swallowed", router.route(it)) }
+        drivingEvents.forEach { assertTrue("$it is swallowed", deliver(it)) }
         assertEquals("nothing reached the player", emptyList<String>(), player.calls)
 
-        assertTrue(router.route(guestEvents.first()))
+        assertTrue(deliver(guestEvents.first()))
         assertEquals("the join's only touch is the one pause", listOf("pause"), player.calls)
     }
 
@@ -132,8 +141,8 @@ class RemoteControllerTest {
     fun `a normal guest still drives the local player`() {
         assertFalse(mode.enabled.value)
         assertTrue(RemoteControllerPolicy.drivesLocalPlayer(isHost = false, remoteController = false))
-        guestEvents.forEach { assertFalse("$it is the manager's to handle", router.route(it)) }
-        assertEquals(emptyList<String>(), player.calls)
+        guestEvents.forEach { assertFalse("$it is the manager's to handle", deliver(it)) }
+        assertEquals("every event reached the player's handlers", guestEvents.size, player.calls.count { it == "play" })
         roomState.value = room()
         assertNull("a normal guest has no remote view", mode.nowPlaying.value)
     }
@@ -147,11 +156,11 @@ class RemoteControllerTest {
         mode.enter()
         host = true
         guestEvents.filterNot { it is ListenTogetherEvent.Reconnected }.forEach {
-            assertFalse("$it reaches the host handlers", router.route(it))
+            assertFalse("$it reaches the host handlers", deliver(it))
         }
-        assertEquals(emptyList<String>(), player.calls)
         val reconnectedAsHost = ListenTogetherEvent.Reconnected("ABC123", "me", room(), isHost = true)
-        assertFalse(router.route(reconnectedAsHost))
+        assertFalse(deliver(reconnectedAsHost))
+        assertEquals("the host's events all reached the player", guestEvents.size, player.calls.count { it == "play" })
     }
 
     @Test
@@ -184,7 +193,10 @@ class RemoteControllerTest {
     fun `every player-touching guest path in the manager consults the policy`() {
         val manager = source("src/main/kotlin/com/metrolist/music/listentogether/ListenTogetherManager.kt")
         val handleEvent = manager.substringAfter("private fun handleEvent(event: ListenTogetherEvent) {").substringBefore("when (event)")
-        assertTrue("handleEvent routes through the remote filter first", handleEvent.contains("remoteEventRouter.route(event)"))
+        assertTrue(
+            "handleEvent returns when the remote filter consumed the event",
+            handleEvent.contains("if (remoteEventRouter.route(event)) return"),
+        )
         assertTrue(manager.contains("remoteController: Boolean = false"))
         val volume = manager.substringAfter("private fun applyHostVolumeIfNeeded").substringBefore("\n        }\n")
         assertTrue("the host's volume is not applied to a remote controller", volume.contains("drivesLocalPlayer"))
@@ -219,6 +231,85 @@ class RemoteControllerTest {
         val handleEvent = manager.substringAfter("private fun handleEvent(event: ListenTogetherEvent) {").substringBefore("when (event)")
 
         assertTrue(handleEvent.indexOf("RemoteHostGuard.mustLeave") in 0 until handleEvent.indexOf("remoteEventRouter.route(event)"))
+    }
+
+    // SARASWATI: Phase 4 review fix (1)/(7) — HostChanged for a remote controller.
+    @Test
+    fun `a remote controller made host is told to leave and never reaches the host handlers`() {
+        mode.enter()
+        val madeHost = ListenTogetherEvent.HostChanged("me", "Mohit")
+
+        assertTrue("the guard fires before the router", RemoteHostGuard.mustLeave(madeHost, "me", mode.enabled.value))
+        assertFalse("as a non-host passenger it still drives nothing", mode.drives(isHost = false))
+    }
+
+    @Test
+    fun `another member becoming host leaves a remote controller as it was`() {
+        mode.enter()
+        val other = ListenTogetherEvent.HostChanged("other", "Papa")
+
+        assertFalse(RemoteHostGuard.mustLeave(other, "me", mode.enabled.value))
+        assertFalse("the handler's lost-host and gained-host branches both skip a non-host passenger", deliver(other))
+        assertTrue(mode.enabled.value)
+    }
+
+    @Test
+    fun `the manager's host duties and role listener keep a remote controller out`() {
+        val manager = source("src/main/kotlin/com/metrolist/music/listentogether/ListenTogetherManager.kt")
+        val guard = manager.substringAfter("RemoteHostGuard.mustLeave(event").substringBefore("remoteEventRouter.route(event)")
+        assertTrue("the guard leaves and returns", guard.contains("leaveRoom()") && guard.contains("return"))
+        assertTrue("the role listener does not start host services for a remote controller", manager.contains("newRole == RoomRole.HOST && !wasHost && !remoteMode.enabled.value"))
+    }
+
+    // SARASWATI: Phase 4 review fix (2)
+    @Test
+    fun `events wait for the stored flag before a rejoin is routed`() {
+        var released = false
+        val waiter = scope.launch {
+            mode.awaitRestored()
+            released = true
+        }
+        assertFalse("nothing is released while the stored flag is unread", released)
+
+        mode.restore()
+
+        assertTrue(released)
+        assertTrue(mode.enabled.value)
+        waiter.cancel()
+    }
+
+    @Test
+    fun `an empty or unreadable stored flag also releases the wait, and so does a choice of this process`() {
+        for (release in listOf<(RemoteControllerMode) -> Unit>({ it.restoredNothing() }, { it.enter() }, { it.clear() })) {
+            val fresh = RemoteControllerMode(scope, roomState)
+            var released = false
+            scope.launch {
+                fresh.awaitRestored()
+                released = true
+            }
+            assertFalse(released)
+            release(fresh)
+            assertTrue(released)
+        }
+    }
+
+    @Test
+    fun `the manager awaits the restored flag before it handles a join or a reconnect, and the store always reports back`() {
+        val manager = source("src/main/kotlin/com/metrolist/music/listentogether/ListenTogetherManager.kt")
+        val collector = manager.substringAfter("Received event: \$event").substringBefore("handleEvent(event)")
+        assertTrue(collector.contains("remoteMode.awaitRestored()"))
+        val store = source("src/main/kotlin/com/metrolist/music/saraswati/family/sangat/RemoteControllerStore.kt")
+        assertEquals("restored, empty, and failed reads all report", 2, Regex("restoredNothing\\(\\)").findAll(store).count())
+    }
+
+    // SARASWATI: Phase 4 review fix (8)
+    @Test
+    fun `a guest whose connection is halted can play its own music`() {
+        assertTrue(GuestPlaybackLock.blocks(isInRoom = true, isHost = false, connection = ConnectionState.CONNECTED))
+        assertTrue(GuestPlaybackLock.blocks(isInRoom = true, isHost = false, connection = ConnectionState.RECONNECTING))
+        assertFalse(GuestPlaybackLock.blocks(isInRoom = true, isHost = false, connection = ConnectionState.ERROR))
+        assertFalse(GuestPlaybackLock.blocks(isInRoom = true, isHost = true, connection = ConnectionState.CONNECTED))
+        assertFalse(GuestPlaybackLock.blocks(isInRoom = false, isHost = false, connection = ConnectionState.CONNECTED))
     }
 
     private fun source(path: String): String {

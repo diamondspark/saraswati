@@ -29,6 +29,11 @@ class PlaylistGoneException(
     message: String,
 ) : Exception(message)
 
+/** YouTube permanently refuses this song (removed, region-blocked, not addable); retrying will not help. */
+class SongRejectedException(
+    message: String,
+) : Exception(message)
+
 interface YouTubePlaylistPort {
     /** Makes a new UNLISTED playlist on the signed-in account and returns its id. */
     suspend fun createUnlisted(title: String): Result<String>
@@ -36,6 +41,7 @@ interface YouTubePlaylistPort {
     /** Every song in the playlist, in playlist order. [PlaylistGoneException] when it no longer exists. */
     suspend fun entries(playlistId: String): Result<List<PlaylistEntry>>
 
+    /** [SongRejectedException] when YouTube permanently refuses [videoId]. */
     suspend fun add(
         playlistId: String,
         videoId: String,
@@ -81,7 +87,7 @@ class InnerTubePlaylistPort : YouTubePlaylistPort {
     ): Result<Unit> =
         guarded {
             requireSignedIn()
-            YouTube.addToPlaylist(playlistId, videoId).getOrThrow()
+            YouTube.addToPlaylist(playlistId, videoId).getOrElse { throw it.asRejectedIfPermanent(videoId) }
             Unit
         }
 
@@ -115,6 +121,14 @@ class InnerTubePlaylistPort : YouTubePlaylistPort {
     private fun requireSignedIn() {
         check(!YouTube.cookie.isNullOrBlank()) { "not signed in to YouTube" }
     }
+
+    // 400 and 404 name this one song; an auth failure (401, 403), a rate limit (429) or a server error is not its fault.
+    private fun Throwable.asRejectedIfPermanent(videoId: String): Throwable =
+        if (this is InnerTubeHttpException && (status == HttpStatusCode.BadRequest || status == HttpStatusCode.NotFound)) {
+            SongRejectedException("song $videoId refused with ${status.value}")
+        } else {
+            this
+        }
 
     private fun Throwable.asGoneIfMissing(playlistId: String): Throwable =
         if (this is InnerTubeHttpException && status == HttpStatusCode.NotFound) {

@@ -286,4 +286,39 @@ class TopSongsPlaylistSyncTest {
 
             assertEquals(50, hub.registered.single().third.length)
         }
+
+    // SARASWATI: Phase 4 review fix (5)
+    @Test
+    fun `a song YouTube permanently rejects is skipped and the sync still finishes and registers`() =
+        runBlocking {
+            source.songs = songs(4)
+            port.rejectedSongs += "song02"
+
+            val result = sync().syncIfDue(t0, "Mummy")
+
+            assertTrue(result.isSuccess)
+            val id = port.playlists.keys.single()
+            assertEquals(listOf("song01", "song03", "song04"), port.ids(id))
+            assertEquals(1, hub.registered.size)
+            assertEquals(t0.toEpochMilli(), stored()[ParivaarTopSongsSyncedAtKey])
+        }
+
+    // SARASWATI: Phase 4 review fix (11)
+    @Test
+    fun `the hub and the title get the same trimmed name, and a blank one falls back`() =
+        runBlocking {
+            source.songs = songs(1)
+
+            sync().syncIfDue(t0, "  Mummy  ")
+
+            assertEquals("Mummy", hub.registered.single().third)
+            assertEquals(listOf("Saraswati · Mummy top songs"), port.createdTitles)
+
+            val blankDir = folder.newFolder()
+            val blankStore = PreferenceDataStoreFactory.create(scope = scope) { java.io.File(blankDir, "s.preferences_pb") }
+            val blankHub = FakeHub()
+            TopSongsPlaylistSync(FakePort(), blankHub, identity, source, blankStore, pause = { }).syncIfDue(t0, "   ")
+
+            assertEquals("Phone", blankHub.registered.single().third)
+        }
 }

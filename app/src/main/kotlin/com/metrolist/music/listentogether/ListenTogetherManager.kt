@@ -25,6 +25,7 @@ import com.metrolist.music.models.toMediaMetadata
 import com.metrolist.music.playback.PlayerConnection
 import com.metrolist.music.playback.queues.YouTubeQueue
 import com.metrolist.music.saraswati.family.sangat.PassengerPlayCredit
+import com.metrolist.music.saraswati.family.sangat.GuestPlaybackLock
 import com.metrolist.music.saraswati.family.sangat.RemoteControllerMode
 import com.metrolist.music.saraswati.family.sangat.RemoteControllerPolicy
 import com.metrolist.music.saraswati.family.sangat.RemoteHostGuard
@@ -390,7 +391,9 @@ class ListenTogetherManager
                 // Set up playback blocking for guests
                 connection?.shouldBlockPlaybackChanges = {
                     // Block if we're in a room as a guest (not host)
-                    isInRoom && !isHost
+                    // SARASWATI: Phase 4 review fix (8) — not while the connection is halted: nothing syncs, so the
+                    // guest's own music must not stay locked behind a room it can no longer hear
+                    GuestPlaybackLock.blocks(isInRoom, isHost, connectionState.value)
                 }
 
                 // Add listener if in room
@@ -460,6 +463,10 @@ class ListenTogetherManager
                     client.events.collect { event ->
                         try {
                             Timber.tag(TAG).d("Received event: $event")
+                            // SARASWATI: Phase 4 review fix (2) — a rejoin after a process death must see the stored flag
+                            if (event is ListenTogetherEvent.JoinApproved || event is ListenTogetherEvent.Reconnected) {
+                                remoteMode.awaitRestored()
+                            }
                             handleEvent(event)
                         } catch (e: Exception) {
                             Timber.tag(TAG).e(e, "Error handling event: $event")
@@ -475,7 +482,9 @@ class ListenTogetherManager
                         lastRole = newRole
 
                         val wasHost = previousRole == RoomRole.HOST
-                        if (newRole == RoomRole.HOST && !wasHost) {
+                        // SARASWATI: Phase 4 review fix (1) — a remote controller made host is about to leave (RemoteHostGuard)
+                        // and must not start publishing from its own idle player meanwhile
+                        if (newRole == RoomRole.HOST && !wasHost && !remoteMode.enabled.value) {
                             val connection = playerConnection
                             if (connection != null) {
                                 Timber.tag(TAG).d("Role changed to HOST, starting sync services")

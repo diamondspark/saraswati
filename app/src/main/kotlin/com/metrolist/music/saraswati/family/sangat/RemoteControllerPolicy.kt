@@ -8,8 +8,10 @@
 // plays them, so the family does not hear two copies of the same song a few hundred milliseconds apart.
 package com.metrolist.music.saraswati.family.sangat
 
+import com.metrolist.music.listentogether.ConnectionState
 import com.metrolist.music.listentogether.ListenTogetherEvent
 import com.metrolist.music.listentogether.RoomState
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -17,6 +19,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.withTimeoutOrNull
 
 object RemoteControllerPolicy {
     /** The host plays for the room; a guest plays too unless it joined as a remote controller. */
@@ -24,6 +27,19 @@ object RemoteControllerPolicy {
         isHost: Boolean,
         remoteController: Boolean,
     ): Boolean = isHost || !remoteController
+}
+
+/**
+ * Whether a guest's own player is locked while it sits in a room. A halted connection (the hub answered 503, the
+ * token store was closed) keeps the room for a later retry but syncs nothing, so it must not keep the guest from
+ * playing its own music in the meantime.
+ */
+object GuestPlaybackLock {
+    fun blocks(
+        isInRoom: Boolean,
+        isHost: Boolean,
+        connection: ConnectionState,
+    ): Boolean = isInRoom && !isHost && connection != ConnectionState.ERROR
 }
 
 /**
@@ -62,26 +78,50 @@ class RemoteControllerMode(
     @Volatile
     private var decided = false
 
+    // Done once the stored flag has been read (or this process chose for itself, or the read failed): a room event
+    // routed before then could find the flag still false and let a rejoined passenger's phone play.
+    private val restored = CompletableDeferred<Unit>()
+
     val nowPlaying: StateFlow<RemoteNowPlaying?> =
         combine(_enabled, roomState) { remote, room -> if (remote) RemoteNowPlaying.from(room) else null }
             .stateIn(scope, SharingStarted.Eagerly, null)
 
     fun enter() {
         decided = true
+        restored.complete(Unit)
         if (!_enabled.getAndUpdate { true }) persist(true)
     }
 
     fun clear() {
         decided = true
+        restored.complete(Unit)
         if (_enabled.getAndUpdate { false }) persist(false)
     }
 
     /** The flag stored by an earlier process; ignored once this process has joined or left on its own. */
     fun restore() {
         if (!decided) _enabled.value = true
+        restored.complete(Unit)
+    }
+
+    /** The stored flag was read and held nothing, or could not be read: nothing to wait for any more. */
+    fun restoredNothing() {
+        restored.complete(Unit)
+    }
+
+    /**
+     * Returns once the stored flag has been applied, so the caller routes room events knowing the mode. Gives up
+     * after [RESTORE_WAIT_MS] rather than hold every room event behind a stuck read.
+     */
+    suspend fun awaitRestored() {
+        withTimeoutOrNull(RESTORE_WAIT_MS) { restored.await() }
     }
 
     fun drives(isHost: Boolean): Boolean = RemoteControllerPolicy.drivesLocalPlayer(isHost, _enabled.value)
+
+    private companion object {
+        const val RESTORE_WAIT_MS = 3_000L
+    }
 }
 
 /**
