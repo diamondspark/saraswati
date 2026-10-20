@@ -77,6 +77,29 @@ internal fun <T> upcomingQueueItems(
     currentIndex: Int,
 ): List<T> = if (currentIndex in queue.indices) queue.drop(currentIndex + 1) else emptyList()
 
+// SARASWATI: fix wave P5a I1/I2 — a song on this phone is never named to a room, and what a room sends is not trusted
+// to name only shareable songs: a host that sends `local:5` would make this phone open its own audio row 5. Tracks
+// naming a song on this phone are dropped, in both directions, before any queue, MediaItem, YouTube lookup or
+// message is built from them.
+internal fun shareableTrackOrNull(track: TrackInfo?): TrackInfo? = track?.takeIf { LocalSangatPolicy.mayShare(it.id) }
+
+internal fun shareableTracks(tracks: List<TrackInfo>): List<TrackInfo> = tracks.filter { LocalSangatPolicy.mayShare(it.id) }
+
+/** What a playback action may carry out to the room: null when it names a song on this phone; its queue trimmed. */
+internal class OutboundPlayback(
+    val queue: List<TrackInfo>?,
+)
+
+internal fun outboundPlaybackOrNull(
+    trackId: String?,
+    trackInfo: TrackInfo?,
+    queue: List<TrackInfo>?,
+): OutboundPlayback? {
+    if (trackId != null && !LocalSangatPolicy.mayShare(trackId)) return null
+    if (trackInfo != null && shareableTrackOrNull(trackInfo) == null) return null
+    return OutboundPlayback(queue?.let(::shareableTracks))
+}
+
 // SARASWATI: Phase 5 Task 4 — the only place a track becomes a TrackInfo for the room. A song on this phone gives
 // null: its title would reach the hub and the other phones could not play it.
 internal fun trackInfoOrNull(
@@ -973,6 +996,12 @@ class ListenTogetherManager
             connection: PlayerConnection,
             queue: List<TrackInfo>,
             queueTitle: String?,
+        ) = applyShareableUpcomingQueue(connection, shareableTracks(queue), queueTitle)
+
+        private fun applyShareableUpcomingQueue(
+            connection: PlayerConnection,
+            queue: List<TrackInfo>,
+            queueTitle: String?,
         ) {
             invalidatePendingQueueMutations()
             if (playerConnection !== connection) return
@@ -1180,7 +1209,7 @@ class ListenTogetherManager
             val player = connection.player
             val actionPosition = action.positionOrNull
             val actionTrackId = action.trackIdOrNull
-            val actionTrackInfo = action.trackInfoOrNull
+            val actionTrackInfo = shareableTrackOrNull(action.trackInfoOrNull)
             val actionServerTime = action.serverTimeOrNull
             val actionQueueTitle = action.queueTitleOrNull
 
@@ -1496,7 +1525,7 @@ class ListenTogetherManager
 
                     PlaybackActions.SYNC_QUEUE -> {
                         invalidatePendingQueueMutations()
-                        val queue = action.queue
+                        val queue = action.queue?.let(::shareableTracks)
                         val queueTitle = actionQueueTitle
                         if (queue != null) {
                             Timber.tag(TAG).d("Guest: SYNC_QUEUE size=${queue.size}")
@@ -1511,8 +1540,8 @@ class ListenTogetherManager
                             val player = connection.player
 
                             val mediaItems =
-                                queue.map { track ->
-                                    track.toMediaMetadata().toMediaItem()
+                                queue.mapNotNull { track ->
+                                    shareableTrackOrNull(track)?.toMediaMetadata()?.toMediaItem()
                                 }
 
                             val currentId = player.currentMediaItem?.mediaId
@@ -1624,6 +1653,31 @@ class ListenTogetherManager
             queueTitle: String? = null, // New param
             effectiveAtServerTime: Long? = null,
             bypassBuffer: Boolean = false,
+        ) {
+            // SARASWATI: fix wave P5a I2 — a room naming a song on this phone starts nothing here.
+            if (currentTrack != null && shareableTrackOrNull(currentTrack) == null) {
+                Timber.tag(TAG).w("Ignoring a room track that names a song on this phone")
+                return
+            }
+            applyShareablePlaybackState(
+                currentTrack,
+                isPlaying,
+                position,
+                queue?.let(::shareableTracks),
+                queueTitle,
+                effectiveAtServerTime,
+                bypassBuffer,
+            )
+        }
+
+        private fun applyShareablePlaybackState(
+            currentTrack: TrackInfo?,
+            isPlaying: Boolean,
+            position: Long,
+            queue: List<TrackInfo>?,
+            queueTitle: String?,
+            effectiveAtServerTime: Long?,
+            bypassBuffer: Boolean,
         ) {
             invalidatePendingQueueMutations()
             val connection = playerConnection
