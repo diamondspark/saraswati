@@ -59,6 +59,7 @@ import com.metrolist.music.constants.OpenRouterBaseUrlKey
 import com.metrolist.music.constants.ParivaarMixKey
 import com.metrolist.music.constants.ParivaarPlaylistIdKey
 import com.metrolist.music.constants.ParivaarTopSongsSyncedAtKey
+import com.metrolist.music.constants.SmartDownloadLedgerKey
 import com.metrolist.music.constants.StationOfflineSetsKey
 import com.metrolist.music.constants.VisitorDataKey
 import com.metrolist.music.saraswati.family.sangat.RemoteControllerStore
@@ -152,6 +153,8 @@ object BackupPolicy {
                 ParivaarMixKey,
                 // SARASWATI: Phase 5 Task 9 — offline Station songs belong to this phone's stations and downloads.
                 StationOfflineSetsKey,
+                // SARASWATI: Phase 5 Task 10 — the smart-download ledger lists this phone's own downloads.
+                SmartDownloadLedgerKey,
                 // SARASWATI: Phase 4 Task 14 — the family playlists are the hub's list, cached.
                 FamilyPlaylistsCacheKey,
                 // SARASWATI: Phase 4 Task 12 — this phone's own top-songs playlist and the time of its last sync.

@@ -803,3 +803,7 @@ val CountryCodeToName =
         "YE" to "Yemen",
         "ZW" to "Zimbabwe",
     )
+
+// SARASWATI: Phase 5 Task 10 — what the nightly smart downloads have done on this phone, as JSON
+// (SmartDownloadLedger). It describes this phone's own downloads, so a restored backup must not plant one (BackupPolicy).
+val SmartDownloadLedgerKey = stringPreferencesKey("saraswatiSmartDownloadLedger")
