@@ -81,6 +81,12 @@ import com.metrolist.music.saraswati.family.FamilyFeature
 import com.metrolist.music.saraswati.family.FamilyFeatureGate
 import com.metrolist.music.saraswati.family.parivaar.ParivaarMixQueue
 import com.metrolist.music.saraswati.family.parivaar.ParivaarMixStore
+// SARASWATI: Phase 6 Task 7 — the car's Prahar row and its selection.
+import com.metrolist.music.saraswati.craft.prahar.CarPraharRow
+import com.metrolist.music.saraswati.craft.prahar.PraharQueue
+import com.metrolist.music.saraswati.craft.prahar.PraharRepository
+import com.metrolist.music.saraswati.craft.prahar.PraharStore
+import java.time.LocalDateTime
 import com.metrolist.music.saraswati.family.playlists.FamilyPlaylistsRepository
 import com.metrolist.music.saraswati.family.sangat.CarSangatController
 import com.metrolist.music.saraswati.family.sangat.CarSangatResult
@@ -115,6 +121,9 @@ constructor(
     private val familyPlaylists: FamilyPlaylistsRepository,
     private val featureGate: FamilyFeatureGate,
     private val carSangat: CarSangatController,
+    // SARASWATI: Phase 6 Task 7 — the Prahar mix the car's Home leads with, and its refresh on browse.
+    private val praharStore: PraharStore,
+    private val praharRepository: PraharRepository,
 ) : MediaLibrarySession.Callback {
     private val scope = CoroutineScope(Dispatchers.Main) + Job()
 
@@ -172,7 +181,8 @@ constructor(
             },
             // SARASWATI: fix wave B2 — Home answers from its last good snapshot at once and refreshes in the
             // background (8 s at most), so a slow or failing YouTube never leaves the car's Home tab blank.
-            homeShelves = { homeSnapshot.current() },
+            // SARASWATI: Phase 6 Task 7 — the Prahar row leads Home, above YouTube's unchanged shelves.
+            homeShelves = { listOfNotNull(CarPraharRow.item(praharStore.cached(), LocalDateTime.now(), carResources)) + homeSnapshot.current() },
             familyItems = ::familyRows,
         )
     private val packageLookup = AndroidPackageLookup(context)
@@ -356,6 +366,11 @@ constructor(
     ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> =
         scope.future(Dispatchers.IO) {
             try {
+                // SARASWATI: Phase 6 Task 7 — car browse asks for this window's Prahar mix in the background; the row
+                // is answered from what is held now, never after waiting for this.
+                if (parentId == MusicService.CAR_HOME) {
+                    scope.launch { praharRepository.refreshIfDue(LocalDateTime.now()) }
+                }
                 // SARASWATI: Task 11 — the root and the four tabs. Checked first: Stations and Family are
                 // answered from the cache at once and must not wait behind a database or network lookup.
                 carTree.childrenOf(parentId)?.let { children ->
@@ -907,6 +922,17 @@ constructor(
                         service.adoptQueue(radioQueue, radioStatus.title, radioStatus.items.size)
                     }
                     MediaItemsWithStartPosition(radioStatus.items, 0, C.TIME_UNSET)
+                }
+
+                // SARASWATI: Phase 6 Task 7 — the car's Prahar row plays the mix held for this window and day, from the
+                // phone's own copy. A mix that is no longer the current window's is not played.
+                CarPraharRow.MEDIA_ID -> {
+                    if (path.size != 1) return@future defaultResult
+                    val mix = praharStore.cached()?.takeIf { CarPraharRow.isCurrent(it, LocalDateTime.now()) } ?: return@future defaultResult
+                    val queue = PraharQueue(mix)
+                    val status = queue.getInitialStatus()
+                    withContext(Dispatchers.Main) { service.adoptQueue(queue, status.title, status.items.size) }
+                    MediaItemsWithStartPosition(status.items, 0, C.TIME_UNSET)
                 }
 
                 // SARASWATI: Phase 4 Task 15 — the Family folder's Parivaar Mix row: the last mix built, from the

@@ -55,6 +55,8 @@ import com.metrolist.music.extensions.reversed
 import com.metrolist.music.extensions.toSQLiteQuery
 import com.metrolist.music.models.MediaMetadata
 import com.metrolist.music.models.toMediaMetadata
+// SARASWATI: Phase 6 Task 7 — row type of the Prahar query above.
+import com.metrolist.music.saraswati.craft.prahar.PraharEventRow
 import com.metrolist.music.ui.utils.resize
 import com.metrolist.music.utils.ArtistNameAliases
 import kotlinx.coroutines.flow.Flow
@@ -692,6 +694,18 @@ interface DatabaseDao {
     @Transaction
     @Query("SELECT * FROM song WHERE id IN (:songIds)")
     suspend fun getSongsByIds(songIds: List<String>): List<Song>
+
+    // SARASWATI: Phase 6 Task 7 — read-only: the plays the Prahar mix seeds from. Local songs are excluded here, so
+    // they can never seed YouTube radio.
+    @Query(
+        """
+        SELECT event.songId, event.timestamp, event.playTime
+        FROM event
+        JOIN song ON song.id = event.songId
+        WHERE song.isLocal = 0 AND event.timestamp > :fromTimeStamp
+        """,
+    )
+    suspend fun praharPlays(fromTimeStamp: LocalDateTime): List<PraharEventRow>
 
     @Transaction
     @Query("SELECT * FROM song WHERE dateDownload IS NOT NULL AND isDownloaded = 0")

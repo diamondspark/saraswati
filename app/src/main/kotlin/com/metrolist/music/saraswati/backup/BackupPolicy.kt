@@ -150,6 +150,8 @@ object BackupPolicy {
                 FamilyFeaturesDisabledKey,
                 // SARASWATI: Phase 4 Task 11 — the built Parivaar Mix is derived from the family's listening.
                 ParivaarMixKey,
+                // SARASWATI: Phase 6 Task 7 — the built Prahar mix is derived from the person's listening, like Parivaar Mix.
+                com.metrolist.music.saraswati.craft.prahar.PraharStore.Key,
                 // SARASWATI: Phase 4 Task 14 — the family playlists are the hub's list, cached.
                 FamilyPlaylistsCacheKey,
                 // SARASWATI: Phase 4 Task 12 — this phone's own top-songs playlist and the time of its last sync.

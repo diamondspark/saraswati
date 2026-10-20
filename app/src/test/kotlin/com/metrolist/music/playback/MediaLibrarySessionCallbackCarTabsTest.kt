@@ -119,7 +119,7 @@ class MediaLibrarySessionCallbackCarTabsTest {
 
     @Test
     fun `the Home tab is answered from the snapshot, never from the fetch itself`() {
-        assertTrue(callback.contains("homeShelves = { homeSnapshot.current() }"))
+        assertTrue(callback.contains("homeShelves = { listOfNotNull(CarPraharRow.item(praharStore.cached(), LocalDateTime.now(), carResources)) + homeSnapshot.current() }"))
         assertFalse("the tree is not handed the fetch", callback.contains("homeShelves = ::loadHomeShelves"))
         val fetchSite = Regex("""fetch\s*=\s*::loadHomeShelves""").findAll(callback).count()
         assertEquals("the fetch is only the snapshot's background refresh", 1, fetchSite)

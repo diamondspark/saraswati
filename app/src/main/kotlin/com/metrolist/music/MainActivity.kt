@@ -250,6 +250,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.time.Instant
+// SARASWATI: Phase 6 Task 7 — for the Prahar launch refresh.
+import java.time.LocalDateTime
 import java.util.Locale
 import javax.inject.Inject
 
@@ -318,6 +320,10 @@ class MainActivity : FragmentActivity() {
 
     @Inject
     lateinit var parivaarMixRefresher: ParivaarMixRefresher
+
+    // SARASWATI: Phase 6 Task 7 — the Prahar mix, refreshed at launch.
+    @Inject
+    lateinit var praharRepository: com.metrolist.music.saraswati.craft.prahar.PraharRepository
 
     // SARASWATI: Phase 4 Task 9 — the owner's four kill-switches, and the poll for family members who are
     // driving with Sangat on. The watcher runs only between onStart and onStop, never in Saral.
@@ -547,6 +553,8 @@ class MainActivity : FragmentActivity() {
                     val memberName = ParivaarMemberName.of(saved, Build.MODEL)
                     topSongsPlaylistSync.syncIfDue(Instant.now(), memberName)
                     parivaarMixRefresher.refreshIfDue(Instant.now())
+                    // SARASWATI: Phase 6 Task 7 — the Prahar mix for this window, on the same launch refresh (no WorkManager).
+                    praharRepository.refreshIfDue(LocalDateTime.now())
                 }
                 // SARASWATI: Phase 4 Task 9 — (owner phone only, once) a device session; the kill-switches refresh above.
                 // (the self-pair refreshes the gate again itself once it has a session — review fix M7)
