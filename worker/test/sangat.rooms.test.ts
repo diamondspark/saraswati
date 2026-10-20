@@ -39,6 +39,19 @@ async function readRoom(hub: ReturnType<typeof hubStub>, code: string): Promise<
 const toHex = (bytes: ArrayBuffer): string =>
   Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, "0")).join("");
 
+// A token embedded as raw bytes in a BLOB column hex-encodes to the token's own
+// hex characters, which a plain `.not.toContain(token)` already catches; one
+// embedded as a UTF-8 string (e.g. inside a protobuf string field) hex-encodes
+// to something else entirely, so it needs its own check.
+const hexOfUtf8 = (text: string): string =>
+  Array.from(new TextEncoder().encode(text), (b) => b.toString(16).padStart(2, "0")).join("");
+
+/** Every place `token` could appear in a dump produced by dumpSangatTables. */
+function expectTokenAbsent(dump: string, token: string): void {
+  expect(dump).not.toContain(token);
+  expect(dump).not.toContain(hexOfUtf8(token));
+}
+
 /**
  * Every row of every Sangat table, as searchable text: a BLOB column (a
  * room's state, a suggestion's track) is hex-encoded first, since
@@ -168,8 +181,8 @@ describe("rooms", () => {
       { userId: bharat.userId, sessionTokenHash: await sha256Hex(bharat.token) },
     ]);
     const afterApprove = await dumpSangatTables(hub);
-    expect(afterApprove).not.toContain(host.token);
-    expect(afterApprove).not.toContain(bharat.token);
+    expectTokenAbsent(afterApprove, host.token);
+    expectTokenAbsent(afterApprove, bharat.token);
 
     // The real token still works to reconnect; its own hash does not.
     const back = await SangatClient.connect(hub, a.token);
@@ -180,8 +193,8 @@ describe("rooms", () => {
     expect((await thief.next("error")).payload.code).toBe("session_not_found");
 
     const afterReconnect = await dumpSangatTables(hub);
-    expect(afterReconnect).not.toContain(host.token);
-    expect(afterReconnect).not.toContain(bharat.token);
+    expectTokenAbsent(afterReconnect, host.token);
+    expectTokenAbsent(afterReconnect, bharat.token);
   });
 
   it("create_room validates the username and refuses a second room on the same socket", async () => {
