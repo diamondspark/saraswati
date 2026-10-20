@@ -50,7 +50,7 @@ class LocalRoutingDataSourceTest {
     fun `a local key opens the content URI and never touches the remote factory`() {
         val local = Recording()
         val remote = Recording()
-        val source = LocalRoutingDataSource.Factory(local, remote).createDataSource()
+        val source = LocalRoutingDataSource.Factory(local, remote, canServe = { true }).createDataSource()
         source.open(DataSpec.Builder().setUri("local:42").setKey("local:42").build())
         assertEquals(0, remote.created)
         assertEquals(1, local.created)
@@ -62,7 +62,7 @@ class LocalRoutingDataSourceTest {
     fun `a video id goes to the remote factory unchanged`() {
         val local = Recording()
         val remote = Recording()
-        val source = LocalRoutingDataSource.Factory(local, remote).createDataSource()
+        val source = LocalRoutingDataSource.Factory(local, remote, canServe = { true }).createDataSource()
         val spec = DataSpec.Builder().setUri("dQw4w9WgXcQ").setKey("dQw4w9WgXcQ").build()
         source.open(spec)
         assertEquals(0, local.created)
@@ -73,7 +73,7 @@ class LocalRoutingDataSourceTest {
     fun `a deleted local file fails open with FileNotFoundException`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val source =
-            LocalRoutingDataSource.Factory(DefaultDataSource.Factory(context), Recording()).createDataSource()
+            LocalRoutingDataSource.Factory(DefaultDataSource.Factory(context), Recording(), canServe = { true }).createDataSource()
         try {
             source.open(DataSpec.Builder().setUri("local:999").setKey("local:999").build())
             fail("expected the open to fail")
@@ -84,12 +84,55 @@ class LocalRoutingDataSourceTest {
 
     @Test
     fun `a malformed local key is a missing file too`() {
-        val source = LocalRoutingDataSource.Factory(Recording(), Recording()).createDataSource()
+        val source = LocalRoutingDataSource.Factory(Recording(), Recording(), canServe = { true }).createDataSource()
         try {
             source.open(DataSpec.Builder().setUri("local:abc").setKey("local:abc").build())
             fail("expected the open to fail")
         } catch (e: IOException) {
             assertTrue(e is FileNotFoundException || e.cause is FileNotFoundException)
         }
+    }
+
+    // SARASWATI: fix wave P5a C1 — with the Local files switch off (or access gone) a local key is refused before any
+    // source is created, and a remote key is unaffected.
+    @Test
+    fun `a local key is refused without touching either factory when serving is off`() {
+        val local = Recording()
+        val remote = Recording()
+        val source = LocalRoutingDataSource.Factory(local, remote, canServe = { false }).createDataSource()
+        try {
+            source.open(DataSpec.Builder().setUri("local:42").setKey("local:42").build())
+            fail("expected the open to be refused")
+        } catch (e: FileNotFoundException) {
+            // refused
+        }
+        assertEquals(0, local.created)
+        assertEquals(0, remote.created)
+    }
+
+    @Test
+    fun `a remote key still opens when serving local songs is off`() {
+        val local = Recording()
+        val remote = Recording()
+        val source = LocalRoutingDataSource.Factory(local, remote, canServe = { false }).createDataSource()
+        source.open(DataSpec.Builder().setUri("dQw4w9WgXcQ").setKey("dQw4w9WgXcQ").build())
+        assertEquals(1, remote.created)
+        assertEquals(0, local.created)
+    }
+
+    @Test
+    fun `serving is asked on every open`() {
+        var allowed = true
+        val local = Recording()
+        val factory = LocalRoutingDataSource.Factory(local, Recording(), canServe = { allowed })
+        factory.createDataSource().open(DataSpec.Builder().setUri("local:1").setKey("local:1").build())
+        allowed = false
+        try {
+            factory.createDataSource().open(DataSpec.Builder().setUri("local:1").setKey("local:1").build())
+            fail("expected the open to be refused")
+        } catch (e: FileNotFoundException) {
+            // refused
+        }
+        assertEquals(1, local.created)
     }
 }

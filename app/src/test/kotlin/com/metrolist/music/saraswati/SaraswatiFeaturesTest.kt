@@ -13,12 +13,6 @@ import org.junit.Test
 
 class SaraswatiFeaturesTest {
     @Test
-    fun `discord is off`() = assertFalse(SaraswatiFeatures.DISCORD)
-
-    @Test
-    fun `lastfm is off`() = assertFalse(SaraswatiFeatures.LASTFM)
-
-    @Test
     fun `ai lyrics translation is off`() = assertFalse(SaraswatiFeatures.AI_LYRICS)
 
     @Test

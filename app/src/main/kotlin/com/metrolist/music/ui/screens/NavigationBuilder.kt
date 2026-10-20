@@ -64,9 +64,6 @@ import com.metrolist.music.ui.screens.settings.SettingsScreen
 import com.metrolist.music.ui.screens.settings.StorageSettings
 import com.metrolist.music.ui.screens.settings.ThemeScreen
 import com.metrolist.music.ui.screens.settings.UpdaterScreen
-import com.metrolist.music.ui.screens.settings.integrations.DiscordSettings
-import com.metrolist.music.ui.screens.settings.integrations.IntegrationScreen
-import com.metrolist.music.ui.screens.settings.integrations.LastFMSettings
 import com.metrolist.music.ui.screens.settings.integrations.ListenTogetherSettings
 
 import com.metrolist.music.ui.screens.wrapped.WrappedScreen
@@ -428,18 +425,7 @@ fun NavGraphBuilder.navigationBuilder(
         BackupAndRestore(navController)
     }
 
-    composable("settings/integrations") {
-        IntegrationScreen(navController)
-    }
-
-    composable("settings/integrations/discord") {
-        DiscordSettings(navController)
-    }
-
-    composable("settings/integrations/lastfm") {
-        LastFMSettings(navController)
-    }
-
+    // SARASWATI: Discord and Last.fm removed; the Integrations hub and their settings routes went with them.
     composable(route = "settings/integrations/listen_together") {
         ListenTogetherSettings(navController)
     }

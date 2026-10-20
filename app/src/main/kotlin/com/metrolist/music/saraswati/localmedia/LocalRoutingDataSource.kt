@@ -6,7 +6,8 @@
 // SARASWATI: Phase 5 Task 4 — plays songs on this phone. A `local:<id>` key is opened straight from its content URI
 // through the platform source: no cache, no stream resolver, no network. Every other key goes to the existing
 // resolver and cache chain, unchanged. Neither source is created until it is needed, so a local song never so
-// much as builds the remote chain.
+// much as builds the remote chain. A local key is served only while canServe says so (access granted and the Local
+// files switch not off); otherwise the open fails like a missing file, so a queue that outlives the switch plays nothing.
 package com.metrolist.music.saraswati.localmedia
 
 import android.net.Uri
@@ -20,12 +21,14 @@ import java.io.FileNotFoundException
 class LocalRoutingDataSource private constructor(
     private val local: DataSource.Factory,
     private val remote: DataSource.Factory,
+    private val canServe: () -> Boolean,
 ) : DataSource {
     class Factory(
         private val local: DataSource.Factory,
         private val remote: DataSource.Factory,
+        private val canServe: () -> Boolean,
     ) : DataSource.Factory {
-        override fun createDataSource(): DataSource = LocalRoutingDataSource(local, remote)
+        override fun createDataSource(): DataSource = LocalRoutingDataSource(local, remote, canServe)
     }
 
     private val listeners = ArrayList<TransferListener>()
@@ -41,6 +44,7 @@ class LocalRoutingDataSource private constructor(
         val target: DataSource
         val spec: DataSpec
         if (LocalSongIds.isLocal(key)) {
+            if (!canServe()) throw FileNotFoundException("Songs on this phone are switched off")
             val contentUri = LocalSongIds.contentUri(key) ?: throw FileNotFoundException("Not a song on this phone")
             target = local.createDataSource()
             spec = dataSpec.withUri(contentUri)

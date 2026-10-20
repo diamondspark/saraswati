@@ -297,21 +297,7 @@ fun AccountSettings(
 
         Material3SettingsGroup(
             items = buildList {
-                // SARASWATI: the Integrations screen only hosts Discord and
-                // Last.fm (Listen Together has its own entry point elsewhere);
-                // both are dropped, so hide the row entirely.
-                if (SaraswatiFeatures.DISCORD || SaraswatiFeatures.LASTFM) {
-                    add(
-                        Material3SettingsItem(
-                            title = { Text(stringResource(R.string.integrations)) },
-                            icon = painterResource(R.drawable.integration),
-                            onClick = {
-                                onClose()
-                                navController.navigate("settings/integrations")
-                            }
-                        )
-                    )
-                }
+                // SARASWATI: the Integrations row is gone: it only hosted Discord and Last.fm, both removed.
                 add(
                     Material3SettingsItem(
                         title = { Text(stringResource(R.string.settings)) },

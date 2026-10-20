@@ -127,12 +127,7 @@ class BackupRoundTripTest {
             assertEquals("LIGHT", after[DarkModeKey])
             assertNull(after[InnerTubeCookieKey])
             assertNull(after[com.metrolist.music.constants.ProxyUrlKey])
-            // SARASWATI (fix round 1): DiscordRpcManager reconnects automatically from a
-            // Keystore-persisted token on every MusicService creation (no
-            // SaraswatiFeatures.DISCORD check in that file) and publishes whatever is in
-            // DataStore as the Rich Presence buttons on the next song play — so a planted
-            // URL here would otherwise reach a live Discord presence on restart, no fresh
-            // login required. This must never survive the restore's sanitize step.
+            // SARASWATI: Discord was removed; an old backup's presence-button URL is still dropped on restore.
             assertNull(after[DiscordButton1UrlKey])
         }
 
