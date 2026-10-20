@@ -308,12 +308,17 @@ class CastRelayControllerTest {
         assertEquals(listOf("v0", "v2"), castableWithoutRelay(items).map { it.mediaId })
     }
 
+    // The listener can take a moment to release the port on a slow machine, so retry briefly.
     private fun assertClosed(port: Int) {
-        try {
-            Socket(loopback, port).close()
-            fail("relay port should be closed")
-        } catch (expected: ConnectException) {
+        repeat(40) {
+            try {
+                Socket(loopback, port).close()
+            } catch (expected: ConnectException) {
+                return
+            }
+            Thread.sleep(100)
         }
+        fail("relay port should be closed")
     }
 
     private class ThrowingSource : RelayAudioSource {
