@@ -37,7 +37,9 @@ import com.metrolist.music.saraswati.localmedia.LocalRoutingDataSource
 import com.metrolist.music.saraswati.localmedia.LocalSangatPolicy
 import com.metrolist.music.saraswati.localmedia.LocalErrorAction
 import com.metrolist.music.saraswati.localmedia.LocalServingPolicy
+import com.metrolist.music.saraswati.localmedia.LocalAccess
 import com.metrolist.music.saraswati.localmedia.LocalSongIds
+import com.metrolist.music.saraswati.localmedia.localAccess
 import com.metrolist.music.saraswati.family.FamilyFeature
 import com.metrolist.music.saraswati.family.PlaybackStatsPlan
 import com.metrolist.music.saraswati.family.TastePolicy
@@ -611,8 +613,7 @@ class MusicService :
     // fails. It reads caches and downloads only, so choosing makes no request.
     private val neverSilentState = NeverSilentState(System::currentTimeMillis)
 
-    // Local songs (Task 2/3 live on another branch): a "local:" id plays only with the audio permission.
-    // Switch to LocalSongIds.isLocal / localAccess() when that branch merges.
+    // SARASWATI: Phase 5 Task 7 — a local song plays offline only while this phone may still read its audio files.
     internal val offlinePlayability by lazy {
         DefaultOfflinePlayability(
             downloads = { downloadUtil.downloads.value },
@@ -621,11 +622,8 @@ class MusicService :
                 database.format(id).first()?.contentLength
                     ?: ContentMetadata.getContentLength(playerCache.getContentMetadata(id)).takeIf { it > 0L }
             },
-            isLocal = { it.startsWith("local:") },
-            localGranted = {
-                Build.VERSION.SDK_INT >= 33 &&
-                    checkSelfPermission("android.permission.READ_MEDIA_AUDIO") == android.content.pm.PackageManager.PERMISSION_GRANTED
-            },
+            isLocal = { LocalSongIds.isLocal(it) },
+            localGranted = { localAccess(this@MusicService) == LocalAccess.GRANTED },
         )
     }
 

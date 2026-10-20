@@ -12,6 +12,7 @@
 package com.metrolist.music.saraswati.offline
 
 import com.metrolist.music.models.MediaMetadata
+import com.metrolist.music.saraswati.localmedia.LocalSongIds
 import kotlinx.serialization.Serializable
 import java.time.Instant
 import java.time.ZoneId
@@ -139,6 +140,6 @@ object SmartDownloadPlan {
         id: String,
     ) = ledger.entries[id]?.failures ?: 0
 
-    // Matches the "local:" ids of songs on this phone; they never leave it, so they are never downloaded.
-    private fun isLocal(id: String) = id.startsWith("local:")
+    // Songs on this phone never leave it, so they are never downloaded.
+    private fun isLocal(id: String) = LocalSongIds.isLocal(id)
 }
