@@ -65,6 +65,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import kotlin.coroutines.coroutineContext
+import kotlin.coroutines.cancellation.CancellationException
+import timber.log.Timber
 
 /** What Saral needs from the music player. The screen adapts the app's PlayerConnection to this. */
 interface SaralPlayback {
@@ -335,6 +337,10 @@ class SaralViewModel
         val askExplanation: StateFlow<Boolean> = _askExplanation.asStateFlow()
         private var pendingAsk: PendingAsk? = null
 
+        // SARASWATI: security-ask-explanation (review fix 3) — once true, [explanationGate] is never read again:
+        // "seen" cannot become false again, so there is nothing left to learn from another DataStore read.
+        private var explanationSeenCache = false
+
         private data class PendingAsk(
             val spoken: String,
             val guesses: List<String>?,
@@ -508,12 +514,17 @@ class SaralViewModel
             voiceJob =
                 viewModelScope.launch {
                     val gate = explanationGate
-                    if (gate != null && !gate.hasSeen()) {
+                    // SARASWATI: security-ask-explanation (review fix 3) — once seen is true, never ask the
+                    // gate again for the rest of this ViewModel's life; a DataStore read on every voice search
+                    // would be wasted work once the answer can never change back to false.
+                    val seen = explanationSeenCache || gate == null || gate.hasSeen()
+                    if (!seen) {
                         coroutineContext.ensureActive()
                         pendingAsk = PendingAsk(spoken, guesses)
                         _askExplanation.value = true
                         return@launch
                     }
+                    explanationSeenCache = true
                     runAsk(asker, spoken, guesses)
                 }
         }
@@ -524,9 +535,22 @@ class SaralViewModel
             val asker = ask ?: return
             pendingAsk = null
             _askExplanation.value = false
+            // The person has seen and acknowledged it now, whatever happens to the write below.
+            explanationSeenCache = true
             voiceJob =
                 viewModelScope.launch {
-                    explanationGate?.markSeen()
+                    // SARASWATI: security-ask-explanation (review fix 2) — a DataStore write failing here must
+                    // not leave the voice flow stuck in SEARCHING with no clean way out: the ask the person
+                    // already asked for still runs regardless. explanationSeenCache above means this session
+                    // will not show the explanation again even if the write failed; a future session would
+                    // read the gate fresh and, if it is still false on disk, show it and retry the write.
+                    try {
+                        explanationGate?.markSeen()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Timber.tag("Saral").w(e, "failed to persist the ask-voice explanation as seen")
+                    }
                     coroutineContext.ensureActive()
                     runAsk(asker, pending.spoken, pending.guesses)
                 }

@@ -1086,11 +1086,13 @@
     <string name="ask_disclaimer">Saraswati can get things wrong</string>
     <!-- SARASWATI: Phase 6 Task 11 strings end -->
 
-    <!-- SARASWATI: security-ask-explanation — shown once, before Saral's voice search is first routed through
-         Ask Saraswati (SaralAsk resolves the spoken words on the family hub, instead of searching them directly
-         as before). Mirrors local_files_explain_*. The Hindi line is a placeholder only: TODO, needs a native
-         Hindi speaker's copy — do not translate this programmatically or invent Devanagari text. -->
-    <string name="ask_voice_explanation_body">Saral\'s voice search now sends what you say to Saraswati\'s family hub, to help find a better answer before searching as before. This only happens once you tap the microphone.</string>
+    <!-- SARASWATI: security-ask-explanation — the EXPLANATION SCREEN is shown once, but what it describes is not:
+         every voice search is routed through Ask Saraswati (SaralAsk resolves the spoken words on the family
+         hub) for as long as it is configured, not just the first time. The copy below must say so plainly, the
+         way local_files_explain_body is explicit about scope. Mirrors local_files_explain_* in shape only. The
+         Hindi line is a placeholder only: TODO, needs a native Hindi speaker's copy — do not translate this
+         programmatically or invent Devanagari text. -->
+    <string name="ask_voice_explanation_body">Every time you use voice search, Saral now sends what you say to Saraswati\'s family hub, to help find a better answer before searching as before.</string>
     <string name="ask_voice_explanation_continue">Okay</string>
     <!-- TODO(hi): placeholder — needs a native Hindi speaker's review and real Hindi copy before this ships. -->
     <string name="ask_voice_explanation_body_hi" translatable="false">TODO: Hindi translation needed for ask_voice_explanation_body</string>

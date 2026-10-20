@@ -47,17 +47,24 @@ import java.time.ZoneOffset
 /** A gate whose "seen" bit lives in memory, so a test can see exactly when it is read and set. */
 class FakeAskVoiceExplanationGate(
     seen: Boolean = false,
+    private val failMarkSeen: Boolean = false,
 ) : AskVoiceExplanationGate {
     @Volatile var seen: Boolean = seen
         private set
     var markSeenCalls = 0
         private set
+    var hasSeenCalls = 0
+        private set
 
-    override suspend fun hasSeen(): Boolean = seen
+    override suspend fun hasSeen(): Boolean {
+        hasSeenCalls++
+        return seen
+    }
 
     override suspend fun markSeen() {
-        seen = true
         markSeenCalls++
+        if (failMarkSeen) throw RuntimeException("DataStore write failed")
+        seen = true
     }
 }
 
@@ -181,5 +188,41 @@ class SaralAskVoiceExplanationTest {
         // Acknowledging now (e.g. a stray late callback) must do nothing: the pending ask was dropped.
         vm.onAskExplanationAcknowledged()
         assertEquals(emptyList<String>(), playback.calls.toList())
+    }
+
+    // SARASWATI: security-ask-explanation (review fix 2) — a failed write to the DataStore must not strand the
+    // person's voice search: the ask they already asked for still runs.
+    @Test
+    fun `a markSeen failure does not block the ask that was waiting on it`() {
+        answer(AskIntent.PlayStation(bhajan.id))
+        val explanationGate = FakeAskVoiceExplanationGate(seen = false, failMarkSeen = true)
+        val vm = newVm(explanationGate)
+
+        vm.heard("bhajan lagao")
+        vm.onAskExplanationAcknowledged()
+
+        assertFalse(vm.askExplanation.value)
+        assertEquals(listOf("radio(seedBhajan01)"), playback.calls.toList())
+        assertEquals(VoicePhase.IDLE, vm.voice.value)
+        assertEquals(1, explanationGate.markSeenCalls)
+        // The write failed, but acknowledging it still means this session treats it as seen.
+        assertFalse(explanationGate.seen)
+    }
+
+    // SARASWATI: security-ask-explanation (review fix 3) — once the gate has said "seen" once, it must not be
+    // asked again for the life of this ViewModel.
+    @Test
+    fun `once seen, the gate is never read again for the life of the view model`() {
+        answer(AskIntent.PlayStation(bhajan.id))
+        val explanationGate = FakeAskVoiceExplanationGate(seen = true)
+        val vm = newVm(explanationGate)
+
+        vm.heard("bhajan lagao")
+        assertEquals(1, explanationGate.hasSeenCalls)
+
+        vm.heard("bhajan lagao")
+        vm.heard("bhajan lagao")
+
+        assertEquals("a gate already known to be seen is not read again", 1, explanationGate.hasSeenCalls)
     }
 }
