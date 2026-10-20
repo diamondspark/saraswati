@@ -17,6 +17,8 @@ import androidx.media3.common.util.UnstableApi
 import com.google.android.gms.cast.framework.CastContext
 import com.metrolist.music.extensions.metadata
 import com.metrolist.music.saraswati.castrelay.CastRelayController
+import com.metrolist.music.saraswati.castrelay.castableWithoutRelay
+import com.metrolist.music.saraswati.localmedia.LocalSongIds
 import com.metrolist.music.ui.utils.resize
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -196,7 +198,7 @@ class CastConnectionHandler(
                     return@launch
                 }
 
-                val indices = queueIndices(centerIndex)
+                val indices = castableIndices(queueIndices(centerIndex))
                 val items = indices.mapNotNull { resolvedMediaItem(it) }
                 val startIndex = indices.takeWhile { it != centerIndex }.size
                 if (items.size != indices.size || startIndex !in items.indices) {
@@ -306,7 +308,7 @@ class CastConnectionHandler(
                     if (index == C.INDEX_UNSET) break
                     indices += index
                 }
-                val items = indices.mapNotNull { resolvedMediaItem(it) }
+                val items = castableIndices(indices).mapNotNull { resolvedMediaItem(it) }
                 if (items.isNotEmpty()) player.addMediaItems(items)
             }
     }
@@ -340,12 +342,22 @@ class CastConnectionHandler(
             relay.mediaItems(listOf(item))?.singleOrNull()?.let { return it }
         }
         val metadata = item.metadata ?: return null
+        // SARASWATI: Phase 5 Task 5 — a song on this phone has no stream URL; it is never looked up on the network.
+        if (LocalSongIds.isLocal(metadata.id)) return null
         val streamUrl = musicService.getStreamUrl(metadata.id) ?: return null
         return item
             .buildUpon()
             .setUri(streamUrl)
             .setMimeType(MimeTypes.AUDIO_MP4)
             .build()
+    }
+
+    // SARASWATI: Phase 5 Task 5 — without the relay, songs on this phone are left out of the Cast window.
+    private fun castableIndices(indices: List<Int>): List<Int> {
+        if (relay.isActive) return indices
+        val player = musicService.player
+        val castable = castableWithoutRelay(indices.map { player.getMediaItemAt(it) }).map { it.mediaId }.toSet()
+        return indices.filter { player.getMediaItemAt(it).mediaId in castable }
     }
 
     private fun withCastMetadata(item: MediaItem): MediaItem? {

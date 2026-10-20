@@ -7,6 +7,8 @@
 package com.metrolist.music.saraswati.castrelay
 
 import androidx.media3.common.PlaybackException
+import com.metrolist.music.saraswati.localmedia.LocalFile
+import com.metrolist.music.saraswati.localmedia.LocalFileOpener
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -61,6 +63,26 @@ class RelayHttpServerTest {
         assertTrue(reply.head.contains("Content-Type: audio/webm"))
         assertTrue(reply.head.contains("Access-Control-Allow-Origin: *"))
         assertEquals(audio.toList(), reply.body.toList())
+    }
+
+    @Test
+    fun `a song on this phone is served over the relay with its range`() {
+        val localBytes = ByteArray(100) { it.toByte() }
+        val localSource =
+            RoutingRelayAudioSource(
+                local =
+                    LocalRelayAudioSource(
+                    LocalFileOpener { LocalFile("audio/mp4", localBytes.size.toLong(), ByteArrayInputStream(localBytes)) },
+                ),
+                remote = source,
+            )
+        val localOpaque = session.register(listOf("local:9")).getValue("local:9")
+        val (_, port) = startServer(src = localSource)
+        val reply = get(port, tokenPath(localOpaque), "Range: bytes=10-19\r\n")
+        assertEquals(206, reply.status)
+        assertTrue(reply.head.contains("Content-Type: audio/mp4"))
+        assertTrue(reply.head.contains("Content-Range: bytes 10-19/100"))
+        assertEquals(localBytes.copyOfRange(10, 20).toList(), reply.body.toList())
     }
 
     @Test

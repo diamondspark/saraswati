@@ -28,7 +28,10 @@ import com.metrolist.music.playback.audio.VolumeNormalizationAudioProcessor
 import com.metrolist.music.constants.ListenTogetherUsernameKey
 import com.metrolist.music.saraswati.castrelay.CacheRelayAudioSource
 import com.metrolist.music.saraswati.castrelay.CastRelayController
+import com.metrolist.music.saraswati.castrelay.LocalRelayAudioSource
+import com.metrolist.music.saraswati.castrelay.RoutingRelayAudioSource
 import com.metrolist.music.saraswati.castrelay.WifiAddress
+import com.metrolist.music.saraswati.localmedia.ContentResolverFileOpener
 import com.metrolist.music.saraswati.localmedia.LocalAwareExtractorsFactory
 import com.metrolist.music.saraswati.localmedia.LocalRoutingDataSource
 import com.metrolist.music.saraswati.localmedia.LocalSangatPolicy
@@ -295,6 +298,10 @@ class MusicService :
 
     @Inject
     lateinit var mediaLibrarySessionCallback: MediaLibrarySessionCallback
+
+    // SARASWATI: Phase 5 Task 5 — the Cast relay asks this before it serves any song on this phone.
+    @Inject
+    lateinit var localSongsRepository: com.metrolist.music.saraswati.localmedia.LocalSongsRepository
 
     // SARASWATI: Task 11 — read here only to tell the car's Stations tab to ask again once it loads or changes.
     @Inject
@@ -583,16 +590,36 @@ class MusicService :
 
     // SARASWATI: Task 17 — the Cast relay reads through its own CacheDataSource over the playback path, so it
     // never shares read state with the player. Built on the first Cast session that needs it.
+    // SARASWATI: Phase 5 Task 5 — songs on this phone are served from their own files; routing keeps them off the
+    // stream path, and their MIME type comes from the MediaStore row, so the queue needs no resolve for them.
     internal val castRelayController: CastRelayController by lazy {
+        val localOpener = ContentResolverFileOpener(contentResolver)
+        val localAllowed: suspend () -> Boolean = { localSongsRepository.canServe() }
         CastRelayController(
             random = SecureRandom(),
             source =
-                CacheRelayAudioSource(
-                    cache = downloadCache,
-                    upstream = createDataSourceFactory(VolumeNormalizationAudioProcessor(), { null }),
-                    storedMimeType = ::castRelayStoredMimeType,
+                RoutingRelayAudioSource(
+                    local = LocalRelayAudioSource(localOpener, localAllowed),
+                    remote =
+                        CacheRelayAudioSource(
+                            cache = downloadCache,
+                            upstream = createDataSourceFactory(VolumeNormalizationAudioProcessor(), { null }),
+                            storedMimeType = ::castRelayStoredMimeType,
+                        ),
                 ),
-            storedMimeType = ::castRelayStoredMimeType,
+            storedMimeType = { mediaId ->
+                if (LocalSongIds.isLocal(mediaId)) {
+                    withContext(Dispatchers.IO) {
+                        if (!localAllowed()) return@withContext null
+                        LocalSongIds.mediaStoreId(mediaId)?.let(localOpener::open)?.let { file ->
+                            file.input.close()
+                            file.mimeType
+                        }
+                    }
+                } else {
+                    castRelayStoredMimeType(mediaId)
+                }
+            },
             featureEnabled = { familyFeatureGate.isEnabled(FamilyFeature.CAST_RELAY) },
             localAddress = { WifiAddress.current(connectivityManager) },
         )

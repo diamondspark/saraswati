@@ -71,6 +71,9 @@ class LocalSongsRepository
             dataStore.edit { it[LocalFilesEnabledKey] = enabled }
         }
 
+        /** Whether songs on this phone may be read and served right now: access granted and the switch not off. */
+        suspend fun canServe(): Boolean = LocalFiles.enabled(storedSwitch.first(), access())
+
         @OptIn(ExperimentalCoroutinesApi::class)
         val songs: Flow<List<Song>> =
             storedSwitch.flatMapLatest { stored ->
