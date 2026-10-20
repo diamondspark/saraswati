@@ -1378,4 +1378,9 @@
     <string name="prahar_blurb_sandhya">Soft songs as the day winds down.</string>
     <string name="prahar_blurb_pradosh">Calm songs for the late evening.</string>
     <string name="prahar_blurb_nishith">Low songs for the night.</string>
+    <!-- SARASWATI: Task 13 — Chatur shuffle button labels and the smart pick mark. -->
+    <string name="saraswati_chatur_off">Shuffle off</string>
+    <string name="saraswati_chatur_shuffle">Shuffle</string>
+    <string name="saraswati_chatur_smart">Smart</string>
+    <string name="saraswati_chatur_smart_pick">Smart pick</string>
 </resources>
