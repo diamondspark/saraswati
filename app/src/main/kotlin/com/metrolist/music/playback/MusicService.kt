@@ -33,6 +33,8 @@ import com.metrolist.music.saraswati.family.FamilyFeature
 import com.metrolist.music.saraswati.family.PlaybackStatsPlan
 import com.metrolist.music.saraswati.family.TastePolicy
 import com.metrolist.music.saraswati.offline.DefaultOfflinePlayability // SARASWATI: Phase 5 Task 7
+import com.metrolist.music.saraswati.perf.TapToAudioClock // SARASWATI: Phase 5 Task 12
+import com.metrolist.music.saraswati.perf.TapToAudioTracer // SARASWATI: Phase 5 Task 12
 import com.metrolist.music.saraswati.offline.NeverSilentController
 import com.metrolist.music.saraswati.offline.NeverSilentState
 import com.metrolist.music.saraswati.offline.NextStreamPrefetcher // SARASWATI: Phase 5 Task 8
@@ -608,6 +610,15 @@ class MusicService :
     }
 
     private suspend fun castRelayStoredMimeType(mediaId: String): String? = database.format(mediaId).first()?.mimeType
+
+    // SARASWATI: Phase 5 Task 12 — the tap-to-audio tracer. "Offline" is decided at the tap, from the local id or
+    // the first chunk being in a cache; it reads the caches only, so a tap makes no request.
+    private val tapToAudioTracer =
+        TapToAudioTracer(TapToAudioClock(System::currentTimeMillis)) { id ->
+            id.startsWith("local:") ||
+                downloadCache.isCached(id, 0, CHUNK_LENGTH) ||
+                playerCache.isCached(id, 0, CHUNK_LENGTH)
+        }
 
     // SARASWATI: Phase 5 Task 7 — never silent: skip to what plays without a network when the signal or YouTube
     // fails. It reads caches and downloads only, so choosing makes no request.
@@ -1583,6 +1594,8 @@ class MusicService :
             }
         }
         player.addAnalyticsListener(PlaybackStatsListener(false, this@MusicService))
+        // SARASWATI: Task 12 — times a tap to its first audio (SarTapToAudio* trace sections; debug log only).
+        player.addAnalyticsListener(tapToAudioTracer)
 
         // Cleanup handled manually in onDestroy/release
         _playerFlow.value = player

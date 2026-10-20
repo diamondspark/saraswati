@@ -71,6 +71,7 @@ import com.metrolist.music.constants.AutoRadioQueueKey
 import com.metrolist.music.playback.queues.ListQueue
 import com.metrolist.music.playback.queues.YouTubeQueue
 import com.metrolist.music.saraswati.car.CarBrowseTree
+import com.metrolist.music.saraswati.perf.sarTraceSection // SARASWATI: Phase 5 Task 12
 import com.metrolist.music.saraswati.car.CarHomeHolder
 import com.metrolist.music.saraswati.car.CarHomeSnapshot
 import com.metrolist.music.saraswati.car.FileCarHomeStore
@@ -339,7 +340,8 @@ constructor(
         pageSize: Int,
         params: MediaLibraryService.LibraryParams?,
     ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> =
-        scope.future(Dispatchers.IO) {
+        // SARASWATI: Task 12 — the whole browse is one trace section ("SarCarChildren") for the car speed budget.
+        scope.future(Dispatchers.IO) { sarTraceSection("SarCarChildren") {
             try {
                 // SARASWATI: Task 11 — the root and the four tabs. Checked first: Stations and Family are
                 // answered from the cache at once and must not wait behind a database or network lookup.
@@ -413,7 +415,7 @@ constructor(
                 reportException(e)
                 LibraryResult.ofItemList(emptyList(), params)
             }
-        }
+        } }
 
     // SARASWATI: Task 11 — what the "Mixes" folder (MusicService.YOUTUBE_PLAYLIST) used to hold, moved here
     // unchanged except that the setting that used to switch it on is no longer read: it is the car's Home tab,
