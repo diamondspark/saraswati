@@ -28,6 +28,7 @@ import com.metrolist.music.constants.PureBlackKey
 import com.metrolist.music.saraswati.family.FamilyRoutes
 import com.metrolist.music.saraswati.family.FamilyScreen
 import com.metrolist.music.saraswati.family.JoinFamilyScreen
+import com.metrolist.music.saraswati.family.sangat.RemoteControllerScreen
 import com.metrolist.music.saraswati.family.ManageFamilyScreen
 import com.metrolist.music.ui.screens.artist.ArtistAlbumsScreen
 import com.metrolist.music.ui.screens.artist.ArtistItemsScreen
@@ -118,6 +119,11 @@ fun NavGraphBuilder.navigationBuilder(
 
     composable(FamilyRoutes.JOIN) {
         JoinFamilyScreen(navController)
+    }
+
+    // SARASWATI: Phase 4 Task 19 — a car passenger's remote-controller screen.
+    composable(Screens.SangatRemote.route) {
+        RemoteControllerScreen(navController)
     }
 
     composable(

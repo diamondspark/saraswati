@@ -54,6 +54,14 @@ sealed class Screens(
         route = "family"
     )
 
+    // SARASWATI: Phase 4 Task 19 — a car passenger's remote-controller screen. Not a tab, so not in MainScreens.
+    object SangatRemote : Screens(
+        titleId = R.string.sangat_remote_title,
+        iconIdInactive = R.drawable.group_outlined,
+        iconIdActive = R.drawable.group_filled,
+        route = "sangat/remote",
+    )
+
     companion object {
         val MainScreens = listOf(Home, Search, ListenTogether, Library, Family)
     }
