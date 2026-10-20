@@ -13,6 +13,7 @@
 package com.metrolist.music.saraswati.family
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -37,11 +38,16 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.metrolist.music.LocalPlayerAwareWindowInsets
+import com.metrolist.music.LocalPlayerConnection
 import com.metrolist.music.R
 import com.metrolist.music.constants.IsFamilyOwnerKey
 import com.metrolist.music.ui.component.Material3SettingsGroup
 import com.metrolist.music.saraswati.family.sangat.SangatSection
 import com.metrolist.music.ui.component.Material3SettingsItem
+import com.metrolist.music.saraswati.family.parivaar.ParivaarMixCard
+import com.metrolist.music.saraswati.family.parivaar.ParivaarViewModel
+import com.metrolist.music.saraswati.family.playlists.FamilyPlaylistsSection
+import com.metrolist.music.saraswati.family.playlists.FamilyPlaylistsViewModel
 import com.metrolist.music.utils.rememberPreference
 
 @Composable
@@ -149,10 +155,41 @@ fun FamilyScreen(
             }
         }
 
-        // SARASWATI: Phase 4 Task 19 — the Sangat section, for family phones only.
+        // SARASWATI: Phase 4 Task 20 — the shared sections need this phone's session, so only the owner's and a
+        // paired phone see them.
         if (isOwner || isMember) {
-            Spacer(Modifier.height(24.dp))
-            SangatSection(navController)
+            FamilySharedSections(navController)
         }
     }
+}
+
+@Composable
+private fun FamilySharedSections(navController: NavController) {
+    val parivaarViewModel: ParivaarViewModel = hiltViewModel()
+    val playlistsViewModel: FamilyPlaylistsViewModel = hiltViewModel()
+    val playerConnection = LocalPlayerConnection.current
+    val parivaarState by parivaarViewModel.state.collectAsStateWithLifecycle()
+    val tasteVisible by parivaarViewModel.tasteVisible.collectAsStateWithLifecycle()
+
+    Spacer(Modifier.height(14.dp))
+    Text(stringResource(R.string.parivaar_mix_title), style = MaterialTheme.typography.titleMedium)
+    Spacer(Modifier.height(8.dp))
+    ParivaarMixCard(
+        state = parivaarState,
+        onPlay = { parivaarViewModel.play { playerConnection?.playQueue(it) } },
+    )
+    if (tasteVisible) {
+        Text(
+            stringResource(R.string.parivaar_mix_footnote) + " " + stringResource(R.string.parivaar_mix_change_taste),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 8.dp).clickable { navController.navigate(FamilyRoutes.TASTE) },
+        )
+    }
+    Spacer(Modifier.height(14.dp))
+    FamilyPlaylistsSection(navController, playlistsViewModel)
+    // SARASWATI: Phase 4 Task 19 — the Sangat section, after the family playlists as in the approved Family mockup.
+    Spacer(Modifier.height(14.dp))
+    SangatSection(navController)
+    Spacer(Modifier.height(24.dp))
 }

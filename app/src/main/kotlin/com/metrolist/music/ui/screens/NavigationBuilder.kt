@@ -27,6 +27,8 @@ import com.metrolist.music.constants.DarkModeKey
 import com.metrolist.music.constants.PureBlackKey
 import com.metrolist.music.saraswati.family.FamilyRoutes
 import com.metrolist.music.saraswati.family.FamilyScreen
+import com.metrolist.music.saraswati.family.parivaar.TasteHistoryScreen
+import com.metrolist.music.saraswati.family.playlists.FamilyPlaylistScreen
 import com.metrolist.music.saraswati.family.JoinFamilyScreen
 import com.metrolist.music.saraswati.family.sangat.RemoteControllerScreen
 import com.metrolist.music.saraswati.family.ManageFamilyScreen
@@ -124,6 +126,19 @@ fun NavGraphBuilder.navigationBuilder(
     // SARASWATI: Phase 4 Task 19 — a car passenger's remote-controller screen.
     composable(Screens.SangatRemote.route) {
         RemoteControllerScreen(navController)
+    }
+
+    // SARASWATI: Phase 4 Task 20 — Taste & history.
+    composable(FamilyRoutes.TASTE) {
+        TasteHistoryScreen(navController)
+    }
+
+    // SARASWATI: Phase 4 Task 20 — one family playlist, by its YouTube playlist id.
+    composable(
+        route = FamilyRoutes.PLAYLIST,
+        arguments = listOf(navArgument("playlistId") { type = NavType.StringType }),
+    ) { backStackEntry ->
+        FamilyPlaylistScreen(navController, backStackEntry.arguments?.getString("playlistId").orEmpty())
     }
 
     composable(
