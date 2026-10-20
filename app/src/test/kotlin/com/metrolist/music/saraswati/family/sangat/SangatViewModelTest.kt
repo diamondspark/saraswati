@@ -34,6 +34,8 @@ class SangatViewModelTest {
         val here = MutableStateFlow<String?>(null)
         val car = MutableStateFlow(false)
         val now = MutableStateFlow<RemoteNowPlaying?>(null)
+        val info = MutableStateFlow<SangatRoomInfo?>(null)
+        val suggested = mutableListOf<SangatCandidate>()
         val created = mutableListOf<String>()
         val joined = mutableListOf<Triple<String, String, Boolean>>()
         var left = 0
@@ -41,6 +43,11 @@ class SangatViewModelTest {
         override val currentRoomCode: Flow<String?> get() = here
         override val remoteController: Flow<Boolean> get() = car
         override val remoteNowPlaying: Flow<RemoteNowPlaying?> get() = now
+        override val roomInfo: Flow<SangatRoomInfo?> get() = info
+
+        override fun suggestSong(candidate: SangatCandidate) {
+            suggested += candidate
+        }
 
         override fun createRoom(username: String) {
             created += username
@@ -184,4 +191,46 @@ class SangatViewModelTest {
         assertFalse(vm.askName.value)
         assertEquals(1, names.saves)
     }
+
+    @Test
+    fun `not now leaves a note that show again takes back`() {
+        rooms.value = listOf(room("CAR1", car = true))
+        val vm = newVm()
+
+        vm.dismissPrompt("CAR1")
+        assertEquals("CAR1", vm.dismissedNote.value)
+        assertNull(vm.prompt.value)
+
+        vm.showPromptAgain("CAR1")
+        assertNull(vm.dismissedNote.value)
+        assertEquals("CAR1", vm.prompt.value?.roomCode)
+    }
+
+    @Test
+    fun `the banner follows the room this phone is in`() {
+        rooms.value = listOf(room("NORM1"))
+        val vm = newVm()
+        assertEquals(false, vm.banner.value?.joined)
+
+        port.info.value = info("NORM1", host = false)
+        assertEquals(true, vm.banner.value?.joined)
+        assertEquals(listOf("Papa"), vm.banner.value?.syncedWith)
+
+        port.info.value = info("MINE", host = true)
+        assertNull(vm.banner.value)
+        assertTrue(vm.rows.value.none { it.room.roomCode == "MINE" })
+    }
+
+    private fun info(
+        code: String,
+        host: Boolean,
+    ) = SangatRoomInfo(
+        roomCode = code,
+        hostName = if (host) "Asha" else "Papa",
+        isHost = host,
+        members = listOf(SangatMember(if (host) "Asha" else "Papa", isMe = host)) + if (host) emptyList() else listOf(SangatMember("Asha", isMe = true)),
+        track = null,
+        isPlaying = false,
+        positionMs = 0L,
+    )
 }

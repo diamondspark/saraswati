@@ -45,6 +45,8 @@ import com.metrolist.music.saraswati.family.sangat.ListenTogetherSangatPort
 import com.metrolist.music.saraswati.family.sangat.SangatFeed
 import com.metrolist.music.saraswati.family.sangat.SangatNames
 import com.metrolist.music.saraswati.family.sangat.SangatRoomPort
+import com.metrolist.music.saraswati.family.sangat.SangatSongSearch
+import com.metrolist.music.saraswati.family.sangat.YouTubeSangatSongSearch
 import com.metrolist.music.saraswati.family.sangat.WatcherSangatFeed
 import com.metrolist.music.saraswati.family.sangat.ListenTogetherCarRoom
 import com.metrolist.music.saraswati.family.sangat.SangatCarMode
@@ -154,6 +156,10 @@ object FamilyModule {
         watcher: SangatLiveWatcher,
         gate: FamilyFeatureGate,
     ): SangatFeed = WatcherSangatFeed(watcher, gate)
+
+    @Provides
+    @Singleton
+    fun provideSangatSongSearch(): SangatSongSearch = YouTubeSangatSongSearch()
 
     @Provides
     @Singleton

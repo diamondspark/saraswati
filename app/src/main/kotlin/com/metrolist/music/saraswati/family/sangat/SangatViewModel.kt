@@ -37,6 +37,12 @@ interface SangatRoomPort {
     val remoteController: Flow<Boolean>
     val remoteNowPlaying: Flow<RemoteNowPlaying?>
 
+    /** The room this phone is in as the screens show it, or null. */
+    val roomInfo: Flow<SangatRoomInfo?>
+
+    /** Suggests a song to the room; a car room approves it itself. */
+    fun suggestSong(candidate: SangatCandidate)
+
     fun createRoom(username: String)
 
     fun joinRoom(
@@ -75,6 +81,10 @@ class SangatDismissals
         fun dismiss(roomCode: String) {
             codes.update { it + roomCode }
         }
+
+        fun restore(roomCode: String) {
+            codes.update { it - roomCode }
+        }
     }
 
 @HiltViewModel
@@ -108,6 +118,18 @@ class SangatViewModel
         val remoteNowPlaying: StateFlow<RemoteNowPlaying?> =
             rooms.remoteNowPlaying.stateIn(scope, SharingStarted.Eagerly, null)
 
+        val roomInfo: StateFlow<SangatRoomInfo?> = rooms.roomInfo.stateIn(scope, SharingStarted.Eagerly, null)
+
+        /** The live list for the Sangat section: this phone's own hosted room left out, a joined room marked. */
+        val rows: StateFlow<List<SangatRow>> =
+            combine(live, roomInfo, remoteController) { list, info, remote -> SangatDisplay.rows(list, info, remote) }
+                .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+        /** The Home banner, or null when nothing is live (or while this phone hosts its own room). */
+        val banner: StateFlow<SangatBanner?> =
+            combine(live, roomInfo, remoteController) { list, info, remote -> SangatDisplay.banner(list, info, remote) }
+                .stateIn(scope, SharingStarted.Eagerly, null)
+
         /** The car room to offer: live, in the car, not this phone's own room, and not dismissed. */
         val prompt: StateFlow<LiveSangatRoom?> =
             combine(live, currentRoomCode, dismissals.dismissed) { list, here, gone ->
@@ -139,9 +161,28 @@ class SangatViewModel
             }
         }
 
+        private val _dismissedNote = MutableStateFlow<String?>(null)
+
+        /** The room whose prompt was just dismissed: the Home screen says where to join later and offers Show again. */
+        val dismissedNote: StateFlow<String?> = _dismissedNote.asStateFlow()
+
         fun dismissPrompt(roomCode: String) {
             dismissals.dismiss(roomCode)
+            _dismissedNote.value = roomCode
         }
+
+        /** The "Show again" action: the prompt for that room comes back. */
+        fun showPromptAgain(roomCode: String) {
+            dismissals.restore(roomCode)
+            _dismissedNote.value = null
+        }
+
+        fun clearDismissedNote() {
+            _dismissedNote.value = null
+        }
+
+        /** The name this phone goes by in a room, empty before one was saved. */
+        suspend fun savedName(): String = names.saved().trim()
 
         /** Saves the name typed into the dialog and carries on with the start or join that asked for it. */
         fun submitName(name: String) {

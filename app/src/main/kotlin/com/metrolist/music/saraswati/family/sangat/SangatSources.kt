@@ -11,6 +11,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.edit
 import com.metrolist.music.constants.ListenTogetherUsernameKey
 import com.metrolist.music.listentogether.ListenTogetherManager
+import com.metrolist.music.listentogether.TrackInfo
 import com.metrolist.music.saraswati.family.FamilyFeature
 import com.metrolist.music.saraswati.family.FamilyFeatureGate
 import com.metrolist.music.saraswati.family.LiveSangatRoom
@@ -18,6 +19,7 @@ import com.metrolist.music.utils.dataStore
 import com.metrolist.music.utils.get
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
@@ -32,6 +34,21 @@ class ListenTogetherSangatPort(
 
     override val remoteNowPlaying: Flow<RemoteNowPlaying?>
         get() = manager.remoteNowPlaying
+
+    override val roomInfo: Flow<SangatRoomInfo?>
+        get() = combine(manager.roomState, manager.userId) { state, me -> SangatRoomInfo.from(state, me) }
+
+    override fun suggestSong(candidate: SangatCandidate) =
+        manager.suggestTrack(
+            TrackInfo(
+                id = candidate.id,
+                title = candidate.title,
+                artist = candidate.artist,
+                album = candidate.album,
+                duration = candidate.durationMs,
+                thumbnail = candidate.thumbnail,
+            ),
+        )
 
     override fun createRoom(username: String) = manager.createRoom(username)
 

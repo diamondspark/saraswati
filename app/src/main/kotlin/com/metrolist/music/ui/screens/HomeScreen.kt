@@ -121,6 +121,7 @@ import com.metrolist.music.LocalPlayerConnection
 import com.metrolist.music.R
 import com.metrolist.music.saraswati.SaraswatiFeatures
 import com.metrolist.music.saraswati.culture.FestivalBanner
+import com.metrolist.music.saraswati.family.sangat.CarSangatDismissedNote
 import com.metrolist.music.saraswati.family.sangat.CarSangatPrompt
 import com.metrolist.music.saraswati.family.sangat.SangatLiveBanner
 import com.metrolist.music.saraswati.family.sangat.SangatNameDialog
@@ -681,8 +682,8 @@ fun HomeScreen(
 
     // SARASWATI: Phase 4 Task 19 — the Sangat live banner, the car prompt and the one-time name ask.
     val sangatViewModel: SangatViewModel = hiltViewModel()
-    val sangatLive by sangatViewModel.live.collectAsStateWithLifecycle()
-    val sangatHere by sangatViewModel.currentRoomCode.collectAsStateWithLifecycle()
+    val sangatBanner by sangatViewModel.banner.collectAsStateWithLifecycle()
+    val sangatDismissedNote by sangatViewModel.dismissedNote.collectAsStateWithLifecycle()
     val sangatPrompt by sangatViewModel.prompt.collectAsStateWithLifecycle()
     val sangatAskName by sangatViewModel.askName.collectAsStateWithLifecycle()
     LaunchedEffect(sangatViewModel) {
@@ -1280,6 +1281,19 @@ fun HomeScreen(
                     onDismiss = sangatViewModel::cancelNameRequest,
                 )
             }
+            sangatDismissedNote?.let { code ->
+                LaunchedEffect(code) {
+                    kotlinx.coroutines.delay(SANGAT_NOTE_MS)
+                    sangatViewModel.clearDismissedNote()
+                }
+                CarSangatDismissedNote(
+                    onShowAgain = { sangatViewModel.showPromptAgain(code) },
+                    modifier =
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(LocalPlayerAwareWindowInsets.current.asPaddingValues()),
+                )
+            }
 
             LazyColumn(
                 state = lazylistState,
@@ -1287,11 +1301,12 @@ fun HomeScreen(
             ) {
                 // SARASWATI: Task 10 — banner order on Home is: Sangat live (Phase 4 Task 19),
                 // then the festival banner, then the Sudhaar banner.
-                sangatLive.firstOrNull()?.takeIf { sangatHere == null }?.let { room ->
+                sangatBanner?.let { banner ->
                     item(key = "sangat_live_banner") {
                         SangatLiveBanner(
-                            room = room,
-                            onClick = { navController.navigate(Screens.Family.route) },
+                            banner = banner,
+                            onJoin = { sangatViewModel.join(banner.room) },
+                            onLeave = sangatViewModel::leave,
                         )
                     }
                 }
@@ -2844,3 +2859,6 @@ fun HomeScreen(
         )
     }
 }
+
+// SARASWATI: how long Home keeps the "Okay. You can join later" note after a car prompt is dismissed.
+private const val SANGAT_NOTE_MS = 8_000L
