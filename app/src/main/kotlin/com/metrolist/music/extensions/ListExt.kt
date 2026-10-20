@@ -52,8 +52,10 @@ fun List<Playlist>.filterYoutubeShorts(enabled: Boolean = false) =
         this
     }
 
-// SARASWATI: fix wave P5a C2 — a song on this phone must leave a playlist's own song list, thumbnail grid and
-// count the moment the Local files switch goes off, and come back the moment it goes back on.
+// SARASWATI: fix wave P5a C2 — a song on this phone must leave the song list itself (a playlist's songs, or the
+// Library > Songs merge) the moment the Local files switch goes off, and come back once it is on. This does not
+// touch playlist.songCount or playlist.thumbnails, which read a separate, unfiltered query — a known, already
+// tracked follow-up, not fixed here.
 fun List<Song>.filterLocalSongs(localFilesEnabled: Boolean) =
     if (localFilesEnabled) {
         this

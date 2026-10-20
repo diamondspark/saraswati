@@ -58,8 +58,10 @@ constructor(
     private val _onlinePlaylist = MutableStateFlow<PlaylistItem?>(null)
     val onlinePlaylist: StateFlow<PlaylistItem?> = _onlinePlaylist
 
-    // SARASWATI: fix wave P5a C2 — a song on this phone must leave this list, its count and its thumbnails the
-    // moment the Local files switch goes off, and come back the moment it goes back on.
+    // SARASWATI: fix wave P5a C2 — a song on this phone must leave this song list the moment the Local files
+    // switch goes off, and come back the moment it goes back on. This is the song list only: the screen's header
+    // count/thumbnails still read playlist.songCount/playlist.thumbnails, an unfiltered query — a known,
+    // already tracked follow-up, not fixed here.
     private data class PlaylistSongsPrefs(
         val sortType: PlaylistSongSortType,
         val sortDescending: Boolean,

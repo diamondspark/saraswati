@@ -438,24 +438,33 @@ fun LocalPlaylistScreen(
     LaunchedEffect(reorderableState.isAnyItemDragging) {
         if (!reorderableState.isAnyItemDragging) {
             dragInfo?.let { (from, to) ->
-                viewModel.viewModelScope.launch(Dispatchers.IO) {
-                    database.withTransaction {
-                        move(viewModel.playlistId, from, to)
-                    }
+                // SARASWATI: fix wave P5a C2 — from/to are indices into `songs`, the switch/permission-filtered
+                // list, but move() and the YouTube sync below act on the playlist's real stored `position`,
+                // which also counts songs the switch is hiding right now. Resolve to the dragged rows' actual
+                // stored positions from the list as it stood before the drag, or a hidden song's gap shifts the
+                // wrong row and the YT sync can target the wrong setVideoId.
+                val fromPosition = songs.getOrNull(from)?.map?.position
+                val toPosition = songs.getOrNull(to)?.map?.position
+                if (fromPosition != null && toPosition != null) {
+                    viewModel.viewModelScope.launch(Dispatchers.IO) {
+                        database.withTransaction {
+                            move(viewModel.playlistId, fromPosition, toPosition)
+                        }
 
-                    // Sync order with YT Music
-                    val browseId = viewModel.playlist.value?.playlist?.browseId
-                    if (browseId != null) {
-                        val playlistSongMap = database.playlistSongMaps(viewModel.playlistId, 0)
-                        val setVideoId = playlistSongMap.getOrNull(to)?.setVideoId
-                        val successorSetVideoId = playlistSongMap.getOrNull(to + 1)?.setVideoId
+                        // Sync order with YT Music
+                        val browseId = viewModel.playlist.value?.playlist?.browseId
+                        if (browseId != null) {
+                            val playlistSongMap = database.playlistSongMaps(viewModel.playlistId, 0)
+                            val setVideoId = playlistSongMap.getOrNull(toPosition)?.setVideoId
+                            val successorSetVideoId = playlistSongMap.getOrNull(toPosition + 1)?.setVideoId
 
-                        if (setVideoId != null) {
-                            YouTube.moveSongPlaylist(
-                                browseId,
-                                setVideoId,
-                                successorSetVideoId,
-                            )
+                            if (setVideoId != null) {
+                                YouTube.moveSongPlaylist(
+                                    browseId,
+                                    setVideoId,
+                                    successorSetVideoId,
+                                )
+                            }
                         }
                     }
                 }
