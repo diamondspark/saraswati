@@ -26,10 +26,11 @@ import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.ArtistConjunctions
 import com.metrolist.innertube.models.YouTubeLocale
 import com.metrolist.kugou.KuGou
-import com.metrolist.lastfm.LastFM
 import com.metrolist.music.BuildConfig
 import com.metrolist.music.saraswati.SaraswatiFeatures
 import com.metrolist.music.saraswati.car.CarHomeHolder
+import com.metrolist.music.saraswati.offline.SmartDownloadExecutor
+import com.metrolist.music.saraswati.offline.SmartDownloadScheduler
 import com.metrolist.music.saraswati.saral.SaralActive
 import com.metrolist.music.saraswati.security.OpenResult
 import com.metrolist.music.saraswati.security.SaraswatiVault
@@ -73,6 +74,11 @@ class App :
     @ApplicationScope
     lateinit var applicationScope: CoroutineScope
 
+    // SARASWATI: Phase 5 Task 11 — both asked for lazily; the executor touches the download database only when the
+    // ledger lists unfinished smart downloads.
+    @Inject
+    lateinit var smartDownloadExecutor: dagger.Lazy<SmartDownloadExecutor>
+
     override fun onCreate() {
         super.onCreate()
 
@@ -112,6 +118,10 @@ class App :
         } catch (e: Exception) {
             Timber.e(e, "Failed to ensure DataStore directory")
         }
+
+        // SARASWATI: Discord and Last.fm were removed (owner decision). A phone that used Discord still holds its
+        // OAuth token file (Keystore-encrypted, "discord_token"); delete it so nothing stays on the device.
+        runCatching { deleteSharedPreferences("discord_token") }
 
         // SARASWATI: scrub any plaintext secret preference (a YouTube
         // sign-in cookie, or an AI/Last.fm/Listen-Together/proxy
@@ -156,6 +166,20 @@ class App :
         }
 
         InnerTubeXPlayer.initialize(this)
+
+        // SARASWATI: Phase 5 Task 11 — re-arm the nightly smart-download job (it is not persisted, so every process
+        // start restores it) and stop any smart download a dead process left running. Off the startup path.
+        applicationScope.launch(Dispatchers.IO) {
+            try {
+                val enabled = dataStore.data.first()[SmartDownloadsEnabledKey] ?: true
+                SmartDownloadScheduler.ensureScheduled(this@App, enabled)
+                smartDownloadExecutor.get().stopPending()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Timber.w(e, "Smart downloads: could not re-arm")
+            }
+        }
 
         // Pre-read Coil cache size on background to avoid runBlocking in newImageLoader
         applicationScope.launch(Dispatchers.IO) {
@@ -209,12 +233,6 @@ class App :
         if (languageTag == "zh-TW") {
             KuGou.useTraditionalChinese = true
         }
-
-        // Initialize LastFM with API keys from BuildConfig (GitHub Secrets)
-        LastFM.initialize(
-            apiKey = BuildConfig.LASTFM_API_KEY.takeIf { it.isNotEmpty() } ?: "",
-            secret = BuildConfig.LASTFM_SECRET.takeIf { it.isNotEmpty() } ?: "",
-        )
 
         // SARASWATI: proxy settings are hidden (audit A15.2); guard this too
         // so a stored proxy config restored from a legacy backup is never
@@ -327,19 +345,6 @@ class App :
                     } catch (e: Exception) {
                         Timber.e(e, "Could not parse cookie. Clearing existing cookie.")
                         forgetAccount(this@App)
-                    }
-                }
-        }
-
-        applicationScope.launch(Dispatchers.IO) {
-            dataStore.data
-                .map { it[LastFMSessionKey] }
-                .distinctUntilChanged()
-                .collect { session ->
-                    try {
-                        LastFM.sessionKey = session
-                    } catch (e: Exception) {
-                        Timber.e("Error while loading last.fm session key. %s", e.message)
                     }
                 }
         }

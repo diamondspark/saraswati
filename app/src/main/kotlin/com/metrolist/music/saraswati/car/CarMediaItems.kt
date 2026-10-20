@@ -13,6 +13,7 @@ import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
 import androidx.annotation.DrawableRes
+import com.metrolist.music.R
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 
@@ -20,12 +21,19 @@ import androidx.media3.common.MediaMetadata
  * The words and icons the car rows are made of. Handed in as two functions so the rows can be built, and tested,
  * without an Android resource table.
  */
+// SARASWATI: Phase 5 Task 6 — songCount gives "n songs" for a count; the default is the bare number for tests.
 internal class CarResources(
     val string: (Int) -> String,
     val iconUri: (Int) -> Uri,
+    val songCount: (Int) -> String = { it.toString() },
 ) {
     companion object {
-        fun of(context: Context) = CarResources(string = { context.getString(it) }, iconUri = { carDrawableUri(context, it) })
+        fun of(context: Context) =
+            CarResources(
+                string = { context.getString(it) },
+                iconUri = { carDrawableUri(context, it) },
+                songCount = { context.resources.getQuantityString(R.plurals.n_song, it, it) },
+            )
     }
 }
 

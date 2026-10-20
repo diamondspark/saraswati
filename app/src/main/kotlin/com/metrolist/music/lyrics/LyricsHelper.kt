@@ -10,6 +10,7 @@ import android.util.LruCache
 import com.metrolist.music.constants.LyricsProviderOrderKey
 import com.metrolist.music.db.entities.LyricsEntity.Companion.LYRICS_NOT_FOUND
 import com.metrolist.music.models.MediaMetadata
+import com.metrolist.music.saraswati.localmedia.LocalSongIds
 import com.metrolist.music.utils.NetworkConnectivityObserver
 import com.metrolist.music.utils.dataStore
 import com.metrolist.music.utils.reportException
@@ -42,11 +43,18 @@ constructor(
                 resolveLyricsProviders(preferences)
             }.distinctUntilChanged()
 
+    // SARASWATI: fix wave P5a I7 — the first thing every provider lookup does is ask this; a test replaces it to
+    // prove a song on this phone never gets that far.
+    internal var connectivityProbe: () -> Boolean = { networkConnectivity.isCurrentlyConnected() }
+
     private val cache = LruCache<String, List<LyricsResult>>(MAX_CACHE_SIZE)
     private var currentLyricsJob: Job? = null
 
     suspend fun getLyrics(mediaMetadata: MediaMetadata): LyricsWithProvider {
         currentLyricsJob?.cancel()
+
+        // SARASWATI: Phase 5 Task 2 — a song on this phone is never looked up by any lyrics provider.
+        if (LocalSongIds.isLocal(mediaMetadata.id)) return LyricsWithProvider(LYRICS_NOT_FOUND, PROVIDER_NONE)
 
         val cached = cache.get(mediaMetadata.id)?.firstOrNull()
         if (cached != null) {
@@ -58,7 +66,7 @@ constructor(
             .first()
 
         val isNetworkAvailable = try {
-            networkConnectivity.isCurrentlyConnected()
+            connectivityProbe()
         } catch (e: Exception) {
             true
         }
@@ -120,6 +128,9 @@ constructor(
         callback: (LyricsResult) -> Unit,
     ) {
         currentLyricsJob?.cancel()
+
+        // SARASWATI: Phase 5 Task 2 — as in getLyrics: nothing about a local song goes to a lyrics provider.
+        if (LocalSongIds.isLocal(mediaId)) return
 
         val cacheKey = "$songArtists-$songTitle".replace(" ", "")
         cache.get(cacheKey)?.let { results ->

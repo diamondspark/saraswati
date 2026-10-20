@@ -120,6 +120,26 @@ scripts/perf-baseline.sh dev.diamondspark.saraswati 10 > /tmp/saraswati-perf.txt
 
 Then fill in the table below from the two reports and re-check each budget.
 
+### Macrobenchmark journeys (Task 13)
+
+- `TapToAudioBenchmark` (`baselineprofile`): pass 1 (`tapToAudioNetwork`) opens ten
+  songs on their `music.youtube.com` links and measures `SarTapToAudioNetwork`;
+  pass 2 (`tapToAudioOffline`) repeats the same songs and measures
+  `SarTapToAudioOffline`. The ten video ids are passed at run time as the
+  instrumentation argument `sarVideoIds` (comma-separated, exactly ten) and are
+  never committed. Pass 2 needs those songs already downloaded on the device.
+  Run it with `-Pandroid.testInstrumentationRunnerArguments.sarVideoIds=<ids>`;
+  the exact Gradle task name for this module's variant is not yet verified and is
+  confirmed on the Pixel in Task 16.
+- `MetrolistStartupBenchmark`: the `StartupBenchmark` cold-start body against
+  `com.metrolist.music` (Metrolist 13.6.3, installed on the same device), in
+  `None()` and `Partial()`.
+- `HomeScrollBenchmark.scrollOnThisPhone`: opens Library, then On this phone, and
+  flings the list (frame timing).
+- `BaselineProfileGenerator` also grants `READ_MEDIA_AUDIO` to the benchmark build
+  and profiles Library then On this phone then scroll, the Family tab, and Library
+  then Downloaded. `includeInStartupProfile` stays on.
+
 ## Results
 
 ### Measurement-condition caveats (read before trusting any number below)

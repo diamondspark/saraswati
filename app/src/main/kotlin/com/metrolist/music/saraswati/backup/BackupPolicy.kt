@@ -37,11 +37,6 @@ import com.metrolist.music.constants.AccountChannelHandleKey
 import com.metrolist.music.constants.AccountEmailKey
 import com.metrolist.music.constants.AccountNameKey
 import com.metrolist.music.constants.DataSyncIdKey
-import com.metrolist.music.constants.DiscordAvatarKey
-import com.metrolist.music.constants.DiscordButton1UrlKey
-import com.metrolist.music.constants.DiscordButton2UrlKey
-import com.metrolist.music.constants.DiscordNameKey
-import com.metrolist.music.constants.DiscordUsernameKey
 import com.metrolist.music.constants.FamilyDeviceIdKey
 import com.metrolist.music.constants.FamilyFeaturesDisabledKey
 import com.metrolist.music.constants.FamilyPlaylistsCacheKey
@@ -60,6 +55,8 @@ import com.metrolist.music.constants.ParivaarMixKey
 import com.metrolist.music.constants.ParivaarPlaylistIdKey
 import com.metrolist.music.constants.ParivaarTopSongsSyncedAtKey
 import com.metrolist.music.constants.SangatCarRoomCodeKey
+import com.metrolist.music.constants.SmartDownloadLedgerKey
+import com.metrolist.music.constants.StationOfflineSetsKey
 import com.metrolist.music.constants.VisitorDataKey
 import com.metrolist.music.saraswati.family.sangat.RemoteControllerStore
 import com.metrolist.music.saraswati.security.SecretPreferenceKeys
@@ -102,33 +99,8 @@ object BackupPolicy {
                 // SaraswatiFeatures.AI_LYRICS, so a restored value really
                 // would redirect that request to an attacker's host.
                 OpenRouterBaseUrlKey,
-                // A family member's Discord identity (shown on their
-                // Discord profile via Rich Presence). Same reasoning as the
-                // YouTube account name/email above: a shared backup must
-                // not leak which person this install belongs to, on any
-                // linked service, not just YouTube.
-                DiscordUsernameKey,
-                DiscordNameKey,
-                DiscordAvatarKey,
-                // SARASWATI (fix round 1): NOT safe to restore. Originally
-                // classified SAFE on the (wrong) assumption that Discord's
-                // OAuth token never survives a restart — it does:
-                // DiscordTokenStore persists it Keystore-encrypted, and
-                // DiscordRpcManager.init() (called unconditionally by
-                // MusicService on every service creation, with no
-                // SaraswatiFeatures.DISCORD check anywhere in that file)
-                // retrieves it and reconnects automatically. MusicService
-                // then reads these two keys straight from DataStore to
-                // build the Rich Presence activity published on the next
-                // song play. On a phone where Discord was already
-                // connected, a hostile backup planting these would get
-                // auto-published to the family member's live Discord
-                // presence on the very next reconnect/song-play — no fresh
-                // login needed, triggered by the restore's own app
-                // restart. Exactly the "plant a URL into a live phone"
-                // scenario this file exists to prevent.
-                DiscordButton1UrlKey,
-                DiscordButton2UrlKey,
+                // SARASWATI: the Discord identity and presence-button keys are in SecretPreferenceKeys.all now
+                // (Discord was removed), so they are never exported or restored through that set.
                 // Cache size caps (MB). A hostile backup setting these to
                 // an oversized value doesn't leak anything, but it does
                 // raise the eviction threshold the image/song cache uses —
@@ -152,6 +124,10 @@ object BackupPolicy {
                 ParivaarMixKey,
                 // SARASWATI: Phase 6 Task 7 — the built Prahar mix is derived from the person's listening, like Parivaar Mix.
                 com.metrolist.music.saraswati.craft.prahar.PraharStore.Key,
+                // SARASWATI: Phase 5 Task 9 — offline Station songs belong to this phone's stations and downloads.
+                StationOfflineSetsKey,
+                // SARASWATI: Phase 5 Task 10 — the smart-download ledger lists this phone's own downloads.
+                SmartDownloadLedgerKey,
                 // SARASWATI: Phase 4 Task 14 — the family playlists are the hub's list, cached.
                 FamilyPlaylistsCacheKey,
                 // SARASWATI: Phase 4 Task 12 — this phone's own top-songs playlist and the time of its last sync.

@@ -40,7 +40,7 @@ _sar_path_front "$ANDROID_HOME/platform-tools"
 _sar_path_front "$JAVA_HOME/bin"
 export PATH
 
-# Gradle heap 3 GB, Kotlin daemon 2 GB, low CPU priority: the dev machine has
+# Gradle heap 4 GB, Kotlin daemon 4 GB, low CPU priority: the dev machine has
 # about 8 GB of RAM to spare, so always build through this wrapper.
 sar_gradle() {
   if [ ! -x ./gradlew ]; then

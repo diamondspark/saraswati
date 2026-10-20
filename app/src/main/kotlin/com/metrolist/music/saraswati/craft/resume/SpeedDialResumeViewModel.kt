@@ -14,6 +14,7 @@ import com.metrolist.innertube.models.YTItem
 import com.metrolist.music.db.MusicDatabase
 import com.metrolist.music.db.entities.Song
 import com.metrolist.music.playback.queues.Queue
+import com.metrolist.music.saraswati.localmedia.LocalSongsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -45,6 +46,7 @@ class SpeedDialResumeViewModel
     constructor(
         private val store: ResumeStore,
         database: MusicDatabase,
+        private val localSongs: LocalSongsRepository,
     ) : ViewModel() {
         /** Every stored resume point, keyed by collection id. */
         val points: StateFlow<Map<String, ResumePoint>> =
@@ -52,7 +54,8 @@ class SpeedDialResumeViewModel
 
         private val actions =
             SpeedDialResumeActions(store) { playlistId ->
-                database.playlistSongs(playlistId).first().map { it.song }
+                // SARASWATI: Phase 5 Task 3 — with the Local files switch off, a local playlist resumes with nothing.
+                if (localSongs.canServe()) database.playlistSongs(playlistId).first().map { it.song } else emptyList()
             }
 
         /** Plays [item] from its saved point through [playQueue]. Upstream's tile tap is unchanged. */

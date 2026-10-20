@@ -404,18 +404,9 @@
     <string name="username">Username</string>
     <string name="password">Password</string>
 
-    <!-- Last.fm -->
     <string name="lastfm_integration">Last.fm integration</string>
-    <string name="enable_scrobbling">Enable scrobbling</string>
-    <string name="lastfm_now_playing">Send Now Playing status</string>
-    <string name="last_fm_send_likes">Sync Loved and Unloved</string>
-    <string name="last_fm_send_likes_description">Love or unlove songs in Last.fm when you like or unlike them in Metrolist</string>
     <string name="logging_in">Logging in…</string>
 
-    <string name="scrobbling_configuration">Scrobbling configuration</string>
-    <string name="scrobble_min_track_duration">Scrobble songs longer than (seconds)</string>
-    <string name="scrobble_delay_percent">Scrobble delay (percentage)</string>
-    <string name="scrobble_delay_minutes">Scrobble delay (minutes)</string>
     <string name="hide_video_songs">Hide video songs</string>
     <string name="hide_youtube_shorts">Hide YouTube Shorts</string>
 
@@ -786,43 +777,7 @@
     <string name="recently_converted">Recently converted</string>
     <string name="column_label">Column %d</string>
 
-    <string name="discord_connect_description">Sign in with Discord to share what you\'re listening to</string>
-    <string name="discord_information_warning">Metrolist uses Discord\'s public OAuth2 and Gateway APIs to share what you\'re listening to. Authorization happens through a local browser session that closes itself after capturing the code — nothing is sent to third-party servers. Your token is stored on this device in encrypted preferences and is never shared. Metrolist connects directly to wss://gateway.discord.gg to publish your activity, and only requests the minimum scope required (sdk.social_layer_presence).</string>
-    <string name="discord_status_connected">Connected</string>
-    <string name="discord_status_authorizing">Authorizing…</string>
-    <string name="discord_status_authorized">Authorized</string>
-    <string name="discord_status_not_initialized">Not initialized</string>
-    <string name="discord_error_loopback_timeout">Discord didn\'t respond in time. Please try again.</string>
-    <string name="discord_error_loopback_unbound">Couldn\'t open a local callback port. Please free one and try again.</string>
-    <string name="discord_error_no_browser">No browser was found to complete Discord authorization.</string>
-    <string name="discord_error_token_refresh_failed">Discord session expired. Please reconnect.</string>
-    <string name="discord_error_invalid_scope">Discord rejected the connection. Please reconnect and grant the required permission.</string>
-    <string name="discord_error_banner_title">Discord error</string>
-    <string name="discord_rpc_preview">Rich Presence preview</string>
     <string name="discord_integration">Discord Integration</string>
-    <string name="enable_discord_rpc">Enable Rich Presence</string>
-    <string name="discord_advanced_mode">Advanced mode</string>
-    <string name="discord_advanced_mode_description">Customize every field of your Rich Presence with placeholders</string>
-    <string name="discord_presence">Presence</string>
-    <string name="discord_activity_type">Activity type</string>
-    <string name="discord_activity_playing">Playing</string>
-    <string name="discord_activity_listening">Listening</string>
-    <string name="discord_activity_watching">Watching</string>
-    <string name="discord_activity_competing">Competing</string>
-    <string name="discord_activity_name">Activity name</string>
-    <string name="discord_state">State</string>
-    <string name="discord_details">Details</string>
-    <string name="discord_buttons">Buttons</string>
-    <string name="discord_button_1">Button 1</string>
-    <string name="discord_button_2">Button 2</string>
-    <string name="discord_enable_button_1">Show button 1</string>
-    <string name="discord_enable_button_2">Show button 2</string>
-    <string name="discord_button_label">Label</string>
-    <string name="discord_button_url">URL</string>
-    <string name="discord_status">Status</string>
-    <string name="discord_status_online">Online</string>
-    <string name="discord_status_idle">Idle</string>
-    <string name="discord_status_dnd">Do Not Disturb</string>
     <string name="speed_dial">Speed dial</string>
     <string name="pin_to_speed_dial">Pin to speed dial</string>
     <string name="unpin_from_speed_dial">Unpin from speed dial</string>
@@ -1404,4 +1359,56 @@
 
     <!-- SARASWATI: Phase 6 Task 17 — radio tuning chip row above the upcoming queue (English only; AGENTS.md). -->
     <string name="tuning_row_title">Sur · Radio tuning</string>
+    <!-- SARASWATI: Phase 5 Task 3 — Local files switch and the explanation shown before the permission prompt -->
+    <string name="local_files_title">Local files</string>
+    <string name="local_files_desc_on">Songs stored on this phone can be played here and in the car</string>
+    <string name="local_files_desc_off">Off. Saraswati does not look for songs on this phone.</string>
+    <string name="local_files_unsupported">Needs Android 13 or newer</string>
+    <string name="local_files_refused">Not allowed. You can allow it in this phone\'s app settings.</string>
+    <string name="local_files_explain_title">Songs on this phone</string>
+    <string name="local_files_explain_body">Saraswati will look for music files on this phone so you can play them here and in the car. It reads audio files only, never photos or videos. They never leave this phone, except to a Cast speaker you pick. You can switch this off at any time in Privacy settings.</string>
+    <string name="local_files_explain_continue">Continue</string>
+    <string name="local_songs_cant_join_sangat">Songs on this phone can\'t join Sangat</string>
+    <string name="local_song_cant_play">Can\'t play this song</string>
+    <string name="local_song_cant_cast">Songs on this phone can\'t be cast here</string>
+    <!-- SARASWATI: Phase 5 Task 6 — the car's two local rows and the first line of On this phone. -->
+    <string name="car_downloaded_title">Downloaded</string>
+    <string name="car_local_title">On this phone</string>
+    <string name="car_local_allow">Allow on your phone</string>
+    <!-- SARASWATI: Phase 5 Task 14 — the On this phone screen and its Library entry. -->
+    <string name="local_songs_title">On this phone</string>
+    <string name="local_songs_privacy">They never leave this phone, except to a Cast speaker you pick</string>
+    <string name="local_songs_needs_permission">Saraswati will look for music files on this phone so you can play them here and in the car. It reads audio files only, never photos or videos.</string>
+    <string name="local_songs_allow">Allow</string>
+    <string name="local_songs_open_settings">Open app settings</string>
+    <string name="local_songs_turn_on">Turn on</string>
+    <string name="local_songs_off_short">Off</string>
+    <string name="local_songs_tap_to_find">Tap to find your songs</string>
+    <string name="local_songs_scanning">Looking for songs on this phone</string>
+    <string name="local_songs_empty">No songs yet</string>
+    <string name="local_songs_empty_body">No music files were found on this phone.</string>
+    <string name="local_songs_check_again">Check again</string>
+    <string name="local_songs_play_all">Play all</string>
+    <string name="local_songs_shuffle">Shuffle</string>
+    <string name="local_songs_refresh">Refresh</string>
+    <plurals name="local_songs_count">
+        <item quantity="one">%d song</item>
+        <item quantity="other">%d songs</item>
+    </plurals>
+    <!-- SARASWATI: Phase 5 Task 15 — Storage settings, "Raat ke Gaane" (smart downloads). -->
+    <string name="smart_downloads_group">Smart downloads</string>
+    <string name="smart_downloads_title">Raat ke Gaane</string>
+    <string name="smart_downloads_headline">Wi-Fi + charging, ~50 songs a night</string>
+    <string name="smart_downloads_body">While the phone sleeps, Saraswati saves songs so they are ready without internet.</string>
+    <string name="smart_downloads_rule_wifi">Only on Wi-Fi. It never uses mobile data.</string>
+    <string name="smart_downloads_rule_charging">Only while charging. It never drains the battery.</string>
+    <string name="smart_downloads_rule_amount">About 50 songs a night, one at a time.</string>
+    <string name="smart_downloads_rule_off">Turn it off any time. Downloads that haven\'t finished are stopped.</string>
+    <string name="smart_downloads_privacy">They never leave this phone, except to a Cast speaker you pick</string>
+    <string name="smart_downloads_not_run_yet">Hasn\'t run yet</string>
+    <string name="smart_downloads_off">Off</string>
+    <plurals name="smart_downloads_last_night">
+        <item quantity="one">Last night: %d song</item>
+        <item quantity="other">Last night: %d songs</item>
+    </plurals>
 </resources>

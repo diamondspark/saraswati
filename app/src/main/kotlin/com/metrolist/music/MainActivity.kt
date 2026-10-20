@@ -321,6 +321,11 @@ class MainActivity : FragmentActivity() {
     @Inject
     lateinit var healthReporter: HealthReporter
 
+    // SARASWATI: Phase 5 Task 3 — rescans the songs on this phone (at most every six hours, and only while access
+    // is granted and the Local files switch is on).
+    @Inject
+    lateinit var localSongsRepository: com.metrolist.music.saraswati.localmedia.LocalSongsRepository
+
     // SARASWATI: Phase 4 Task 12
     @Inject
     lateinit var topSongsPlaylistSync: TopSongsPlaylistSync
@@ -549,6 +554,8 @@ class MainActivity : FragmentActivity() {
                 launch { familyPlaylistsRepository.refresh() }
                 // SARASWATI: fix wave B1 (I2) — its own job too, so a slow hub holds up neither of the others.
                 launch { healthReporter.report() }
+                // SARASWATI: Phase 5 Task 3 — off the main thread; reads nothing without access or with the switch off.
+                launch(Dispatchers.IO) { localSongsRepository.syncIfDue(Instant.now()) }
                 // SARASWATI: Phase 4 Task 12 — this phone's weekly top-songs playlist, then the daily Parivaar Mix
                 // built from everyone's. One job, in that order; each is a no-op until it is due and never throws.
                 // SARASWATI: final fix wave (I2, M1) — the switches are refreshed first in this job: nothing is written to

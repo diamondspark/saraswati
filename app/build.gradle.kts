@@ -57,14 +57,8 @@ android {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
         }
 
-        // LastFM API keys from GitHub Secrets
-        val lastFmKey = localProperties.getProperty("LASTFM_API_KEY") ?: System.getenv("LASTFM_API_KEY") ?: ""
-        val lastFmSecret = localProperties.getProperty("LASTFM_SECRET") ?: System.getenv("LASTFM_SECRET") ?: ""
-
-        buildConfigField("String", "LASTFM_API_KEY", "\"$lastFmKey\"")
-        buildConfigField("String", "LASTFM_SECRET", "\"$lastFmSecret\"")
+        // SARASWATI: Last.fm keys and the Discord app id are gone with those integrations (removed, owner decision).
         buildConfigField("String", "ARCHITECTURE", "\"universal\"")
-        buildConfigField("Long", "DISCORD_APP_ID", "1447278780795064401L")
     }
 
     flavorDimensions += listOf("variant")
@@ -429,8 +423,8 @@ dependencies {
 //    reports, which already read it.
 //  - the gms flavor reports no in-app updater (Task 2's updater pipeline
 //    replaces it in Phase 2); Cast support (CAST_AVAILABLE) is untouched.
-//  - the Last.fm keys are zeroed: the integration is removed, and a build
-//    must never embed a real key.
+//  - the Last.fm and Discord integrations are removed outright: no keys, no
+//    app id, no code.
 val saraswatiVersionCode = providers.exec {
     commandLine("python3", "-I", rootProject.file("scripts/version.py").absolutePath)
 }.standardOutput.asText.get().trim().toInt()
@@ -446,8 +440,6 @@ android {
         }
 
         buildConfigField("String", "ARCHITECTURE", "\"arm64\"")
-        buildConfigField("String", "LASTFM_API_KEY", "\"\"")
-        buildConfigField("String", "LASTFM_SECRET", "\"\"")
     }
 
     // SARASWATI: Task 6 — base URL of the family hub Worker (HubClient).

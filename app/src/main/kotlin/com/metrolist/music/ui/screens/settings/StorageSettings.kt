@@ -28,6 +28,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -54,6 +56,7 @@ import com.metrolist.music.constants.EnableSongCacheKey
 import com.metrolist.music.constants.MaxImageCacheSizeKey
 import com.metrolist.music.constants.MaxSongCacheSizeKey
 import com.metrolist.music.extensions.tryOrNull
+import com.metrolist.music.saraswati.offline.SmartDownloadsSettingViewModel
 import com.metrolist.music.ui.component.ActionPromptDialog
 import com.metrolist.music.ui.component.IconButton
 import com.metrolist.music.ui.component.Material3SettingsGroup
@@ -473,6 +476,9 @@ fun StorageSettings(
                     ),
                 ),
         )
+
+        // SARASWATI: Phase 5 Task 15 — the "Raat ke Gaane" smart downloads switch and its explanation.
+        SmartDownloadsSection()
     }
 
     TopAppBar(
@@ -488,5 +494,46 @@ fun StorageSettings(
                 )
             }
         },
+    )
+}
+
+// SARASWATI: Phase 5 Task 15 — the Raat ke Gaane row: its switch, the approved explanation and the status line.
+@Composable
+private fun SmartDownloadsSection() {
+    val viewModel: SmartDownloadsSettingViewModel = hiltViewModel()
+    val enabled by viewModel.enabled.collectAsStateWithLifecycle()
+    val status by viewModel.status.collectAsStateWithLifecycle()
+    Material3SettingsGroup(
+        title = stringResource(R.string.smart_downloads_group),
+        items =
+            listOf(
+                Material3SettingsItem(
+                    icon = painterResource(R.drawable.download),
+                    title = { Text(stringResource(R.string.smart_downloads_title)) },
+                    description = {
+                        Column {
+                            Text(stringResource(R.string.smart_downloads_headline))
+                            Text(stringResource(R.string.smart_downloads_body))
+                            listOf(
+                                R.string.smart_downloads_rule_wifi,
+                                R.string.smart_downloads_rule_charging,
+                                R.string.smart_downloads_rule_amount,
+                                R.string.smart_downloads_rule_off,
+                            ).forEach { rule ->
+                                Text("\u2022  " + stringResource(rule))
+                            }
+                            Text(stringResource(R.string.smart_downloads_privacy))
+                            Text(status)
+                        }
+                    },
+                    trailingContent = {
+                        Switch(
+                            checked = enabled,
+                            onCheckedChange = viewModel::setEnabled,
+                        )
+                    },
+                    onClick = { viewModel.setEnabled(!enabled) },
+                ),
+            ),
     )
 }

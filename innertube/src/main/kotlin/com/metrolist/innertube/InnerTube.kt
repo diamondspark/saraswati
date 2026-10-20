@@ -5,6 +5,9 @@ import com.metrolist.innertube.models.ReturnYouTubeDislikeResponse
 import com.metrolist.innertube.models.YouTubeClient
 import com.metrolist.innertube.models.YouTubeLocale
 import com.metrolist.innertube.models.response.NextResponse
+import com.metrolist.innertube.saraswati.LocalIdEgressGuard
+import com.metrolist.innertube.saraswati.LocalSongEgressException
+import com.metrolist.innertube.saraswati.mentionsLocalId
 import com.metrolist.innertubex.InnerTube as InnerTubeX
 import com.metrolist.innertubex.InnerTubeHttpException
 import com.metrolist.innertubex.models.Context
@@ -180,6 +183,9 @@ class InnerTube(
             // InnerTubeX handles endpoint-specific status validation and transient retries.
             expectSuccess = false
 
+            // SARASWATI: Phase 5 Task 2 — no request may name a song on this phone (`local:<id>`).
+            install(LocalIdEgressGuard)
+
             install(ContentNegotiation) {
                 json(
                     Json {
@@ -289,7 +295,12 @@ class InnerTube(
     suspend fun getTranscript(
         client: YouTubeClient,
         videoId: String,
-    ) = innerTubeX.getTranscript(client, videoId)
+    ): HttpResponse {
+        // SARASWATI: Phase 5 Task 2 — the transcript request carries the id inside encoded params, which the
+        // egress guard cannot read, so a song on this phone is refused here.
+        if (mentionsLocalId(videoId)) throw LocalSongEgressException()
+        return innerTubeX.getTranscript(client, videoId)
+    }
 
     suspend fun fetchFreshVisitorData() = innerTubeX.fetchFreshVisitorData()
 

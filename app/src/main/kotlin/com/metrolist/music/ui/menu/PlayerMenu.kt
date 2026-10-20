@@ -86,6 +86,9 @@ import com.metrolist.music.R
 import com.metrolist.music.constants.ListItemHeight
 import com.metrolist.music.constants.VarispeedKey
 import com.metrolist.music.listentogether.ConnectionState
+import com.metrolist.music.saraswati.localmedia.LocalSongIds
+import com.metrolist.music.saraswati.localmedia.LocalSongMenuPolicy
+import com.metrolist.music.saraswati.localmedia.SongAction
 import com.metrolist.music.ui.screens.Screens
 import com.metrolist.music.listentogether.ListenTogetherEvent
 import com.metrolist.music.models.MediaMetadata
@@ -122,6 +125,7 @@ fun PlayerMenu(
     val playerConnection = LocalPlayerConnection.current ?: return
     // SARASWATI: Phase 6 Task 3 — the snooze menu item.
     val snoozeViewModel = hiltViewModel<SnoozeViewModel>()
+    val isLocal = LocalSongIds.isLocal(mediaMetadata.id)
     val playerVolume = playerConnection.service.playerVolume.collectAsStateWithLifecycle()
 
     // Cast state for volume control - safely access castConnectionHandler to prevent crashes
@@ -312,7 +316,7 @@ fun PlayerMenu(
             NewActionGrid(
                 actions =
                     listOfNotNull(
-                        if (!isListenTogetherGuest) {
+                        if (!isListenTogetherGuest && LocalSongMenuPolicy.visible(SongAction.START_RADIO, isLocal)) {
                             NewAction(
                                 icon = {
                                     Icon(
@@ -344,7 +348,7 @@ fun PlayerMenu(
                             text = stringResource(R.string.add_to_playlist),
                             onClick = { showChoosePlaylistDialog = true },
                         ),
-                        NewAction(
+                        if (LocalSongMenuPolicy.visible(SongAction.SHARE, isLocal)) NewAction(
                             icon = {
                                 Icon(
                                     painter = painterResource(R.drawable.link),
@@ -370,7 +374,7 @@ fun PlayerMenu(
                                     .show()
                                 onDismiss()
                             },
-                        ),
+                        ) else null,
                     ),
                 columns = if (isListenTogetherGuest) 2 else 3,
                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 16.dp),
@@ -385,7 +389,7 @@ fun PlayerMenu(
                 items =
                     buildList {
                         // SARASWATI: Phase 6 Task 3 — "Abhi nahin": keep this song out of queues and radio for 30 days.
-                        add(
+                        if (LocalSongMenuPolicy.visible(SongAction.SNOOZE, isLocal)) add(
                             Material3MenuItemData(
                                 title = { Text(text = stringResource(R.string.snooze_song)) },
                                 description = { Text(text = stringResource(R.string.snooze_song_desc)) },
@@ -467,7 +471,7 @@ fun PlayerMenu(
                         }
                         // Add to Library option
                         val isInLibrary = librarySong?.song?.inLibrary != null
-                        add(
+                        if (LocalSongMenuPolicy.visible(SongAction.ADD_TO_LIBRARY, isLocal)) add(
                             Material3MenuItemData(
                                 title = {
                                     Text(
@@ -533,7 +537,7 @@ fun PlayerMenu(
 
         item { Spacer(modifier = Modifier.height(12.dp)) }
 
-        item {
+        if (LocalSongMenuPolicy.visible(SongAction.DOWNLOAD, isLocal)) item {
             Material3MenuGroup(
                 items =
                     listOf(
