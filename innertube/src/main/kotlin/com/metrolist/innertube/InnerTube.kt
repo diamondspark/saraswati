@@ -5,6 +5,7 @@ import com.metrolist.innertube.models.ReturnYouTubeDislikeResponse
 import com.metrolist.innertube.models.YouTubeClient
 import com.metrolist.innertube.models.YouTubeLocale
 import com.metrolist.innertube.models.response.NextResponse
+import com.metrolist.innertube.saraswati.LocalIdEgressGuard
 import com.metrolist.innertubex.InnerTube as InnerTubeX
 import com.metrolist.innertubex.InnerTubeHttpException
 import com.metrolist.innertubex.models.Context
@@ -179,6 +180,9 @@ class InnerTube(
         HttpClient(OkHttp) {
             // InnerTubeX handles endpoint-specific status validation and transient retries.
             expectSuccess = false
+
+            // SARASWATI: Phase 5 Task 2 — no request may name a song on this phone (`local:<id>`).
+            install(LocalIdEgressGuard)
 
             install(ContentNegotiation) {
                 json(

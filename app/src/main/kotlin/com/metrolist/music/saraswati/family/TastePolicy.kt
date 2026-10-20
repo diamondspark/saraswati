@@ -8,6 +8,8 @@
 // YouTube watch history behind. The Saraswati setting CountSharedPlaysKey turns them on.
 package com.metrolist.music.saraswati.family
 
+import com.metrolist.music.saraswati.localmedia.LocalSongIds
+
 sealed interface PlayContext {
     /** Nothing shared: the person chose this song themselves. */
     data object Solo : PlayContext
@@ -70,11 +72,13 @@ data class PlaybackStatsPlan(
             historyDurationMs: Long,
             historyPaused: Boolean,
             counts: Boolean,
+            mediaId: String? = null,
         ): PlaybackStatsPlan {
             val longEnough = counts && totalPlayTimeMs >= historyDurationMs
             return PlaybackStatsPlan(
                 writeLocalEvent = longEnough && !historyPaused,
-                registerWithYouTube = longEnough,
+                // SARASWATI: Phase 5 Task 2 — a song on this phone counts in local history only; YouTube never hears of it.
+                registerWithYouTube = longEnough && !LocalSongIds.isLocal(mediaId),
             )
         }
     }

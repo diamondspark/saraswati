@@ -4153,6 +4153,8 @@ class MusicService :
                 historyDurationMs = historyDurationMs.toLong(),
                 historyPaused = dataStore.get(PauseListenHistoryKey, false),
                 counts = TastePolicy.counts(playContext, dataStore.get(CountSharedPlaysKey, false)),
+                // SARASWATI: Phase 5 Task 2 — a local song is written to history but never registered with YouTube.
+                mediaId = mediaItem.mediaId,
             )
 
         if (plan.writeLocalEvent) {

@@ -10,6 +10,7 @@ import android.util.LruCache
 import com.metrolist.music.constants.LyricsProviderOrderKey
 import com.metrolist.music.db.entities.LyricsEntity.Companion.LYRICS_NOT_FOUND
 import com.metrolist.music.models.MediaMetadata
+import com.metrolist.music.saraswati.localmedia.LocalSongIds
 import com.metrolist.music.utils.NetworkConnectivityObserver
 import com.metrolist.music.utils.dataStore
 import com.metrolist.music.utils.reportException
@@ -47,6 +48,9 @@ constructor(
 
     suspend fun getLyrics(mediaMetadata: MediaMetadata): LyricsWithProvider {
         currentLyricsJob?.cancel()
+
+        // SARASWATI: Phase 5 Task 2 — a song on this phone is never looked up by any lyrics provider.
+        if (LocalSongIds.isLocal(mediaMetadata.id)) return LyricsWithProvider(LYRICS_NOT_FOUND, PROVIDER_NONE)
 
         val cached = cache.get(mediaMetadata.id)?.firstOrNull()
         if (cached != null) {
@@ -120,6 +124,9 @@ constructor(
         callback: (LyricsResult) -> Unit,
     ) {
         currentLyricsJob?.cancel()
+
+        // SARASWATI: Phase 5 Task 2 — as in getLyrics: nothing about a local song goes to a lyrics provider.
+        if (LocalSongIds.isLocal(mediaId)) return
 
         val cacheKey = "$songArtists-$songTitle".replace(" ", "")
         cache.get(cacheKey)?.let { results ->
