@@ -58,3 +58,25 @@ a5f1be487b92621e6b12b43f44c44024394c5032:security/gitleaks-baseline.json:generic
 a5f1be487b92621e6b12b43f44c44024394c5032:security/gitleaks-baseline.json:generic-api-key:241
 a5f1be487b92621e6b12b43f44c44024394c5032:security/gitleaks-baseline.json:generic-api-key:52
 a5f1be487b92621e6b12b43f44c44024394c5032:security/gitleaks-baseline.json:generic-api-key:94
+
+# Phase 3-4: placeholder TEST_ADMIN_KEY / test token fixtures in worker and app unit tests
+# (not real credentials; the real ADMIN_KEY is set only via wrangler secret put by the owner).
+09b167a78305b03488d5c98b8c1d79e970a350cd:app/src/test/kotlin/com/metrolist/music/saraswati/family/HubClientPhase4Test.kt:generic-api-key:207
+3a56ab947dc25d0350ed02dcf5a8f16987abe1da:worker/test/helpers.ts:generic-api-key:5
+8a1428b1dc553dee01f1dacd88a1308e17792ce4:worker/test/registry.helpers.ts:generic-api-key:10
+fe14aadb3a0656ac1f2b572576388e7f948d60f4:worker/test/sangat.hardening.test.ts:generic-api-key:54
+fe14aadb3a0656ac1f2b572576388e7f948d60f4:worker/test/sangat.hub.test.ts:generic-api-key:22
+b9f967925f11b54f5bfc00ae20400b0bd00d8094:worker/test/sangat.rooms.test.ts:generic-api-key:21
+f3e780fc8f779a3dda918df42dc0c91385094260:app/src/test/kotlin/com/metrolist/music/saraswati/family/FamilyTestSupport.kt:generic-api-key:18
+f3e780fc8f779a3dda918df42dc0c91385094260:app/src/test/kotlin/com/metrolist/music/saraswati/family/PairingLinkTest.kt:generic-api-key:21
+8a1aec1c42f8b597c35ff7149bc9574d053d5b65:worker/test/traces/scenarios.ts:generic-api-key:335
+4980ffaf9c2befe4f4d14ee667177c19bc359c90:worker/test/role.test.ts:generic-api-key:5
+70e34dcdb5be95fa20693ba474f017e3ff132d81:worker/test/adminlimit.test.ts:generic-api-key:5
+1c8e07002cde3e0b411011a8bab4abc4f78a33b1:worker/test/ratelimit.test.ts:generic-api-key:5
+b1aaac29c7c1e587d94591366bad189eea29c93f:worker/test/stations.test.ts:generic-api-key:5
+cf5639c2699ba920df393de140fed708097127ed:worker/test/pairing.test.ts:generic-api-key:5
+b1aaac29c7c1e587d94591366bad189eea29c93f:worker/test/killswitches.test.ts:generic-api-key:5
+cf5639c2699ba920df393de140fed708097127ed:worker/vitest.config.ts:generic-api-key:13
+1c8e07002cde3e0b411011a8bab4abc4f78a33b1:worker/test/health.test.ts:generic-api-key:5
+53351555484bae5e0e365c7d84ed0484c895b5d8:worker/test/pairingstatus.test.ts:generic-api-key:5
+cf5639c2699ba920df393de140fed708097127ed:worker/test/roster.test.ts:generic-api-key:5
