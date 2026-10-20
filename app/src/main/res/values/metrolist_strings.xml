@@ -1341,4 +1341,8 @@
     <string name="local_files_explain_body">Saraswati will look for music files on this phone so you can play them here and in the car. It reads audio files only, never photos or videos. They never leave this phone, except to a Cast speaker you pick. You can switch this off at any time in Privacy settings.</string>
     <string name="local_files_explain_continue">Continue</string>
     <string name="local_songs_cant_join_sangat">Songs on this phone can\'t join Sangat</string>
+    <!-- SARASWATI: Phase 5 Task 6 — the car's two local rows and the first line of On this phone. -->
+    <string name="car_downloaded_title">Downloaded</string>
+    <string name="car_local_title">On this phone</string>
+    <string name="car_local_allow">Allow on your phone</string>
 </resources>

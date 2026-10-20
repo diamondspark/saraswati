@@ -5215,6 +5215,8 @@ class MusicService :
         const val CAR_HOME = "car_home"
         const val CAR_LIBRARY = "car_library"
         const val CAR_STATIONS = "car_stations"
+        // SARASWATI: Phase 5 Task 6 — the car's On this phone folder (songs on this phone).
+        const val CAR_LOCAL = "car_local"
         const val CAR_FAMILY = "car_family"
         const val SEARCH = "search"
         const val SHUFFLE_ACTION = "__shuffle__"
