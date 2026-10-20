@@ -480,7 +480,7 @@ def check_hub_agreement(
     if (host, False) not in nsc_domains:
         violations.append(
             f"hub host mismatch: network_security_config has no exact (includeSubdomains=false) entry for {host}"
-            f" (parsed {len(nsc_domains)} domains; hub-like: {[d for d in nsc_domains if 'workers' in d[0]]})"
+            f" (parsed {len(nsc_domains)} domains; nsc head: {nsc_xml_text[:300]!r})"
         )
 
     allowed = {(entry.get("name"), bool(entry.get("subdomains"))) for entry in egress_allowlist.get("allowed", [])}
