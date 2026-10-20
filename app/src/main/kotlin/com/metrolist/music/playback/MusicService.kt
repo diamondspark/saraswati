@@ -32,6 +32,11 @@ import com.metrolist.music.saraswati.castrelay.WifiAddress
 import com.metrolist.music.saraswati.family.FamilyFeature
 import com.metrolist.music.saraswati.family.PlaybackStatsPlan
 import com.metrolist.music.saraswati.family.TastePolicy
+import com.metrolist.music.saraswati.offline.DefaultOfflinePlayability // SARASWATI: Phase 5 Task 7
+import com.metrolist.music.saraswati.offline.NeverSilentController
+import com.metrolist.music.saraswati.offline.NeverSilentState
+import com.metrolist.music.saraswati.offline.QueuePort
+import com.metrolist.music.saraswati.offline.SkipToPlayable
 import com.metrolist.music.saraswati.security.StartActions
 import com.metrolist.music.utils.safeDataStoreEdit
 import android.net.ConnectivityManager
@@ -595,6 +600,113 @@ class MusicService :
     }
 
     private suspend fun castRelayStoredMimeType(mediaId: String): String? = database.format(mediaId).first()?.mimeType
+
+    // SARASWATI: Phase 5 Task 7 — never silent: skip to what plays without a network when the signal or YouTube
+    // fails. It reads caches and downloads only, so choosing makes no request.
+    private val neverSilentState = NeverSilentState(System::currentTimeMillis)
+
+    // Local songs (Task 2/3 live on another branch): a "local:" id plays only with the audio permission.
+    // Switch to LocalSongIds.isLocal / localAccess() when that branch merges.
+    private val offlinePlayability by lazy {
+        DefaultOfflinePlayability(
+            downloads = { downloadUtil.downloads.value },
+            playerCache = playerCache,
+            contentLength = { id ->
+                database.format(id).first()?.contentLength
+                    ?: ContentMetadata.getContentLength(playerCache.getContentMetadata(id)).takeIf { it > 0L }
+            },
+            isLocal = { it.startsWith("local:") },
+            localGranted = {
+                Build.VERSION.SDK_INT >= 33 &&
+                    checkSelfPermission("android.permission.READ_MEDIA_AUDIO") == android.content.pm.PackageManager.PERMISSION_GRANTED
+            },
+        )
+    }
+
+    private val neverSilentPort =
+        object : QueuePort {
+            override fun playOrderAfterCurrent(): List<Int> {
+                val timeline = player.currentTimeline
+                if (timeline.isEmpty) return emptyList()
+                val shuffle = player.shuffleModeEnabled
+                val order = ArrayList<Int>(timeline.windowCount)
+                var index = timeline.getFirstWindowIndex(shuffle)
+                while (index != C.INDEX_UNSET && order.size < timeline.windowCount) {
+                    order += index
+                    index = timeline.getNextWindowIndex(index, Player.REPEAT_MODE_OFF, shuffle)
+                }
+                return SkipToPlayable.orderAfter(order, player.currentMediaItemIndex, player.repeatMode == REPEAT_MODE_ALL)
+            }
+
+            override fun idAt(index: Int): String = player.getMediaItemAt(index).mediaId
+
+            override fun currentId(): String? = player.currentMediaItem?.mediaId
+
+            override fun jumpTo(index: Int) {
+                player.seekTo(index, C.TIME_UNSET)
+                player.prepare()
+                player.play()
+            }
+
+            override suspend fun insertAfterCurrent(ids: List<String>): Int? {
+                val items =
+                    withContext(Dispatchers.IO) { ids.mapNotNull { id -> database.song(id).first()?.toMediaItem() } }
+                if (items.isEmpty()) return null
+                val at = player.currentMediaItemIndex + 1
+                player.addMediaItems(at, items)
+                return at
+            }
+        }
+
+    private val neverSilent by lazy {
+        NeverSilentController(
+            port = neverSilentPort,
+            playability = offlinePlayability,
+            state = neverSilentState,
+            bridgePool = {
+                withContext(Dispatchers.IO) {
+                    downloadUtil.downloads.value
+                        .filterValues { it.state == androidx.media3.exoplayer.offline.Download.STATE_COMPLETED }
+                        .keys
+                        .toList()
+                }
+            },
+            isCasting = { castConnectionHandler?.isCasting?.value == true },
+            isSangatGuest = { listenTogetherManager.isInRoom && !listenTogetherManager.isHost },
+            inRoom = { listenTogetherManager.isInRoom },
+        )
+    }
+
+    private fun neverSilentOnline(): Boolean = connectivityObserver.networkStatus.value
+
+    // Runs [decide] on the main thread; false (or a failure) means upstream's own handling runs.
+    private fun launchNeverSilent(
+        decide: suspend () -> Boolean,
+        otherwise: () -> Unit = {},
+    ) {
+        scope.launch {
+            val handled =
+                try {
+                    decide()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Timber.tag(TAG).w("Never-silent check failed type=${e::class.simpleName}")
+                    false
+                }
+            if (!handled) otherwise()
+        }
+    }
+
+    override fun onIsPlayingChanged(isPlaying: Boolean) {
+        if (!isPlaying) return
+        val id = player.currentMediaItem?.mediaId ?: return
+        scope.launch {
+            if (!withContext(Dispatchers.IO) { offlinePlayability.isPlayableOffline(id) }) {
+                neverSilentState.onNetworkPlaybackStarted()
+            }
+        }
+    }
 
     private val screenStateReceiver =
         object : BroadcastReceiver() {
@@ -2602,6 +2714,13 @@ class MusicService :
             }
         }
         lastTransitionedMediaId = mediaItem?.mediaId
+        // SARASWATI: Phase 5 Task 7 — a streamed song while the signal is gone (or YouTube is failing) is skipped at once.
+        // Only while playing: a queue restored paused at launch must not start by itself.
+        mediaItem?.mediaId?.let { id ->
+            if (player.playWhenReady) {
+                launchNeverSilent(decide = { neverSilent.onTransition(id, neverSilentOnline()) })
+            }
+        }
         initialBufferRecoveryJob?.cancel()
         initialBufferRecoveryJob = null
         initialBufferRecoveryAttemptedMediaId = null
@@ -3165,7 +3284,8 @@ class MusicService :
 
             !isNetworkConnected.value -> {
                 Timber.tag(TAG).d("No internet connection, waiting for connection")
-                waitOnNetworkError()
+                // SARASWATI: Phase 5 Task 7 — a song that plays offline is better than a wait; upstream's wait runs if there is none.
+                launchNeverSilent(decide = { neverSilent.onOffline() }, otherwise = ::waitOnNetworkError)
                 return
             }
 
@@ -3523,6 +3643,19 @@ class MusicService :
      * Handles final failure when all recovery attempts have been exhausted.
      */
     private fun handleFinalFailure() {
+        // SARASWATI: Phase 5 Task 7 — after repeated failures, or none of them online, jump to what plays offline.
+        val failedId = player.currentMediaItem?.mediaId
+        if (failedId == null) {
+            handleFinalFailureUpstream()
+            return
+        }
+        launchNeverSilent(
+            decide = { neverSilent.onFinalFailure(failedId, neverSilentOnline()) },
+            otherwise = ::handleFinalFailureUpstream,
+        )
+    }
+
+    private fun handleFinalFailureUpstream() {
         val autoSkipOnError = dataStore.get(AutoSkipNextOnErrorKey, false)
         val autoplay = dataStore.get(AutoplayKey, true)
         val canAdvance = player.hasNextMediaItem()
