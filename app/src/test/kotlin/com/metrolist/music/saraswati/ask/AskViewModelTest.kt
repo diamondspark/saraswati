@@ -45,6 +45,7 @@ class AskViewModelTest {
         hub = FakeAskHub()
         familyHub = FakeHub()
         gate = askGate(scope, askDataStore(scope, folder.newFile("gate.preferences_pb")), familyHub)
+        runBlocking { gate.refresh() }
         actions = FakeAskActions()
         stations = FakeStationsCache(listOf(BHAJAN_STATION))
         mixStore = askMixStore(scope, askDataStore(scope, folder.newFile("mix.preferences_pb")))

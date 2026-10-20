@@ -172,6 +172,16 @@ class RadioTunerTest {
     }
 
     @Test
+    fun `with the unconfirmed api a successful tune publishes no chips`() = runBlocking {
+        val player = FakePlayer(index = 0, ids = listOf("a"))
+        val h = Harness(player, Result.success(radio("x")))
+
+        assertEquals(TuneResult.Tuned, h.tuner.select(chip()))
+
+        assertTrue(h.state.chips.value.isEmpty())
+    }
+
+    @Test
     fun `the unconfirmed api yields no chips`() {
         assertTrue(UnconfirmedRadioTuningApi.chips(radio("x")).isEmpty())
     }

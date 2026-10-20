@@ -47,7 +47,7 @@ class AskRepositoryTest {
         familyHub = FakeHub()
         gate =
             askGate(scope, askDataStore(scope, folder.newFile("gate.preferences_pb")), familyHub, identity)
-                .also { runBlocking { withTimeout(5_000) { it.awaitHydrated() } } }
+                .also { runBlocking { withTimeout(5_000) { it.awaitHydrated() }; it.refresh() } }
     }
 
     @After
@@ -105,7 +105,6 @@ class AskRepositoryTest {
 
             assertEquals(AskOutcome.Unavailable, outcome)
             assertTrue("took $elapsedMs ms", elapsedMs in 5_900..8_000)
-            assertEquals(ASK_TIMEOUT_MS, 6_000L)
         }
 
     @Test

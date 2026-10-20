@@ -66,6 +66,7 @@ class SaralAskVoiceTest {
         playback = FakePlayback()
         askHub = FakeAskHub()
         gate = askGate(scope, askDataStore(scope, folder.newFile("gate.preferences_pb")), hub, FixedIdentity())
+        runBlocking { gate.refresh() }
         mixStore = askMixStore(scope, askDataStore(scope, folder.newFile("mix.preferences_pb")))
     }
 

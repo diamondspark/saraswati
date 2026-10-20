@@ -35,6 +35,13 @@ class FamilyScreensSourceTest {
                     "var name by rememberSaveable { mutableStateOf(Build.MODEL.orEmpty()) }",
                     "var role by rememberSaveable { mutableStateOf<DeviceRole?>(null) }",
                 ),
+            // SARASWATI: Phase 6 fix (DEF-M13) — the family member whose shared list is open in the recap. A display
+            // name chosen by tapping, not a credential.
+            "recap/FamilyRecapCard.kt" to
+                setOf(
+                    "import androidx.compose.runtime.saveable.rememberSaveable",
+                    "var selected by rememberSaveable { mutableStateOf<String?>(null) }",
+                ),
         )
 
     /**

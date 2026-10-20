@@ -21,6 +21,7 @@ class LocalSongMenuPolicyTest {
             SongAction.ADD_TO_LIBRARY,
             SongAction.SUGGEST_TO_HOST,
             SongAction.SNOOZE,
+            SongAction.FAMILY_PLAYLIST,
         ).forEach { assertFalse(it.name, LocalSongMenuPolicy.visible(it, isLocal = true)) }
     }
 

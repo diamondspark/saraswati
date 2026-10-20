@@ -30,7 +30,7 @@ class SmartShuffleTest {
     }
 
     @Test
-    fun `the current song stays first and keeps playing`() {
+    fun `the current song stays first in the smart order`() {
         val asBase = SmartShuffle.order(currentIndex = 4, baseCount = 10, pickStart = 10, pickCount = 3, random = Random(3))
         assertEquals(4, asBase[0])
 
@@ -40,7 +40,7 @@ class SmartShuffleTest {
     }
 
     @Test
-    fun `picks already in the queue or snoozed are skipped`() {
+    fun `picks already in the queue or snoozed are left out of the pool`() {
         val candidates = listOf(song("a"), song("b"), song("c"), song("d"), song("e"))
 
         val picked = SmartShuffle.pick(candidates, queueIds = setOf("a"), snoozed = setOf("b"), count = 5)
@@ -59,7 +59,7 @@ class SmartShuffleTest {
     }
 
     @Test
-    fun `a queue of three or fewer songs gets no picks`() {
+    fun `a queue of three or fewer songs has no pick count`() {
         assertEquals(0, SmartShuffle.pickCount(0))
         assertEquals(0, SmartShuffle.pickCount(1))
         assertEquals(0, SmartShuffle.pickCount(3))

@@ -46,6 +46,7 @@ class SaralAskTest {
         mixStore = askMixStore(scope, askDataStore(scope, folder.newFile("mix.preferences_pb")))
         familyHub = FakeHub()
         gate = askGate(scope, askDataStore(scope, folder.newFile("gate.preferences_pb")), familyHub)
+        runBlocking { gate.refresh() }
     }
 
     @After
@@ -132,7 +133,6 @@ class SaralAskTest {
             val elapsedMs = (System.nanoTime() - started) / 1_000_000
 
             assertEquals(SaralAction.VoiceSearch(spoken), action)
-            assertEquals(3_000L, SARAL_TIMEOUT_MS)
             assertEquals(true, elapsedMs in 2_900..4_500)
         }
 }

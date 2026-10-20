@@ -97,6 +97,7 @@ class FamilyRecapViewModelTest {
     fun `playing the anthem starts its radio`() =
         runBlocking {
             recordTwoLists()
+            features.value = mapOf(FamilyFeature.PARIVAAR_MIX to true)
             val vm = viewModel()
             withTimeout(5_000) { vm.recap.first { it != null } }
 
