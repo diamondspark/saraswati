@@ -3,6 +3,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { RoomStateSchema, type RoomState } from "../src/gen/listentogether_pb";
 import { Sangat } from "../src/sangat/Sangat";
+import { sha256Hex } from "../src/secrets";
 import {
   closeAllClients,
   createRoom,
@@ -124,6 +125,33 @@ describe("rooms", () => {
     for (const ch of code) expect(ROOM_CODE_ALPHABET).toContain(ch);
     expect(token).toMatch(/^[0-9a-f]{64}$/);
     expect(userId).toMatch(/^user_\d+_\d{1,4}$/);
+  });
+
+  it("stores create_room's and approve_join's session tokens only as their SHA-256, never in the clear", async () => {
+    const hub = hubStub();
+    const [a, b] = [await seedDevice(hub, "a"), await seedDevice(hub, "b")];
+    const host = await createRoom(hub, a, "Asha");
+    const bharat = await joinAndApprove(hub, host.client, host.code, b, "Bharat");
+    await host.client.next("user_joined");
+
+    const rows = await sql(hub, (db) =>
+      db.exec("SELECT userId, sessionTokenHash FROM sangat_members ORDER BY rowid").toArray(),
+    );
+    expect(rows).toEqual([
+      { userId: host.userId, sessionTokenHash: await sha256Hex(host.token) },
+      { userId: bharat.userId, sessionTokenHash: await sha256Hex(bharat.token) },
+    ]);
+    const text = JSON.stringify(rows);
+    expect(text).not.toContain(host.token);
+    expect(text).not.toContain(bharat.token);
+
+    // The real token still works to reconnect; its own hash does not.
+    const back = await SangatClient.connect(hub, a.token);
+    await back.send("reconnect", { session_token: host.token });
+    expect((await back.next("reconnected")).payload.user_id).toBe(host.userId);
+    const thief = await SangatClient.connect(hub, b.token);
+    await thief.send("reconnect", { session_token: await sha256Hex(bharat.token) });
+    expect((await thief.next("error")).payload.code).toBe("session_not_found");
   });
 
   it("create_room validates the username and refuses a second room on the same socket", async () => {
@@ -386,7 +414,7 @@ describe("rooms", () => {
     await sql(hub, (db) => {
       for (let i = 0; i < 99; i++) {
         db.exec(
-          "INSERT INTO sangat_members (userId, roomCode, deviceId, username, sessionToken, isHost, connected, disconnectedAt) VALUES (?, ?, ?, ?, ?, 0, 1, NULL)",
+          "INSERT INTO sangat_members (userId, roomCode, deviceId, username, sessionTokenHash, isHost, connected, disconnectedAt) VALUES (?, ?, ?, ?, ?, 0, 1, NULL)",
           `filler_${i}`,
           host.code,
           `filler-device-${i}`,
@@ -526,8 +554,17 @@ describe("rooms", () => {
     expect(room?.state.users).toHaveLength(1);
     const members = await sql(hub, (db) => db.exec("SELECT * FROM sangat_members").toArray());
     expect(members).toMatchObject([
-      { userId: host.userId, roomCode: host.code, deviceId: a.deviceId, username: "Asha", sessionToken: host.token, isHost: 1, connected: 1 },
+      {
+        userId: host.userId,
+        roomCode: host.code,
+        deviceId: a.deviceId,
+        username: "Asha",
+        sessionTokenHash: await sha256Hex(host.token),
+        isHost: 1,
+        connected: 1,
+      },
     ]);
+    expect(members[0].sessionTokenHash).not.toBe(host.token);
 
     const bharat = await SangatClient.connect(hub, b.token);
     await bharat.send("join_room", { room_code: host.code, username: "Bharat" });

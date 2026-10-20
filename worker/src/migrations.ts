@@ -19,7 +19,13 @@ import { sha256Hex } from "./secrets";
 //       its roster keeps every row.
 //   v4  Ask Saraswati's daily counters (`ask_usage`). Counts only, never the
 //       question. Nothing else changes, so a v3 hub keeps every row.
-export const LATEST_SCHEMA_VERSION = 4;
+//   v5  sangat_members.sessionToken renamed to sessionTokenHash, the same way
+//       the roster's session token was hashed at v2. No value migration: a
+//       Sangat room is live-only state, deleted on leave, expiry, revoke and
+//       the kill switch, so there is nothing worth hashing in place. A seat
+//       mid-reconnect-grace at the exact moment of this deploy just rejoins,
+//       as it would if its grace had simply run out.
+export const LATEST_SCHEMA_VERSION = 5;
 
 type Row = Record<string, SqlStorageValue>;
 
@@ -237,6 +243,31 @@ function applyV4(storage: DurableObjectStorage): void {
 }
 
 /**
+ * Idempotent, like v1, v3 and v4. Renames sangat_members.sessionToken to
+ * sessionTokenHash, the way v2 renamed the roster's. A hub created fresh in
+ * this same migrate() call already has the new name from createSangatTables,
+ * so the rename is skipped for it; an existing hub still has the old column.
+ */
+function applyV5(storage: DurableObjectStorage): void {
+  const sql = storage.sql;
+  storage.transactionSync(() => {
+    // Checked again inside the transaction that does the work.
+    if (readVersion(sql) !== 4) {
+      return;
+    }
+
+    const columns = sql
+      .exec<{ name: string } & Row>("PRAGMA table_info(sangat_members)")
+      .toArray()
+      .map((row) => row.name);
+    if (columns.includes("sessionToken")) {
+      sql.exec("ALTER TABLE sangat_members RENAME COLUMN sessionToken TO sessionTokenHash");
+    }
+    writeVersion(sql, 5);
+  });
+}
+
+/**
  * Brings the database up to LATEST_SCHEMA_VERSION. Safe to call on every
  * start: a database already at (or beyond) the latest version is not touched.
  */
@@ -253,5 +284,8 @@ export async function migrate(storage: DurableObjectStorage): Promise<void> {
   }
   if (version < 4) {
     applyV4(storage);
+  }
+  if (version < 5) {
+    applyV5(storage);
   }
 }

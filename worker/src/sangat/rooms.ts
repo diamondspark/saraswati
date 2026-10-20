@@ -20,7 +20,7 @@ import {
   UserJoinedPayloadSchema,
   UserInfoSchema,
 } from "../gen/listentogether_pb";
-import { newRoomCode, newSessionToken } from "./ids";
+import { newRoomCode } from "./ids";
 import {
   MAX_CLIENTS_PER_ROOM,
   MAX_PENDING_JOINS,
@@ -52,7 +52,7 @@ const ROOM_CODE_ATTEMPTS = 100;
 const KICK_REASON_MAX = 200;
 const DEFAULT_KICK_REASON = "You have been kicked from the room";
 
-export const handleCreateRoom: Handler = (rt, conn, payload) => {
+export const handleCreateRoom: Handler = (rt, conn, payload, pre) => {
   const { store } = rt;
   const me = conn.att.userId;
   const p = decode(CreateRoomPayloadSchema, payload);
@@ -84,8 +84,11 @@ export const handleCreateRoom: Handler = (rt, conn, payload) => {
     return [fail(me, "room_limit_reached", "This device is hosting as many rooms as it may")];
   }
 
+  // Sangat.prepareHash mints and hashes this before the transaction starts;
+  // hashing awaits, and the transaction cannot.
+  if (!pre.newToken) return [fail(me, "server_error", "Internal error")];
   const now = rt.now();
-  const sessionToken = newSessionToken();
+  const sessionToken = pre.newToken.token;
   const room: Room = {
     code,
     hostUserId: me,
@@ -112,7 +115,7 @@ export const handleCreateRoom: Handler = (rt, conn, payload) => {
     roomCode: code,
     deviceId: conn.att.deviceId,
     username,
-    sessionToken,
+    sessionTokenHash: pre.newToken.hash,
     isHost: true,
     connected: true,
     disconnectedAt: null,
@@ -156,7 +159,7 @@ export const handleJoinRoom: Handler = (rt, conn, payload) => {
   return [send(room.hostUserId, "join_request", JoinRequestPayloadSchema, { userId: me, username })];
 };
 
-export const handleApproveJoin: Handler = (rt, conn, payload) => {
+export const handleApproveJoin: Handler = (rt, conn, payload, pre) => {
   const { store } = rt;
   const me = conn.att.userId;
   const p = decode(ApproveJoinPayloadSchema, payload);
@@ -171,6 +174,9 @@ export const handleApproveJoin: Handler = (rt, conn, payload) => {
   const pending = store.pendingJoin(room.code, p.userId);
   if (!pending) return [fail(me, "join_request_not_found", "Join request not found")];
   if (store.connectedCount(room.code) >= MAX_CLIENTS_PER_ROOM) return [fail(me, "room_full", "Room is full")];
+  // Sangat.prepareHash mints and hashes this before the transaction starts;
+  // hashing awaits, and the transaction cannot.
+  if (!pre.newToken) return [fail(me, "server_error", "Internal error")];
 
   const now = rt.now();
   const member = {
@@ -178,7 +184,7 @@ export const handleApproveJoin: Handler = (rt, conn, payload) => {
     roomCode: room.code,
     deviceId: pending.deviceId,
     username: pending.username,
-    sessionToken: newSessionToken(),
+    sessionTokenHash: pre.newToken.hash,
     isHost: false,
     connected: true,
     disconnectedAt: null,
@@ -191,7 +197,7 @@ export const handleApproveJoin: Handler = (rt, conn, payload) => {
   const approval = send(member.userId, "join_approved", JoinApprovedPayloadSchema, {
     roomCode: room.code,
     userId: member.userId,
-    sessionToken: member.sessionToken,
+    sessionToken: pre.newToken.token,
     state: liveState(room.state, now),
   });
   const joined = message(UserJoinedPayloadSchema, { userId: member.userId, username: member.username });

@@ -10,6 +10,7 @@ import { EnvelopeSchema, PingPayloadSchema, RoomStateSchema, type RoomState } fr
 import { IDLE_TIMEOUT_MS } from "../src/sangat/limits";
 import { createSangatTables } from "../src/sangat/schema";
 import { Store } from "../src/sangat/store";
+import { sha256Hex } from "../src/secrets";
 import {
   closeAllClients,
   createRoom,
@@ -113,7 +114,7 @@ describe("disconnects", () => {
       username: "Bharat",
     });
     const row = await member(hub, bharat.userId);
-    expect(row).toMatchObject({ connected: 0, sessionToken: bharat.token });
+    expect(row).toMatchObject({ connected: 0, sessionTokenHash: await sha256Hex(bharat.token) });
     expect(Math.abs((row?.disconnectedAt as number) - Date.now())).toBeLessThan(5000);
     const room = await readRoom(hub, host.code);
     expect(room?.state.users.map((u) => [u.username, u.isConnected])).toEqual([

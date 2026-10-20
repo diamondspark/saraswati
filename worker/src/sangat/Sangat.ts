@@ -13,12 +13,20 @@
 // keeps room changes from interleaving, and means only one decode is in flight
 // against the 128 MB limit. A handler itself is synchronous: it reads and
 // writes storage inside one transaction and returns the messages to send.
+//
+// A few handlers need the SHA-256 of a session token (create_room and
+// approve_join mint one, reconnect is handed one), and hashing awaits, so
+// prepareHash computes it between decode and the transaction, in the same
+// promise chain. The input gate is already open from decoding by then; the
+// handler is handed the socket's attachment again afterward, exactly as after
+// decode, so a device revoked while the hash was computing is caught the same
+// way a revoke mid-decode is.
 
 import { create, toBinary } from "@bufbuild/protobuf";
-import { EnvelopeSchema, ErrorPayloadSchema } from "../gen/listentogether_pb";
+import { EnvelopeSchema, ErrorPayloadSchema, ReconnectPayloadSchema } from "../gen/listentogether_pb";
 import { CodecError, decodeEnvelope, encodeEnvelope } from "./codec";
 import { handleClientCapabilities, handlePing } from "./connection";
-import { newUserId } from "./ids";
+import { newSessionToken, newUserId } from "./ids";
 import { disconnectOrphans, disconnectUser, dueRooms, handleReconnect, sweepRoom } from "./lifecycle";
 import {
   ALARM_RETRY_MS,
@@ -36,7 +44,7 @@ import {
 } from "./limits";
 import { floodedTooLong, idleDeadline, recordMessage } from "./liveness";
 import { handleBufferReady, handlePlaybackAction, handleRequestSync } from "./playback";
-import { fail, hostIsConnected, message, removeFromRoom } from "./roomOps";
+import { decode, fail, hostIsConnected, message, removeFromRoom } from "./roomOps";
 import {
   handleApproveJoin,
   handleCreateRoom,
@@ -48,7 +56,8 @@ import {
 } from "./rooms";
 import { Store, type Room } from "./store";
 import { handleApproveSuggestion, handleRejectSuggestion, handleSuggestTrack } from "./suggestions";
-import type { Attachment, Conn, Handler, Out, Runtime } from "./types";
+import type { Attachment, Conn, Handler, Out, PreHashed, Runtime } from "./types";
+import { sha256Hex } from "../secrets";
 
 export type LiveRoom = {
   roomCode: string;
@@ -453,8 +462,16 @@ export class Sangat {
       if (!handler) {
         outs = [fail(me, "unknown_message_type", `Unknown message type: ${decoded.type}`)];
       } else {
+        const pre = await this.prepareHash(decoded.type, decoded.payload);
+        // The hash may have taken a moment; the socket may have been closed
+        // meanwhile (revoked device, takeover, switched off), exactly as after
+        // the decode above.
+        if (this.attachmentOf(ws)?.closed) {
+          this.dropClosed(ws);
+          return;
+        }
         try {
-          outs = this.store.transaction(() => handler(this.runtime, conn, decoded.payload));
+          outs = this.store.transaction(() => handler(this.runtime, conn, decoded.payload, pre));
           committed = true;
         } catch (error) {
           console.error("sangat: handler failed", decoded.type, errorName(error));
@@ -470,6 +487,25 @@ export class Sangat {
     if (conn.dirty) ws.serializeAttachment(conn.att);
     await this.flush(outs);
     await this.scheduleAlarm();
+  }
+
+  /**
+   * The SHA-256 a handler needs but cannot compute itself (hashing awaits, and
+   * the handler's transaction cannot): a freshly minted token's hash for
+   * create_room and approve_join, or the hash of the token a reconnect
+   * presented. Empty for every other message type.
+   */
+  private async prepareHash(type: string, payload: Uint8Array): Promise<PreHashed> {
+    if (type === "create_room" || type === "approve_join") {
+      const token = newSessionToken();
+      return { newToken: { token, hash: await sha256Hex(token) } };
+    }
+    if (type === "reconnect") {
+      const p = decode(ReconnectPayloadSchema, payload);
+      if (!p || p.sessionToken === "") return {};
+      return { presentedTokenHash: await sha256Hex(p.sessionToken) };
+    }
+    return {};
   }
 
   private async decode(

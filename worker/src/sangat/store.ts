@@ -30,7 +30,7 @@ export interface Member {
   roomCode: string;
   deviceId: string;
   username: string;
-  sessionToken: string;
+  sessionTokenHash: string;
   isHost: boolean;
   connected: boolean;
   disconnectedAt: number | null;
@@ -68,7 +68,7 @@ interface MemberRow extends Record<string, SqlStorageValue> {
   roomCode: string;
   deviceId: string;
   username: string;
-  sessionToken: string;
+  sessionTokenHash: string;
   isHost: number;
   connected: number;
   disconnectedAt: number | null;
@@ -106,7 +106,7 @@ const toMember = (row: MemberRow): Member => ({
   roomCode: row.roomCode,
   deviceId: row.deviceId,
   username: row.username,
-  sessionToken: row.sessionToken,
+  sessionTokenHash: row.sessionTokenHash,
   isHost: row.isHost !== 0,
   connected: row.connected !== 0,
   disconnectedAt: row.disconnectedAt,
@@ -274,9 +274,9 @@ export class Store {
     return row ? toMember(row) : null;
   }
 
-  memberByToken(sessionToken: string): Member | null {
+  memberByTokenHash(sessionTokenHash: string): Member | null {
     const row = this.sql
-      .exec<MemberRow>("SELECT * FROM sangat_members WHERE sessionToken = ?", sessionToken)
+      .exec<MemberRow>("SELECT * FROM sangat_members WHERE sessionTokenHash = ?", sessionTokenHash)
       .toArray()[0];
     return row ? toMember(row) : null;
   }
@@ -348,13 +348,13 @@ export class Store {
 
   insertMember(member: Member): void {
     this.sql.exec(
-      `INSERT INTO sangat_members (userId, roomCode, deviceId, username, sessionToken, isHost, connected, disconnectedAt)
+      `INSERT INTO sangat_members (userId, roomCode, deviceId, username, sessionTokenHash, isHost, connected, disconnectedAt)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       member.userId,
       member.roomCode,
       member.deviceId,
       member.username,
-      member.sessionToken,
+      member.sessionTokenHash,
       member.isHost ? 1 : 0,
       member.connected ? 1 : 0,
       member.disconnectedAt,
