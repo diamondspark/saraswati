@@ -589,7 +589,7 @@ describe("transfer_host", () => {
     expect((await drain(host.client, 50)).map((f) => f.type)).not.toContain("join_request");
   });
 
-  it("goes through setHost: car mode belongs to the old host's phone and is switched off", async () => {
+  it("is refused in a car room: car mode and the host stay with the car phone", async () => {
     const hub = hubStub();
     const { devices, host, guests } = await openFamily(hub, ["a", "b"]);
     const [bharat] = guests;
@@ -599,9 +599,11 @@ describe("transfer_host", () => {
     expect((await readRoom(hub, host.code)).carMode).toBe(1);
 
     await host.client.send("transfer_host", { new_host_id: bharat.userId });
-    await bharat.client.next("host_changed");
+    expect((await host.client.next("error")).payload.code).toBe("not_allowed");
 
-    expect((await readRoom(hub, host.code)).carMode).toBe(0);
+    const room = await readRoom(hub, host.code);
+    expect(room.carMode).toBe(1);
+    expect(room.hostUserId).toBe(host.userId);
   });
 
   it("answers cannot_transfer_to_self, user_not_found, missing_user_id and not_host", async () => {

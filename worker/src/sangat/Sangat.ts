@@ -58,7 +58,18 @@ export type LiveRoom = {
   memberCount: number;
   /** Epoch milliseconds. */
   startedAt: number;
+  /** The song on now, for display only: no id, URL or thumbnail leaves with it. Null before the first song. */
+  nowPlaying: { title: string; artist: string } | null;
 };
+
+const NOW_PLAYING_TITLE_MAX = 100;
+const NOW_PLAYING_ARTIST_MAX = 60;
+
+function nowPlayingOf(room: Room): LiveRoom["nowPlaying"] {
+  const track = room.state.currentTrack;
+  if (!track || track.title === "") return null;
+  return { title: track.title.slice(0, NOW_PLAYING_TITLE_MAX), artist: track.artist.slice(0, NOW_PLAYING_ARTIST_MAX) };
+}
 
 const HANDLERS = new Map<string, Handler>([
   ["create_room", handleCreateRoom],
@@ -290,6 +301,7 @@ export class Sangat {
       carMode: room.carMode,
       memberCount: this.store.connectedCount(room.code),
       startedAt: room.createdAt,
+      nowPlaying: nowPlayingOf(room),
     };
   }
 

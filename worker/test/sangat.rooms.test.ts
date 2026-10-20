@@ -582,6 +582,7 @@ describe("Sangat methods the hub routes call", () => {
         carMode: false,
         memberCount: 2,
         startedAt: expect.any(Number),
+        nowPlaying: null,
       },
     ]);
   });

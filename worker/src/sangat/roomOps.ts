@@ -6,6 +6,7 @@ import { clone, create, fromBinary, toBinary, type DescMessage, type MessageInit
 import {
   ErrorPayloadSchema,
   JoinRejectedPayloadSchema,
+  KickedPayloadSchema,
   RoomStateSchema,
   UserInfoSchema,
   HostChangedPayloadSchema,
@@ -171,6 +172,18 @@ export function removeFromRoom(store: Store, room: Room, member: Member, now: nu
   room.state.users = room.state.users.filter((u) => u.userId !== member.userId);
 
   if (store.memberCount(room.code) === 0) return emptyRoom(store, room, now);
+
+  if (wasHost && room.carMode) {
+    // A car room's guests are remote controllers: none can play for the room, so it ends with its host.
+    const ended = message(KickedPayloadSchema, { reason: "Sangat in the car has ended" });
+    const outs: Out[] = connectedIds(store, room.code).map((to) => ({ to, type: "kicked", payload: ended }));
+    for (const m of store.members(room.code)) {
+      store.deleteMember(m.userId);
+      store.deleteSuggestionsOfUser(m.userId);
+    }
+    room.state.users = [];
+    return [...outs, ...emptyRoom(store, room, now)];
+  }
 
   let newHost: Member | null = null;
   if (wasHost) {

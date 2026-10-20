@@ -265,6 +265,7 @@ export const handleTransferHost: Handler = (rt, conn, payload) => {
   if (!current) return [fail(me, "not_in_room", "You are not in a room")];
   const { room } = current;
   if (!isActiveHost(room, me)) return [fail(me, "not_host", "Only the host can transfer ownership")];
+  if (room.carMode) return [fail(me, "not_allowed", "The car's phone stays the host of a Sangat in the car")];
   if (p.newHostId === me) return [fail(me, "cannot_transfer_to_self", "You are already the host")];
   const target = connectedMemberOf(store, room.code, p.newHostId);
   if (!target) return [fail(me, "user_not_found", "Target user not found in room")];
