@@ -156,7 +156,6 @@
     <string name="integrations">Intégrations</string>
     <string name="username">Nom d\'utilisateur</string>
     <string name="password">Mot de passe</string>
-    <string name="lastfm_integration">Intégration Last.fm</string>
     <string name="enable_scrobbling">Activer le scrobbling</string>
     <string name="lastfm_now_playing">Envoyer le statut « En cours de lecture »</string>
     <string name="scrobbling_configuration">Configuration du scrobbling</string>
@@ -873,7 +872,6 @@
     <string name="enable_zemer_desc">Paroles de musique juive</string>
     <string name="update_available_message">Metrolist %s est prêt à être téléchargé.</string>
     <string name="update_action">Mettre à jour</string>
-    <string name="discord_integration">Intégration à Discord</string>
     <string name="enable_discord_rpc">Activer la présence enrichie</string>
     <string name="force_bottom_navbar">Forcer l\'affichage de la barre de navigation inférieure</string>
 </resources>

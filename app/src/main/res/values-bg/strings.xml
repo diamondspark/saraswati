@@ -269,7 +269,6 @@
     <string name="hide_explicit">Скрий нецензурно съдържание</string>
     <string name="backup_create_success">Архивирането е създадено успешно</string>
     <string name="restore_failed">Неуспешно възстановяване на резервно копие</string>
-    <string name="discord_integration">Discord интеграция</string>
     <string name="dismiss">Отхвърли</string>
     <string name="options">Опции</string>
     <string name="preview">Преглед</string>

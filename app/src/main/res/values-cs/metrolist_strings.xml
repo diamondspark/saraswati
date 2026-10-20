@@ -158,7 +158,6 @@
     <string name="integrations">Integrace</string>
     <string name="username">Uživatelské jméno</string>
     <string name="password">Heslo</string>
-    <string name="lastfm_integration">Integrace Last.fm</string>
     <string name="enable_scrobbling">Povolit scrobbling</string>
     <string name="lastfm_now_playing">Odesílat stav Právě hraje</string>
     <string name="scrobbling_configuration">Nastavení scrobblingu</string>
@@ -879,6 +878,5 @@
     <string name="playlist_created_locally">Synchronizace s YouTube selhala. Playlist byl vytvořen lokálně.</string>
     <string name="update_available_message">Metrolist %s je připraven ke stažení.</string>
     <string name="update_action">Aktualizovat</string>
-    <string name="discord_integration">Integrace Discordu</string>
     <string name="enable_discord_rpc">Povolit stav na Discordu</string>
 </resources>

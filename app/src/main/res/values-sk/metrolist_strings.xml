@@ -159,7 +159,6 @@
     <string name="integrations">Integrácie</string>
     <string name="username">Používateľské meno</string>
     <string name="password">Heslo</string>
-    <string name="lastfm_integration">Integrácia s Last.fm</string>
     <string name="enable_scrobbling">Povoliť scrobbling</string>
     <string name="lastfm_now_playing">Odoslať Práve sa prehráva</string>
     <string name="scrobbling_configuration">Konfigurácia scrobblingu</string>

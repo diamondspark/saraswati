@@ -259,7 +259,6 @@
     <string name="integrations">ইন্টিগ্রেশন</string>
     <string name="username">ব্যবহারকারীর নাম</string>
     <string name="password">পাসওয়ার্ড</string>
-    <string name="lastfm_integration">Last.fm ইন্টিগ্রেশন</string>
     <string name="enable_scrobbling">Scrobbling চালু করুন</string>
     <string name="lastfm_now_playing">Now Playing স্ট্যাটাস পাঠান</string>
     <string name="last_fm_send_likes">পছন্দ ও অপছন্দ সিঙ্ক করুন</string>

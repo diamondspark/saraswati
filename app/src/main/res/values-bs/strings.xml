@@ -79,7 +79,6 @@
     <string name="backup_create_success">Rezervna kopija je uspješno sagrađena</string>
     <string name="backup_create_failed">Nije moguće napraviti rezervnu kopiju</string>
     <string name="restore_failed">Neuspješan povratak rezervne kopije</string>
-    <string name="discord_integration">Integracija sa Discord-om</string>
     <string name="dismiss">Odbaci</string>
     <string name="home">Početna</string>
     <string name="undo">Vrati</string>

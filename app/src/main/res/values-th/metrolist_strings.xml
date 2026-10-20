@@ -198,7 +198,6 @@
     <string name="integrations">การเชื่อมต่อบริการ</string>
     <string name="username">ชื่อผู้ใช้</string>
     <string name="password">รหัสผ่าน</string>
-    <string name="lastfm_integration">การเชื่อมต่อ Last.fm</string>
     <string name="enable_scrobbling">เปิดใช้งาน Scrobbling</string>
     <string name="lastfm_now_playing">ส่งสถานะกำลังเล่น</string>
     <string name="last_fm_send_likes">ส่งสถานะถูกใจและยกเลิกถูกใจ</string>

@@ -152,7 +152,6 @@
     <string name="integrations">Интеграции</string>
     <string name="username">Потребителско име</string>
     <string name="password">Парола</string>
-    <string name="lastfm_integration">Интеграция с Last.fm</string>
     <string name="enable_scrobbling">Активиране на скробълинг</string>
     <string name="lastfm_now_playing">Изпращане на данни за текущата песен</string>
     <string name="scrobbling_configuration">Конфигурация на скробълинга</string>

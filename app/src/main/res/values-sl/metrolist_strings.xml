@@ -166,7 +166,6 @@
     <string name="integrations">Integracije</string>
     <string name="username">Uporabniško ime</string>
     <string name="password">Geslo</string>
-    <string name="lastfm_integration">Integracija z Last.fm</string>
     <string name="enable_scrobbling">Omogoči beleženje</string>
     <string name="lastfm_now_playing">Pošlji status trenutnega predvajanja</string>
     <string name="scrobbling_configuration">Nastavitve beleženja</string>

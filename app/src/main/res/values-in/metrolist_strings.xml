@@ -148,7 +148,6 @@
     <string name="update_notifications">Aktifkan notifikasi pembaruan</string>
     <string name="update_available_title">Pembaruan baru tersedia</string>
     <string name="integrations">Integrasi</string>
-    <string name="lastfm_integration">Integrasi Last.fm</string>
     <string name="username">Username</string>
     <string name="password">Password</string>
     <string name="enable_scrobbling">Aktifkan scrobbling</string>
@@ -861,7 +860,6 @@
     <string name="error_offline_playback">Anda sedang offline. Hubungkan ke internet, atau putar trek yang telah diunduh untuk penggunaan offline.</string>
     <string name="error_explicit_login_recommended">Pemutaran konten eksplisit bekerja lebih baik dengan akun yang sudah login.</string>
     <string name="ai_provider_inception_help">Kunjungi https://platform.inceptionlabs.ai untuk mendapatkan kunci API</string>
-    <string name="discord_integration">Integrasi Discord</string>
     <string name="enable_discord_rpc">Aktifkan Rich Presence</string>
     <string name="force_bottom_navbar">Paksakan bilah navigasi bawah</string>
 </resources>

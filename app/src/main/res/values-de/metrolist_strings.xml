@@ -154,7 +154,6 @@
     <string name="integrations">Integrationen</string>
     <string name="username">Benutzername</string>
     <string name="password">Passwort</string>
-    <string name="lastfm_integration">Last.fm-Integration</string>
     <string name="enable_scrobbling">Scrobbeln aktivieren</string>
     <string name="lastfm_now_playing">Aktuellen Wiedergabe-Status senden</string>
     <string name="scrobbling_configuration">Scrobbling Konfiguration</string>
@@ -867,7 +866,6 @@
     <string name="update_action">Update</string>
     <string name="ai_provider_inception_help">Für API-Schlüssel, besuche: https://platform.inceptionlabs.ai</string>
     <string name="enable_zemer">Zemer aktivieren</string>
-    <string name="discord_integration">Discord-Integration</string>
     <string name="enable_discord_rpc">„Rich Presence“ aktivieren</string>
     <string name="force_bottom_navbar">Navigationsleiste unten erzwingen</string>
 </resources>

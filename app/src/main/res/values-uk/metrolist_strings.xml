@@ -158,7 +158,6 @@
     <string name="integrations">Інтеграції</string>
     <string name="username">Ім\'я користувача</string>
     <string name="password">Пароль</string>
-    <string name="lastfm_integration">Інтеграція з Last.fm</string>
     <string name="enable_scrobbling">Увімкнути скробблінг</string>
     <string name="lastfm_now_playing">Надіслати «Зараз відтворюється»</string>
     <string name="scrobbling_configuration">Конфігурація скроблювання</string>

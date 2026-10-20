@@ -132,7 +132,6 @@
     <string name="integrations">Integraties</string>
     <string name="username">Gebruikersnaam</string>
     <string name="password">Wachtwoord</string>
-    <string name="lastfm_integration">Last.fm Integratie</string>
     <string name="enable_scrobbling">Scrobbling aanzetten</string>
     <string name="scrobbling_configuration">Scrobbling Configuratie</string>
     <string name="hide_video_songs">Video nummers verbergen</string>

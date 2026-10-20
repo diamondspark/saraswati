@@ -186,7 +186,6 @@
     <string name="listen_history">Kuunteluhistoria</string>
     <string name="skip_duplicates">Ohita kaksoiskappaleet</string>
     <string name="disable_screenshot">Poista kuvakaappaukset käytöstä</string>
-    <string name="discord_integration">Discord-integraatio</string>
     <string name="big">Suuri</string>
     <string name="library_artist_empty">Kirjaston artistit näkyvät täällä</string>
     <string name="keep_listening">Jatka kuuntelemista</string>

@@ -158,7 +158,6 @@
     <string name="integrations">Интеграции</string>
     <string name="username">Имя пользователя</string>
     <string name="password">Пароль</string>
-    <string name="lastfm_integration">Интеграция с Last.fm</string>
     <string name="enable_scrobbling">Включить скробблинг</string>
     <string name="lastfm_now_playing">Отправлять статус «Сейчас играет»</string>
     <string name="scrobbling_configuration">Настройки скробблинга</string>
@@ -879,7 +878,6 @@
     <string name="enable_zemer_desc">Тексты еврейских песен</string>
     <string name="update_available_message">Metrolist %s готов к загрузке.</string>
     <string name="update_action">Обновить</string>
-    <string name="discord_integration">Интеграция с Discord</string>
     <string name="enable_discord_rpc">Включить Rich Presence</string>
     <string name="force_bottom_navbar">Всегда использовать нижнюю панель навигации</string>
 </resources>

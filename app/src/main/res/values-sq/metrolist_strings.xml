@@ -214,7 +214,6 @@
     <string name="integrations">Integrimet</string>
     <string name="username">Emri i përdoruesit</string>
     <string name="password">Fjalëkalimi</string>
-    <string name="lastfm_integration">Integrimi i Last.fm</string>
     <string name="enable_scrobbling">Aktivizo scrobbling</string>
     <string name="add_to_library_desc">Ruaj në bibliotekën tënd</string>
     <string name="download_desc">Shkarko për riprodhim jashtë linje</string>

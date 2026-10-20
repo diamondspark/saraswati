@@ -114,7 +114,6 @@
     <string name="updater">Atnaujinimas</string>
     <string name="username">Vartotojo vardas</string>
     <string name="password">Slaptažodis</string>
-    <string name="lastfm_integration">Last.fm integracija</string>
     <string name="enable_scrobbling">Įjungti skroblavimą</string>
     <string name="romanize_current_track">Romanizuoti dabartinę dainą</string>
     <string name="lyrics_offset">Teksto poslinkis</string>
