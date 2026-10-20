@@ -151,6 +151,7 @@ fun SaralScreen(
     val status by viewModel.status.collectAsStateWithLifecycle()
     val isPlaying by viewModel.isPlaying.collectAsStateWithLifecycle()
     val voice by viewModel.voice.collectAsStateWithLifecycle()
+    val askExplanation by viewModel.askExplanation.collectAsStateWithLifecycle()
     val signedIn by viewModel.signedIn.collectAsStateWithLifecycle()
     val signingIn by viewModel.signingIn.collectAsStateWithLifecycle()
     val festival by viewModel.festival.collectAsStateWithLifecycle()
@@ -226,7 +227,19 @@ fun SaralScreen(
             }
         }
 
-        if (voice != VoicePhase.IDLE) ListeningOverlay(voice, onClose = viewModel::onOverlayDismissed)
+        if (askExplanation) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color(0xEB0A0806))
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                AskVoiceExplanationPrompt(onContinue = viewModel::onAskExplanationAcknowledged)
+            }
+        } else if (voice != VoicePhase.IDLE) {
+            ListeningOverlay(voice, onClose = viewModel::onOverlayDismissed)
+        }
     }
 }
 

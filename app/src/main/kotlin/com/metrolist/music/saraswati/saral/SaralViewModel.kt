@@ -34,6 +34,8 @@ import com.metrolist.music.R
 import com.metrolist.music.saraswati.culture.Festival
 import com.metrolist.music.saraswati.culture.FestivalClock
 import com.metrolist.music.saraswati.culture.FestivalRadio
+import com.metrolist.music.saraswati.ask.AskVoiceExplanationGate
+import com.metrolist.music.saraswati.ask.AskVoiceExplanationStore
 import com.metrolist.music.saraswati.ask.SaralAction
 import com.metrolist.music.saraswati.ask.SaralAsk
 import com.metrolist.music.saraswati.culture.FestivalSeed
@@ -255,6 +257,9 @@ class SaralViewModel
         festivalClock: FestivalClock = FestivalClock(),
         // SARASWATI: Phase 6 Task 10 — null keeps the voice path exactly as it was: the recogniser's words go to search.
         private val ask: SaralAsk? = null,
+        // SARASWATI: security-ask-explanation — null skips the one-time explanation (treated as already seen),
+        // so tests that do not care about it are unaffected.
+        private val explanationGate: AskVoiceExplanationGate? = null,
     ) : ViewModel(scope) {
         @Inject
         constructor(
@@ -263,7 +268,16 @@ class SaralViewModel
             search: SaralSearch,
             signIn: YouTubeSignIn,
             ask: SaralAsk,
-        ) : this(cache, refresher, search, signIn, CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate), ask = ask)
+            explanationGate: AskVoiceExplanationStore,
+        ) : this(
+            cache,
+            refresher,
+            search,
+            signIn,
+            CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+            ask = ask,
+            explanationGate = explanationGate,
+        )
 
         private val playback = MutableStateFlow<SaralPlayback?>(null)
         private var pending: ((SaralPlayback) -> Unit)? = null
@@ -313,6 +327,18 @@ class SaralViewModel
 
         private val _voice = MutableStateFlow(VoicePhase.IDLE)
         val voice: StateFlow<VoicePhase> = _voice.asStateFlow()
+
+        // SARASWATI: security-ask-explanation — true while the one-time ask-voice explanation waits for the
+        // person to tap Continue. The spoken words it is waiting to route are kept here, not in the request flow,
+        // since nothing has been asked of the player yet.
+        private val _askExplanation = MutableStateFlow(false)
+        val askExplanation: StateFlow<Boolean> = _askExplanation.asStateFlow()
+        private var pendingAsk: PendingAsk? = null
+
+        private data class PendingAsk(
+            val spoken: String,
+            val guesses: List<String>?,
+        )
 
         /** Starts true so a signed-in phone never sees the sign-in tile flash while storage is read. */
         val signedIn: StateFlow<Boolean> =
@@ -382,6 +408,13 @@ class SaralViewModel
 
         /** The person tapped the overlay. It only counts once the recogniser has answered and the search is running. */
         fun onOverlayDismissed() {
+            if (_askExplanation.value) {
+                _askExplanation.value = false
+                pendingAsk = null
+                voiceJob?.cancel()
+                _voice.value = VoicePhase.IDLE
+                return
+            }
             if (_voice.value != VoicePhase.SEARCHING) return
             voiceJob?.cancel()
             _voice.value = VoicePhase.IDLE
@@ -474,31 +507,60 @@ class SaralViewModel
             _voice.value = VoicePhase.SEARCHING
             voiceJob =
                 viewModelScope.launch {
-                    val action = asker.resolve(spoken)
+                    val gate = explanationGate
+                    if (gate != null && !gate.hasSeen()) {
+                        coroutineContext.ensureActive()
+                        pendingAsk = PendingAsk(spoken, guesses)
+                        _askExplanation.value = true
+                        return@launch
+                    }
+                    runAsk(asker, spoken, guesses)
+                }
+        }
+
+        /** The person tapped Continue on the one-time ask-voice explanation: mark it seen and route as originally asked. */
+        fun onAskExplanationAcknowledged() {
+            val pending = pendingAsk ?: return
+            val asker = ask ?: return
+            pendingAsk = null
+            _askExplanation.value = false
+            voiceJob =
+                viewModelScope.launch {
+                    explanationGate?.markSeen()
                     coroutineContext.ensureActive()
-                    when (action) {
-                        is SaralAction.PlayStation -> {
-                            val tile = tiles.value.firstOrNull { it.station.id == action.stationId }
-                            if (tile == null) {
-                                searchFor(listOf(spoken))
-                            } else {
-                                _voice.value = VoicePhase.IDLE
-                                startStation(tile)
-                            }
-                        }
-                        SaralAction.ParivaarMix -> {
-                            val tracks = asker.cachedMixTracks()
-                            if (tracks.isEmpty()) {
-                                searchFor(listOf(spoken))
-                            } else {
-                                _voice.value = VoicePhase.IDLE
-                                startMix(tracks)
-                            }
-                        }
-                        is SaralAction.VoiceSearch ->
-                            searchFor(if (action.text == spoken) guesses else listOf(action.text))
+                    runAsk(asker, pending.spoken, pending.guesses)
+                }
+        }
+
+        private suspend fun runAsk(
+            asker: SaralAsk,
+            spoken: String,
+            guesses: List<String>?,
+        ) {
+            val action = asker.resolve(spoken)
+            coroutineContext.ensureActive()
+            when (action) {
+                is SaralAction.PlayStation -> {
+                    val tile = tiles.value.firstOrNull { it.station.id == action.stationId }
+                    if (tile == null) {
+                        searchFor(listOf(spoken))
+                    } else {
+                        _voice.value = VoicePhase.IDLE
+                        startStation(tile)
                     }
                 }
+                SaralAction.ParivaarMix -> {
+                    val tracks = asker.cachedMixTracks()
+                    if (tracks.isEmpty()) {
+                        searchFor(listOf(spoken))
+                    } else {
+                        _voice.value = VoicePhase.IDLE
+                        startMix(tracks)
+                    }
+                }
+                is SaralAction.VoiceSearch ->
+                    searchFor(if (action.text == spoken) guesses else listOf(action.text))
+            }
         }
 
         /** [guesses] are the recogniser's, best first. */

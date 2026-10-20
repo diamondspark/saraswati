@@ -37,6 +37,9 @@ class SaralIsolationTest {
     private val mainActivity get() = source("src/main/kotlin/com/metrolist/music/MainActivity.kt")
     private val saralScreen get() = source("src/main/kotlin/com/metrolist/music/saraswati/saral/SaralScreen.kt")
     private val saralSignIn get() = source("src/main/kotlin/com/metrolist/music/saraswati/saral/SaralSignIn.kt")
+    // SARASWATI: security-ask-explanation — the one-time explanation shown before voice search is first routed
+    // through Ask Saraswati; it draws UI inside the Saral package, so it is covered by the way-out scan below.
+    private val askVoiceExplanationPrompt get() = source("src/main/kotlin/com/metrolist/music/saraswati/saral/AskVoiceExplanationPrompt.kt")
     private val loginScreen get() = source("src/main/kotlin/com/metrolist/music/ui/screens/LoginScreen.kt")
     private val loginUrlPolicy get() = source("src/main/kotlin/com/metrolist/music/saraswati/security/LoginUrlPolicy.kt")
 
@@ -178,7 +181,13 @@ class SaralIsolationTest {
     // None of them is used by the Saral screens today; the list fails the build if one is added.
     @Test
     fun `no Saral screen file can open a link or hand out an intent`() {
-        for ((name, text) in listOf("SaralScreen.kt" to saralScreen, "SaralSignIn.kt" to saralSignIn)) {
+        for ((name, text) in
+            listOf(
+                "SaralScreen.kt" to saralScreen,
+                "SaralSignIn.kt" to saralSignIn,
+                // SARASWATI: security-ask-explanation
+                "AskVoiceExplanationPrompt.kt" to askVoiceExplanationPrompt,
+            )) {
             for (word in WAYS_OUT_OF_SARAL) {
                 assertTrue("$name must not contain $word", !text.contains(word))
             }
@@ -196,7 +205,11 @@ class SaralIsolationTest {
                 .map { it.name }
                 .toSet()
 
-        assertEquals("a new Saral file that draws UI must be added to the scan above", setOf("SaralScreen.kt", "SaralSignIn.kt"), composableFiles)
+        assertEquals(
+            "a new Saral file that draws UI must be added to the scan above",
+            setOf("SaralScreen.kt", "SaralSignIn.kt", "AskVoiceExplanationPrompt.kt"),
+            composableFiles,
+        )
     }
 
     // SARASWATI: fix wave A (M1) — the new-intent listener of the full app is what follows links, widgets and
