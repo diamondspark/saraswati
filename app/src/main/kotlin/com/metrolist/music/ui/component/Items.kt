@@ -109,6 +109,7 @@ import com.metrolist.music.constants.GridItemsSizeKey
 import com.metrolist.music.constants.GridThumbnailHeight
 import com.metrolist.music.constants.ListItemHeight
 import com.metrolist.music.constants.ListThumbnailSize
+import com.metrolist.music.constants.LocalFilesEnabledKey
 import com.metrolist.music.constants.SmallGridThumbnailHeight
 import com.metrolist.music.constants.SwipeToSongKey
 import com.metrolist.music.constants.ThumbnailCornerRadius
@@ -117,10 +118,12 @@ import com.metrolist.music.db.entities.Artist
 import com.metrolist.music.db.entities.ArtistEntity
 import com.metrolist.music.db.entities.Playlist
 import com.metrolist.music.db.entities.Song
+import com.metrolist.music.extensions.filterLocalPlaylistSongs
 import com.metrolist.music.extensions.toMediaItem
 import com.metrolist.music.models.MediaMetadata
 import com.metrolist.music.playback.queues.LocalAlbumRadio
 import com.metrolist.music.ui.utils.resize
+import com.metrolist.music.utils.dataStore
 import com.metrolist.music.utils.joinByBullet
 import com.metrolist.music.utils.joinToArtistString
 import com.metrolist.music.utils.makeTimeString
@@ -132,6 +135,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
@@ -887,9 +891,13 @@ fun PlaylistListItem(
         val downloadUtil = LocalDownloadUtil.current
         val database = LocalDatabase.current
 
+        val context = LocalContext.current
         val songs by produceState<List<Song>>(initialValue = emptyList(), playlist.id) {
             withContext(Dispatchers.IO) {
-                value = database.playlistSongs(playlist.id).first().map { it.song }
+                // SARASWATI: fix wave P5a C2 — a song on this phone must not count toward this badge's download
+                // state the moment the Local files switch goes off.
+                val localFilesEnabled = context.dataStore.data.map { it[LocalFilesEnabledKey] ?: true }.first()
+                value = database.playlistSongs(playlist.id).first().filterLocalPlaylistSongs(localFilesEnabled).map { it.song }
             }
         }
 
@@ -968,9 +976,13 @@ fun PlaylistGridItem(
         val downloadUtil = LocalDownloadUtil.current
         val database = LocalDatabase.current
 
+        val context = LocalContext.current
         val songs by produceState<List<Song>>(initialValue = emptyList(), playlist.id) {
             withContext(Dispatchers.IO) {
-                value = database.playlistSongs(playlist.id).first().map { it.song }
+                // SARASWATI: fix wave P5a C2 — a song on this phone must not count toward this badge's download
+                // state the moment the Local files switch goes off.
+                val localFilesEnabled = context.dataStore.data.map { it[LocalFilesEnabledKey] ?: true }.first()
+                value = database.playlistSongs(playlist.id).first().filterLocalPlaylistSongs(localFilesEnabled).map { it.song }
             }
         }
 
