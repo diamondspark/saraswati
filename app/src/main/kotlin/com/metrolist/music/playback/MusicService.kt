@@ -29,6 +29,10 @@ import com.metrolist.music.constants.ListenTogetherUsernameKey
 import com.metrolist.music.saraswati.castrelay.CacheRelayAudioSource
 import com.metrolist.music.saraswati.castrelay.CastRelayController
 import com.metrolist.music.saraswati.castrelay.WifiAddress
+// SARASWATI: Task 12 — smart shuffle controller and its Media3 adapter.
+import com.metrolist.music.saraswati.craft.shuffle.Media3ShufflePlayer
+import com.metrolist.music.saraswati.craft.shuffle.ShuffleMode
+import com.metrolist.music.saraswati.craft.shuffle.SmartShuffleController
 import com.metrolist.music.saraswati.family.FamilyFeature
 import com.metrolist.music.saraswati.family.PlaybackStatsPlan
 import com.metrolist.music.saraswati.family.TastePolicy
@@ -317,6 +321,16 @@ class MusicService :
 
     @Inject
     lateinit var familyFeatureGate: com.metrolist.music.saraswati.family.FamilyFeatureGate
+
+    // SARASWATI: Task 12 — Chatur shuffle. Reads the current player on each call, so an audio-offload swap is seen.
+    private val smartShuffle: SmartShuffleController by lazy {
+        SmartShuffleController(
+            player = Media3ShufflePlayer { player },
+            picks = ::fetchSmartPicks,
+            snooze = { emptySet() },
+            clock = System::currentTimeMillis,
+        )
+    }
 
     private lateinit var audioManager: AudioManager
     private var audioFocusRequest: AudioFocusRequest? = null
@@ -1877,6 +1891,8 @@ class MusicService :
         if (!persistShuffleAcrossQueues && !restoringQueue) {
             player.shuffleModeEnabled = false
         }
+        // SARASWATI: Task 12 — a new queue drops smart shuffle back to plain shuffle, or off.
+        smartShuffle.onNewQueue(shuffleKept = player.shuffleModeEnabled)
         originalQueueSize = 0
         if (queue.preloadItem != null) {
             player.setMediaItem(queue.preloadItem!!.toMediaItem())
@@ -2031,6 +2047,15 @@ class MusicService :
                 }
             }
         }
+    }
+
+    // SARASWATI: Task 12 — smart shuffle picks come from the automix list already loaded for this queue when there is one, else one YouTube call.
+    private suspend fun fetchSmartPicks(currentId: String): Result<List<MediaItem>> {
+        val loaded = automixItems.value
+        if (loaded.isNotEmpty()) return Result.success(loaded)
+        return YouTube
+            .next(WatchEndpoint(videoId = currentId, playlistId = "RDAMVM$currentId"))
+            .map { result -> result.items.map { it.toMediaItem() } }
     }
 
     fun getAutomix(playlistId: String) {
@@ -2603,6 +2628,8 @@ class MusicService :
         mediaItem: MediaItem?,
         reason: Int,
     ) {
+        // SARASWATI: Task 12 — remembers which smart picks have played, so turning smart off keeps them.
+        smartShuffle.onCurrentItemChanged()
         // Only natural completion transitions mark the previous track as fully cached,
         // never a manual skip or seek. Read lastTransitionedMediaId before replacing it.
         if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
@@ -2904,14 +2931,18 @@ class MusicService :
 
     override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
         updateNotification()
+        // SARASWATI: Task 12 — the smart order is set by the controller; a plain re-shuffle here would drop the picks' places.
+        smartShuffle.onPlayerShuffleChanged(shuffleModeEnabled)
         if (shuffleModeEnabled) {
             if (player.mediaItemCount == 0) return
 
-            val shufflePlaylistFirst = dataStore.get(ShufflePlaylistFirstKey, false)
-            val currentIndex = player.currentMediaItemIndex
-            val totalCount = player.mediaItemCount
+            if (smartShuffle.mode.value != ShuffleMode.SMART) {
+                val shufflePlaylistFirst = dataStore.get(ShufflePlaylistFirstKey, false)
+                val currentIndex = player.currentMediaItemIndex
+                val totalCount = player.mediaItemCount
 
-            applyShuffleOrder(currentIndex, totalCount, shufflePlaylistFirst)
+                applyShuffleOrder(currentIndex, totalCount, shufflePlaylistFirst)
+            }
         }
 
         if (dataStore.get(RememberShuffleAndRepeatKey, true)) {
