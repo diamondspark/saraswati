@@ -12,13 +12,17 @@ import androidx.lifecycle.viewModelScope
 import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.PlaylistItem
 import com.metrolist.music.constants.HideVideoSongsKey
+import com.metrolist.music.constants.LocalFilesEnabledKey
 import com.metrolist.music.constants.PlaylistSongSortDescendingKey
 import com.metrolist.music.constants.PlaylistSongSortType
 import com.metrolist.music.constants.PlaylistSongSortTypeKey
 import com.metrolist.music.db.MusicDatabase
 import com.metrolist.music.db.entities.PlaylistSong
+import com.metrolist.music.extensions.filterLocalPlaylistSongs
 import com.metrolist.music.extensions.reversed
 import com.metrolist.music.extensions.toEnum
+import com.metrolist.music.saraswati.localmedia.LocalFiles
+import com.metrolist.music.saraswati.localmedia.localAccess
 import com.metrolist.music.utils.dataStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -53,24 +57,45 @@ constructor(
 
     private val _onlinePlaylist = MutableStateFlow<PlaylistItem?>(null)
     val onlinePlaylist: StateFlow<PlaylistItem?> = _onlinePlaylist
+
+    // SARASWATI: fix wave P5a C2 — a song on this phone must leave this song list the moment the Local files
+    // switch goes off, and come back the moment it goes back on. This is the song list only: the screen's header
+    // count/thumbnails still read playlist.songCount/playlist.thumbnails, an unfiltered query — a known,
+    // already tracked follow-up, not fixed here.
+    private data class PlaylistSongsPrefs(
+        val sortType: PlaylistSongSortType,
+        val sortDescending: Boolean,
+        val hideVideoSongs: Boolean,
+        val localFilesEnabled: Boolean,
+    )
+
+    // SARASWATI: fix wave P5a C2 — the position-renumbering pass below must see every song, including ones the
+    // switch is hiding right now, or closing a local song's gap would shift remote songs onto its stored position.
+    private val rawPlaylistSongs = database.playlistSongs(playlistId)
+
     val playlistSongs: StateFlow<List<PlaylistSong>> =
         combine(
-            database.playlistSongs(playlistId),
+            rawPlaylistSongs,
             context.dataStore.data
                 .map {
-                    Triple(
-                        it[PlaylistSongSortTypeKey].toEnum(PlaylistSongSortType.CUSTOM),
-                        it[PlaylistSongSortDescendingKey] ?: true,
-                        it[HideVideoSongsKey] ?: false
+                    PlaylistSongsPrefs(
+                        sortType = it[PlaylistSongSortTypeKey].toEnum(PlaylistSongSortType.CUSTOM),
+                        sortDescending = it[PlaylistSongSortDescendingKey] ?: true,
+                        hideVideoSongs = it[HideVideoSongsKey] ?: false,
+                        localFilesEnabled = LocalFiles.enabled(it[LocalFilesEnabledKey], localAccess(context)),
                     )
                 }.distinctUntilChanged(),
-        ) { songs, (sortType, sortDescending, hideVideoSongs) ->
-            val filteredSongs = if (hideVideoSongs) {
-                songs.filter { !it.song.song.isVideo }
-            } else {
-                songs
-            }
-            when (sortType) {
+        ) { songs, prefs ->
+            val filteredSongs = songs
+                .filterLocalPlaylistSongs(prefs.localFilesEnabled)
+                .let { filtered ->
+                    if (prefs.hideVideoSongs) {
+                        filtered.filter { !it.song.song.isVideo }
+                    } else {
+                        filtered
+                    }
+                }
+            when (prefs.sortType) {
                 PlaylistSongSortType.CUSTOM -> filteredSongs
                 PlaylistSongSortType.CREATE_DATE -> filteredSongs.sortedBy { it.map.id }
                 PlaylistSongSortType.NAME -> {
@@ -88,13 +113,13 @@ constructor(
                 }
 
                 PlaylistSongSortType.PLAY_TIME -> filteredSongs.sortedBy { it.song.song.totalPlayTime }
-            }.reversed(sortDescending && sortType != PlaylistSongSortType.CUSTOM)
+            }.reversed(prefs.sortDescending && prefs.sortType != PlaylistSongSortType.CUSTOM)
         }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     init {
         viewModelScope.launch {
             val sortedSongs =
-                playlistSongs.first().sortedWith(compareBy({ it.map.position }, { it.map.id }))
+                rawPlaylistSongs.first().sortedWith(compareBy({ it.map.position }, { it.map.id }))
             database.transaction {
                 sortedSongs.forEachIndexed { index, playlistSong ->
                     if (playlistSong.map.position != index) {

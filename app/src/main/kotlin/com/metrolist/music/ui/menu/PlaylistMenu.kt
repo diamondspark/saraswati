@@ -49,14 +49,18 @@ import com.metrolist.music.LocalDownloadUtil
 import com.metrolist.music.LocalListenTogetherManager
 import com.metrolist.music.LocalPlayerConnection
 import com.metrolist.music.R
+import com.metrolist.music.constants.LocalFilesEnabledKey
 import com.metrolist.music.db.entities.Playlist
 import com.metrolist.music.db.entities.PlaylistSong
 import com.metrolist.music.db.entities.Song
 import com.metrolist.music.db.entities.SpeedDialItem
+import com.metrolist.music.extensions.filterLocalPlaylistSongs
 import com.metrolist.music.extensions.toMediaItem
 import com.metrolist.music.playback.ExoDownloadService
 import com.metrolist.music.playback.queues.ListQueue
 import com.metrolist.music.playback.queues.YouTubeQueue
+import com.metrolist.music.saraswati.localmedia.LocalFiles
+import com.metrolist.music.saraswati.localmedia.localAccess
 import com.metrolist.music.ui.component.DefaultDialog
 import com.metrolist.music.ui.component.Material3MenuGroup
 import com.metrolist.music.ui.component.Material3MenuItemData
@@ -66,10 +70,14 @@ import com.metrolist.music.ui.component.PlaylistListItem
 import com.metrolist.music.ui.component.TextFieldDialog
 import com.metrolist.music.ui.menu.ExportDialog
 import com.metrolist.music.utils.PlaylistExporter
+import com.metrolist.music.utils.dataStore
 import com.metrolist.music.utils.getExportFileUri
 import com.metrolist.music.utils.saveToPublicDocuments
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDateTime
@@ -96,8 +104,17 @@ fun PlaylistMenu(
 
     LaunchedEffect(Unit) {
         if (autoPlaylist == false) {
-            database.playlistSongs(playlist.id).collect {
-                songs = it.map(PlaylistSong::song)
+            // SARASWATI: fix wave P5a C2 — a song on this phone must leave this menu's song list the moment the
+            // Local files switch goes off, and come back the moment it goes back on.
+            combine(
+                database.playlistSongs(playlist.id),
+                context.dataStore.data
+                    .map { LocalFiles.enabled(it[LocalFilesEnabledKey], localAccess(context)) }
+                    .distinctUntilChanged(),
+            ) { playlistSongs, localFilesEnabled ->
+                playlistSongs.filterLocalPlaylistSongs(localFilesEnabled).map(PlaylistSong::song)
+            }.collect {
+                songs = it
             }
         } else {
             if (songList != null) {

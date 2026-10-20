@@ -109,6 +109,7 @@ import com.metrolist.music.constants.GridItemsSizeKey
 import com.metrolist.music.constants.GridThumbnailHeight
 import com.metrolist.music.constants.ListItemHeight
 import com.metrolist.music.constants.ListThumbnailSize
+import com.metrolist.music.constants.LocalFilesEnabledKey
 import com.metrolist.music.constants.SmallGridThumbnailHeight
 import com.metrolist.music.constants.SwipeToSongKey
 import com.metrolist.music.constants.ThumbnailCornerRadius
@@ -117,10 +118,15 @@ import com.metrolist.music.db.entities.Artist
 import com.metrolist.music.db.entities.ArtistEntity
 import com.metrolist.music.db.entities.Playlist
 import com.metrolist.music.db.entities.Song
+import com.metrolist.music.extensions.filterLocalPlaylistSongs
 import com.metrolist.music.extensions.toMediaItem
 import com.metrolist.music.models.MediaMetadata
 import com.metrolist.music.playback.queues.LocalAlbumRadio
+import com.metrolist.music.saraswati.localmedia.LocalFiles
+import com.metrolist.music.saraswati.localmedia.localAccess
 import com.metrolist.music.ui.utils.resize
+import com.metrolist.music.utils.dataStore
+import com.metrolist.music.utils.get
 import com.metrolist.music.utils.joinByBullet
 import com.metrolist.music.utils.joinToArtistString
 import com.metrolist.music.utils.makeTimeString
@@ -130,8 +136,10 @@ import com.metrolist.music.utils.rememberPreference
 import com.metrolist.music.utils.reportException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
@@ -887,9 +895,27 @@ fun PlaylistListItem(
         val downloadUtil = LocalDownloadUtil.current
         val database = LocalDatabase.current
 
-        val songs by produceState<List<Song>>(initialValue = emptyList(), playlist.id) {
+        val context = LocalContext.current
+        // SARASWATI: fix wave P5a C2 — reactive, not one-shot: flipping the Local files switch while this screen
+        // is open must retrigger the badge's download-state computation. LocalFiles.enabled() also treats access
+        // not being GRANTED as off, matching every other local-files surface in the app. Both the Flow and its
+        // initial value are remember()'d so this badge — which already recomposes on every allDownloads change,
+        // across every visible playlist row — doesn't redo a blocking DataStore read and checkSelfPermission
+        // call on every one of those recompositions.
+        val localFilesEnabledFlow =
+            remember(context) {
+                context.dataStore.data
+                    .map { LocalFiles.enabled(it[LocalFilesEnabledKey], localAccess(context)) }
+                    .distinctUntilChanged()
+            }
+        val initialLocalFilesEnabled =
+            remember(context) { LocalFiles.enabled(context.dataStore[LocalFilesEnabledKey], localAccess(context)) }
+        val localFilesEnabled by localFilesEnabledFlow.collectAsStateWithLifecycle(
+            initialValue = initialLocalFilesEnabled,
+        )
+        val songs by produceState<List<Song>>(initialValue = emptyList(), playlist.id, localFilesEnabled) {
             withContext(Dispatchers.IO) {
-                value = database.playlistSongs(playlist.id).first().map { it.song }
+                value = database.playlistSongs(playlist.id).first().filterLocalPlaylistSongs(localFilesEnabled).map { it.song }
             }
         }
 
@@ -968,9 +994,27 @@ fun PlaylistGridItem(
         val downloadUtil = LocalDownloadUtil.current
         val database = LocalDatabase.current
 
-        val songs by produceState<List<Song>>(initialValue = emptyList(), playlist.id) {
+        val context = LocalContext.current
+        // SARASWATI: fix wave P5a C2 — reactive, not one-shot: flipping the Local files switch while this screen
+        // is open must retrigger the badge's download-state computation. LocalFiles.enabled() also treats access
+        // not being GRANTED as off, matching every other local-files surface in the app. Both the Flow and its
+        // initial value are remember()'d so this badge — which already recomposes on every allDownloads change,
+        // across every visible playlist row — doesn't redo a blocking DataStore read and checkSelfPermission
+        // call on every one of those recompositions.
+        val localFilesEnabledFlow =
+            remember(context) {
+                context.dataStore.data
+                    .map { LocalFiles.enabled(it[LocalFilesEnabledKey], localAccess(context)) }
+                    .distinctUntilChanged()
+            }
+        val initialLocalFilesEnabled =
+            remember(context) { LocalFiles.enabled(context.dataStore[LocalFilesEnabledKey], localAccess(context)) }
+        val localFilesEnabled by localFilesEnabledFlow.collectAsStateWithLifecycle(
+            initialValue = initialLocalFilesEnabled,
+        )
+        val songs by produceState<List<Song>>(initialValue = emptyList(), playlist.id, localFilesEnabled) {
             withContext(Dispatchers.IO) {
-                value = database.playlistSongs(playlist.id).first().map { it.song }
+                value = database.playlistSongs(playlist.id).first().filterLocalPlaylistSongs(localFilesEnabled).map { it.song }
             }
         }
 

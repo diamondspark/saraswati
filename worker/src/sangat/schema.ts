@@ -19,16 +19,20 @@ export function createSangatTables(sql: SqlStorage): void {
   )`);
   // One row per person in a room, connected or inside the reconnect grace.
   // rowid order is join order, which is how the next host is chosen.
-  // sessionToken is stored as plaintext by design. It is scoped to one room and bound to
-  // the device it was issued to (useless without that device's hashed hub bearer), and it
-  // is deleted on leave, expiry, revoke and the kill switch. Hashing it would put an
-  // await inside the synchronous handler transaction.
+  // sessionTokenHash is the SHA-256 of the member's session token, the same way
+  // the roster keeps its device session tokens hashed. Hashing awaits, and a
+  // handler reads and writes storage inside one synchronous transaction, so
+  // Sangat.prepareHash computes the hash beforehand: create_room and
+  // approve_join mint a token and hash it before their transaction starts,
+  // and reconnect hashes the token it was handed the same way before looking
+  // it up. The seat (and its hash) is deleted on leave, expiry, revoke and the
+  // kill switch.
   sql.exec(`CREATE TABLE IF NOT EXISTS sangat_members (
     userId TEXT PRIMARY KEY,
     roomCode TEXT NOT NULL,
     deviceId TEXT NOT NULL,
     username TEXT NOT NULL,
-    sessionToken TEXT NOT NULL UNIQUE,
+    sessionTokenHash TEXT NOT NULL UNIQUE,
     isHost INTEGER NOT NULL DEFAULT 0,
     connected INTEGER NOT NULL DEFAULT 1,
     disconnectedAt INTEGER

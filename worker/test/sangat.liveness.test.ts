@@ -10,6 +10,7 @@ import { Sangat } from "../src/sangat/Sangat";
 import { IDLE_TIMEOUT_MS, RATE_LIMIT_MESSAGES_PER_SECOND, RATE_LIMIT_STRIKES_TO_CLOSE } from "../src/sangat/limits";
 import { floodedTooLong, recordMessage } from "../src/sangat/liveness";
 import type { Attachment } from "../src/sangat/types";
+import { sha256Hex } from "../src/secrets";
 import {
   closeAllClients,
   createRoom,
@@ -330,7 +331,7 @@ describe("idle sockets", () => {
       username: "Bharat",
     });
     const row = await memberRow(hub, bharat.userId);
-    expect(row).toMatchObject({ connected: 0, sessionToken: bharat.token });
+    expect(row).toMatchObject({ connected: 0, sessionTokenHash: await sha256Hex(bharat.token) });
     expect(Math.abs((row?.disconnectedAt as number) - Date.now())).toBeLessThan(5000);
     const room = await sql(hub, (db) => db.exec("SELECT state FROM sangat_rooms WHERE code = ?", host.code).one());
     const state = fromBinary(RoomStateSchema, new Uint8Array(room.state as ArrayBuffer));

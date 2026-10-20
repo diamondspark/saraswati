@@ -1,6 +1,7 @@
 import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { LATEST_SCHEMA_VERSION, migrate } from "../src/migrations";
+import { Store } from "../src/sangat/store";
 import { adminHeaders, sha256Hex } from "./helpers";
 
 // The schema exactly as the live hub (versions up to 4308392a) created it, kept
@@ -211,12 +212,12 @@ function seedLiveData(sql: SqlStorage) {
 }
 
 describe("schema migrations", () => {
-  it("reports version 4 as the latest and lands a brand-new hub on it", async () => {
+  it("reports the latest version and lands a brand-new hub on it", async () => {
     const stub = freshHub();
 
     // The constructor has already run the migrations on an empty database.
-    expect(LATEST_SCHEMA_VERSION).toBe(4);
-    expect(await schemaVersion(stub)).toBe(4);
+    expect(LATEST_SCHEMA_VERSION).toBe(5);
+    expect(await schemaVersion(stub)).toBe(5);
     expect(await tableNames(stub)).toEqual(
       [...TABLES, ...V3_TABLES, ...V4_TABLES, "schema_version"].sort(),
     );
@@ -255,7 +256,7 @@ describe("schema migrations", () => {
 
         await runMigrate(stub);
 
-        expect(await schemaVersion(stub)).toBe(4);
+        expect(await schemaVersion(stub)).toBe(5);
         expect(await tableNames(stub)).toEqual(
           [...TABLES, ...V3_TABLES, ...V4_TABLES, "schema_version"].sort(),
         );
@@ -437,7 +438,7 @@ describe("schema migrations", () => {
         await runMigrate(stub);
 
         expect(await dump(stub)).toEqual(afterFirst);
-        expect(await schemaVersion(stub)).toBe(4);
+        expect(await schemaVersion(stub)).toBe(5);
         // Re-hashing would have made the stored value the hash of a hash.
         expect(
           (afterFirst.roster as Array<{ sessionTokenHash: string | null }>)[0]
@@ -488,7 +489,7 @@ describe("schema migrations", () => {
 
       await runMigrate(stub);
 
-      expect(await schemaVersion(stub)).toBe(4);
+      expect(await schemaVersion(stub)).toBe(5);
       expect(await tableNames(stub)).toEqual(
         [...TABLES, ...V3_TABLES, ...V4_TABLES, "schema_version"].sort(),
       );
@@ -568,7 +569,7 @@ describe("schema migrations", () => {
       expect({ roster: await dump(stub), family: await v3Rows(stub) }).toEqual(
         afterFirst,
       );
-      expect(await schemaVersion(stub)).toBe(4);
+      expect(await schemaVersion(stub)).toBe(5);
     });
 
     it("rolls back completely when a table cannot be made, leaving version 2", async () => {
@@ -612,7 +613,7 @@ describe("schema migrations", () => {
       });
     }
 
-    it("adds ask_usage, keeps every existing row and records version 4", async () => {
+    it("adds ask_usage, keeps every existing row and records the latest version", async () => {
       const stub = freshHub();
       await resetToV3(stub);
       expect(await tableNames(stub)).not.toContain("ask_usage");
@@ -620,7 +621,7 @@ describe("schema migrations", () => {
 
       await runMigrate(stub);
 
-      expect(await schemaVersion(stub)).toBe(4);
+      expect(await schemaVersion(stub)).toBe(5);
       expect(await tableNames(stub)).toContain("ask_usage");
       expect({ roster: await dump(stub), family: await v3Rows(stub) }).toEqual(
         before,
@@ -647,7 +648,7 @@ describe("schema migrations", () => {
       await runMigrate(stub);
       await runMigrate(stub);
 
-      expect(await schemaVersion(stub)).toBe(4);
+      expect(await schemaVersion(stub)).toBe(5);
       expect(
         await runInDurableObject(stub, (_instance, state) =>
           state.storage.sql
@@ -672,12 +673,82 @@ describe("schema migrations", () => {
 
       await runMigrate(stub);
 
-      expect(await schemaVersion(stub)).toBe(4);
+      expect(await schemaVersion(stub)).toBe(5);
       expect(
         await runInDurableObject(stub, (_instance, state) =>
           state.storage.sql.exec("SELECT count FROM ask_usage").toArray(),
         ),
       ).toEqual([{ count: 3 }]);
+    });
+  });
+
+  describe("from a v4 hub with a live Sangat room", () => {
+    const LIVE_SESSION_TOKEN = "aa".repeat(32);
+
+    /** A v4 hub: sangat_members still has the old plaintext column, with one live seat in it. */
+    async function resetToV4(stub: Stub) {
+      await runInDurableObject(stub, (_instance, state) => {
+        const sql = state.storage.sql;
+        sql.exec("ALTER TABLE sangat_members RENAME COLUMN sessionTokenHash TO sessionToken");
+        sql.exec(
+          "INSERT INTO sangat_rooms (code, hostUserId, hostDeviceId, carMode, state, createdAt, emptySince, hostDisconnectedAt) VALUES ('ROOM0001', 'user_1', 'dev-1', 0, x'', ?, NULL, NULL)",
+          SEEDED_AT,
+        );
+        sql.exec(
+          "INSERT INTO sangat_members (userId, roomCode, deviceId, username, sessionToken, isHost, connected, disconnectedAt) VALUES ('user_1', 'ROOM0001', 'dev-1', 'Asha', ?, 1, 1, NULL)",
+          LIVE_SESSION_TOKEN,
+        );
+        sql.exec("UPDATE schema_version SET version = 4");
+      });
+    }
+
+    it("renames sessionToken to sessionTokenHash and hashes the value in place, and records version 5", async () => {
+      const stub = freshHub();
+      await resetToV4(stub);
+      expect(await columns(stub, "sangat_members")).toContain("sessionToken");
+
+      await runMigrate(stub);
+
+      expect(await schemaVersion(stub)).toBe(5);
+      const cols = await columns(stub, "sangat_members");
+      expect(cols).toContain("sessionTokenHash");
+      expect(cols).not.toContain("sessionToken");
+      // Hashed in place, like the roster's v2: a deploy drops every
+      // hibernated socket, and the phone in this room is expected to recover
+      // by reconnecting with the real token it already holds, so the stored
+      // value must be that token's hash from the moment this migration
+      // finishes, not still the plaintext under a renamed column.
+      const stored = await runInDurableObject(stub, (_instance, state) =>
+        state.storage.sql
+          .exec<{ sessionTokenHash: string }>("SELECT sessionTokenHash FROM sangat_members WHERE userId = 'user_1'")
+          .one().sessionTokenHash,
+      );
+      expect(stored).toBe(await sha256Hex(LIVE_SESSION_TOKEN));
+      expect(stored).not.toBe(LIVE_SESSION_TOKEN);
+
+      // The real token still looks the member up, the way handleReconnect does.
+      const found = await runInDurableObject(stub, async (_instance, state) =>
+        new Store(state.storage).memberByTokenHash(await sha256Hex(LIVE_SESSION_TOKEN)),
+      );
+      expect(found?.userId).toBe("user_1");
+    });
+
+    it("is idempotent: a second pass changes nothing", async () => {
+      const stub = freshHub();
+      await resetToV4(stub);
+      await runMigrate(stub);
+      const after = await runInDurableObject(stub, (_instance, state) =>
+        state.storage.sql.exec("SELECT * FROM sangat_members").toArray(),
+      );
+
+      await runMigrate(stub);
+
+      expect(
+        await runInDurableObject(stub, (_instance, state) =>
+          state.storage.sql.exec("SELECT * FROM sangat_members").toArray(),
+        ),
+      ).toEqual(after);
+      expect(await schemaVersion(stub)).toBe(5);
     });
   });
 

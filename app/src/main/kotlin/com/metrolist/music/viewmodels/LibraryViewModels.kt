@@ -30,6 +30,7 @@ import com.metrolist.music.constants.ArtistSortTypeKey
 import com.metrolist.music.constants.HideExplicitKey
 import com.metrolist.music.constants.HideVideoSongsKey
 import com.metrolist.music.constants.HideYoutubeShortsKey
+import com.metrolist.music.constants.LocalFilesEnabledKey
 import com.metrolist.music.constants.PlaylistSortDescendingKey
 import com.metrolist.music.constants.PlaylistSortType
 import com.metrolist.music.constants.PlaylistSortTypeKey
@@ -42,12 +43,15 @@ import com.metrolist.music.constants.TopSize
 import com.metrolist.music.db.MusicDatabase
 import com.metrolist.music.extensions.filterExplicit
 import com.metrolist.music.extensions.filterExplicitAlbums
+import com.metrolist.music.extensions.filterLocalSongs
 import com.metrolist.music.extensions.filterVideoSongs
 import com.metrolist.music.extensions.filterYoutubeShorts
 import com.metrolist.music.extensions.matchesNormalizedQuery
 import com.metrolist.music.extensions.normalizeForSearch
 import com.metrolist.music.extensions.toEnum
 import com.metrolist.music.playback.DownloadUtil
+import com.metrolist.music.saraswati.localmedia.LocalFiles
+import com.metrolist.music.saraswati.localmedia.localAccess
 import com.metrolist.music.utils.PodcastRefreshTrigger
 import com.metrolist.music.utils.SyncUtils
 import com.metrolist.music.utils.dataStore
@@ -385,18 +389,34 @@ constructor(
         .flatMapLatest { hideExplicit ->
             database.albumsLiked(AlbumSortType.CREATE_DATE, true).map { it.filterExplicitAlbums(hideExplicit) }
         }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    // SARASWATI: fix wave P5a C2 — a song on this phone, reached here only through a bookmarked playlist, must
+    // leave this list the moment the Local files switch goes off, and come back the moment it goes back on.
+    private data class LibrarySongsFilterPrefs(
+        val hideExplicit: Boolean,
+        val hideVideoSongs: Boolean,
+        val hideYoutubeShorts: Boolean,
+        val localFilesEnabled: Boolean,
+    )
+
     var songs = context.dataStore.data
-        .map { Triple(it[HideExplicitKey] ?: false, it[HideVideoSongsKey] ?: false, it[HideYoutubeShortsKey] ?: false) }
+        .map {
+            LibrarySongsFilterPrefs(
+                hideExplicit = it[HideExplicitKey] ?: false,
+                hideVideoSongs = it[HideVideoSongsKey] ?: false,
+                hideYoutubeShorts = it[HideYoutubeShortsKey] ?: false,
+                localFilesEnabled = LocalFiles.enabled(it[LocalFilesEnabledKey], localAccess(context)),
+            )
+        }
         .distinctUntilChanged()
-        .flatMapLatest { (hideExplicit, hideVideoSongs, _) ->
+        .flatMapLatest { prefs ->
             combine(
                 database.songs(SongSortType.CREATE_DATE, true),
-                database.songsInBookmarkedPlaylists()
+                database.songsInBookmarkedPlaylists().map { it.filterLocalSongs(prefs.localFilesEnabled) },
             ) { librarySongs, playlistSongs ->
                 (librarySongs + playlistSongs)
                     .distinctBy { it.id }
-                    .filterExplicit(hideExplicit)
-                    .filterVideoSongs(hideVideoSongs)
+                    .filterExplicit(prefs.hideExplicit)
+                    .filterVideoSongs(prefs.hideVideoSongs)
             }
         }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     var playlists = context.dataStore.data

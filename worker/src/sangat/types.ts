@@ -54,4 +54,16 @@ export interface Runtime {
   allowSyncResponse(userId: string, now: number): boolean;
 }
 
-export type Handler = (rt: Runtime, conn: Conn, payload: Uint8Array) => Out[];
+/**
+ * What Sangat.prepareHash computes for a handler before its storage transaction
+ * starts, since hashing a session token awaits and a transaction cannot. Empty
+ * for every handler that does not touch one.
+ */
+export interface PreHashed {
+  /** A session token minted for this message, with its hash: set only for create_room and approve_join. */
+  newToken?: { token: string; hash: string };
+  /** The hash of the session token the payload presented, for reconnect; null if there was none to hash. */
+  presentedTokenHash?: string | null;
+}
+
+export type Handler = (rt: Runtime, conn: Conn, payload: Uint8Array, pre: PreHashed) => Out[];
