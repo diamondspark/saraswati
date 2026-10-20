@@ -32,7 +32,15 @@ import com.metrolist.music.R
 object FamilyRoutes {
     const val MANAGE = "family/manage"
     const val JOIN = "family/join"
+
+    // SARASWATI: Phase 4 Task 20 — one family playlist, by its YouTube playlist id.
+    const val PLAYLIST = "family/playlist/{playlistId}"
+
+    // SARASWATI: Phase 4 Task 20 — Taste & history, reached from the Family tab.
+    const val TASTE = "family/taste"
 }
+
+fun familyPlaylistRoute(playlistId: String): String = "family/playlist/$playlistId"
 
 @StringRes
 fun FamilyError.messageRes(): Int =
