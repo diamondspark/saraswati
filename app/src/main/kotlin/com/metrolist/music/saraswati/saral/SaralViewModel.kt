@@ -555,14 +555,13 @@ class SaralViewModel
                     // this check and a second one inside ask() could otherwise let a question through with no
                     // explanation ever having been shown.
                     //
-                    // SARASWATI: security-ask-explanation (fifth-round audit fix 2) — performSearch/searchQueries
-                    // directly, not searchFor: this coroutine IS voiceJob (resolveVoice assigned it below),
-                    // so calling searchFor here (which does its own `voiceJob = launch { ... }`) risked that
-                    // assignment being overwritten right back the moment this outer launch itself returns — see
+                    // SARASWATI: security-ask-explanation (fifth-round audit fix 2) — searchDirectly, not
+                    // searchFor: this coroutine IS voiceJob (resolveVoice assigned it below), so calling
+                    // searchFor here (which does its own `voiceJob = launch { ... }`) risked that assignment
+                    // being overwritten right back the moment this outer launch itself returns — see
                     // performSearch's own comment for exactly when that happens.
                     if (!asker.willReachHub()) {
-                        val queries = searchQueries(guesses)
-                        if (queries.isEmpty()) endVoice(VoiceNotice.NOT_HEARD) else performSearch(queries)
+                        searchDirectly(guesses)
                         return@launch
                     }
                     val gate = explanationGate
@@ -623,6 +622,14 @@ class SaralViewModel
                 }
         }
 
+        // SARASWATI: security-ask-explanation (sixth-round audit, same bug class as fifth-round fix 2) — all
+        // three branches below call searchDirectly, not searchFor, for the same reason: runAsk is always
+        // called from inside a coroutine that already is voiceJob (resolveVoice/onAskExplanationAcknowledged
+        // assign it before calling runAsk), so searchFor's own nested `voiceJob = launch { ... }` risks being
+        // overwritten the moment this already-running launch block returns. On a real phone this did not bite
+        // — asker.resolve() suspends for real (the hub round trip) before reaching here, so voiceJob is
+        // already correctly assigned by the time any of these run — but it was untested and fragile: a
+        // throwaway test with non-suspending fakes reproduced "cancel does nothing" on these paths too.
         private suspend fun runAsk(
             asker: SaralAsk,
             spoken: String,
@@ -634,7 +641,7 @@ class SaralViewModel
                 is SaralAction.PlayStation -> {
                     val tile = tiles.value.firstOrNull { it.station.id == action.stationId }
                     if (tile == null) {
-                        searchFor(listOf(spoken))
+                        searchDirectly(listOf(spoken))
                     } else {
                         _voice.value = VoicePhase.IDLE
                         startStation(tile)
@@ -643,14 +650,14 @@ class SaralViewModel
                 SaralAction.ParivaarMix -> {
                     val tracks = asker.cachedMixTracks()
                     if (tracks.isEmpty()) {
-                        searchFor(listOf(spoken))
+                        searchDirectly(listOf(spoken))
                     } else {
                         _voice.value = VoicePhase.IDLE
                         startMix(tracks)
                     }
                 }
                 is SaralAction.VoiceSearch ->
-                    searchFor(if (action.text == spoken) guesses else listOf(action.text))
+                    searchDirectly(if (action.text == spoken) guesses else listOf(action.text))
             }
         }
 
@@ -673,16 +680,25 @@ class SaralViewModel
                 .distinct()
                 .take(MAX_GUESSES)
 
+        // SARASWATI: security-ask-explanation (fifth-round audit fix 2; sixth-round audit, same bug class) —
+        // the suspend counterpart to searchFor, for callers that are already running inside the coroutine
+        // voiceJob points to (resolveVoice's willReachHub()-false branch, and all three of runAsk's fallbacks):
+        // calling searchFor there instead — which does its own `voiceJob = launch { ... }` — looked right but
+        // wasn't. See performSearch's comment for exactly when that reassignment gets silently clobbered.
+        private suspend fun searchDirectly(guesses: List<String>?) {
+            val queries = searchQueries(guesses)
+            if (queries.isEmpty()) endVoice(VoiceNotice.NOT_HEARD) else performSearch(queries)
+        }
+
         // SARASWATI: security-ask-explanation (fifth-round audit fix 2) — a suspend function with no launch
-        // and no voiceJob assignment of its own, so it is safe to call directly from inside a coroutine that
-        // is already [voiceJob] itself (see resolveVoice's willReachHub()-false branch). Calling searchFor
-        // there instead — which does its own `voiceJob = launch { ... }` — looked right but wasn't: when
-        // willReachHub() returns without a real suspension (true whenever Ask Saraswati is off or there is no
-        // session, since neither check ever reaches the network), the whole surrounding launch block runs
-        // synchronously end to end, including searchFor's nested reassignment of voiceJob to its own new job
-        // — and then the *outer* launch{} call (resolveVoice's own `voiceJob = viewModelScope.launch { ... }`)
-        // finally returns and overwrites voiceJob back to that outer, now-already-finished job, silently
-        // clobbering the inner job that is the one actually running the search. onOverlayDismissed's
+        // and no voiceJob assignment of its own, so it is safe to call directly (via searchDirectly above)
+        // from inside a coroutine that is already [voiceJob] itself. When the surrounding launch block never
+        // truly suspends before reaching a nested `voiceJob = launch { ... }` (true of willReachHub() when Ask
+        // Saraswati is off or there is no session, since neither check ever reaches the network — and, with a
+        // non-suspending fake, of runAsk's own asker.resolve() too), the whole block runs synchronously end to
+        // end, including that nested reassignment of voiceJob to its own new job — and then the *outer*
+        // launch{} call finally returns and overwrites voiceJob back to that outer, now-already-finished job,
+        // silently clobbering the inner job that is the one actually running the search. onOverlayDismissed's
         // voiceJob?.cancel() then cancels nothing, while the real search keeps going. Confirmed by running it.
         private suspend fun performSearch(queries: List<String>) {
             var found: SongItem? = null

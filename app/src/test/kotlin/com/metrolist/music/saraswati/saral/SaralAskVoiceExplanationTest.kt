@@ -399,4 +399,32 @@ class SaralAskVoiceExplanationTest {
             vm.status.value,
         )
     }
+
+    // SARASWATI: security-ask-explanation (sixth-round audit, same bug class as the fix just above) — runAsk's
+    // own fallbacks (VoiceSearch, and PlayStation/ParivaarMix when the hub's answer doesn't resolve to
+    // anything playable) called searchFor the same way the willReachHub()-false branch used to: a nested
+    // `voiceJob = launch { ... }` that risks being overwritten by the surrounding launch{} returning right
+    // after. On a real phone asker.resolve() suspends for real (the hub round trip) before reaching this, so
+    // it did not bite there — but FakeAskHub/FixedIdentity in this very test file do not genuinely suspend
+    // either, which is exactly how this reproduces here.
+    @Test
+    fun `cancelling a VoiceSearch fallback from runAsk actually stops it`() {
+        answer(AskIntent.Answer("not a station or the mix"))
+        val vm = newVm(explanationGate = FakeAskVoiceExplanationGate(seen = true))
+        search.gate = CompletableDeferred()
+
+        vm.heard("bhajan lagao")
+        assertEquals(VoicePhase.SEARCHING, vm.voice.value)
+
+        vm.onOverlayDismissed()
+        assertEquals(VoicePhase.IDLE, vm.voice.value)
+
+        // If the search were not actually cancelled, letting it finish here would report NOT_FOUND.
+        search.gate?.complete(Unit)
+        assertEquals(
+            "runAsk's VoiceSearch fallback must actually be cancelled, not just a stale job reference",
+            SaralStatus.Idle,
+            vm.status.value,
+        )
+    }
 }
