@@ -65,6 +65,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -95,6 +96,7 @@ import com.metrolist.music.ui.component.BottomSheetState
 import com.metrolist.music.ui.component.ListDialog
 import com.metrolist.music.ui.component.Material3MenuGroup
 import com.metrolist.music.ui.component.Material3MenuItemData
+import com.metrolist.music.saraswati.craft.snooze.SnoozeViewModel
 import com.metrolist.music.ui.component.NewAction
 import com.metrolist.music.ui.component.NewActionGrid
 import com.metrolist.music.ui.component.VolumeSlider
@@ -118,6 +120,8 @@ fun PlayerMenu(
     val context = LocalContext.current
     val database = LocalDatabase.current
     val playerConnection = LocalPlayerConnection.current ?: return
+    // SARASWATI: Phase 6 Task 3 — the snooze menu item.
+    val snoozeViewModel = hiltViewModel<SnoozeViewModel>()
     val playerVolume = playerConnection.service.playerVolume.collectAsStateWithLifecycle()
 
     // Cast state for volume control - safely access castConnectionHandler to prevent crashes
@@ -380,6 +384,26 @@ fun PlayerMenu(
             Material3MenuGroup(
                 items =
                     buildList {
+                        // SARASWATI: Phase 6 Task 3 — "Abhi nahin": keep this song out of queues and radio for 30 days.
+                        add(
+                            Material3MenuItemData(
+                                title = { Text(text = stringResource(R.string.snooze_song)) },
+                                description = { Text(text = stringResource(R.string.snooze_song_desc)) },
+                                icon = {
+                                    Icon(
+                                        painter = painterResource(R.drawable.bedtime),
+                                        contentDescription = null,
+                                    )
+                                },
+                                onClick = {
+                                    onDismiss()
+                                    snoozeViewModel.snooze(
+                                        mediaMetadata,
+                                        playerConnection.player.currentMediaItem?.mediaId,
+                                    ) { playerConnection.player.seekToNext() }
+                                },
+                            ),
+                        )
                         // Don't show "View Artist" for podcasts - only show "View Podcast"
                         if (artists.isNotEmpty() && !isPodcast) {
                             add(

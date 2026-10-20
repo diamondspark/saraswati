@@ -62,6 +62,14 @@ sealed class Screens(
         route = "sangat/remote",
     )
 
+    // SARASWATI: Phase 6 Task 3 — "Snoozed songs", opened from the Library menu. Not a tab.
+    object Snoozed : Screens(
+        titleId = R.string.snoozed_songs_title,
+        iconIdInactive = R.drawable.bedtime,
+        iconIdActive = R.drawable.bedtime,
+        route = "snoozed",
+    )
+
     // SARASWATI: Phase 4 Task 21 — Import from Spotify, opened from the Library menu. Not a tab.
     object SpotifyImport : Screens(
         titleId = R.string.spotify_import_title,

@@ -1332,4 +1332,14 @@
     <string name="spotify_import_error_unsupported">This is not a Spotify export. Choose the zip or JSON file from your Spotify data.</string>
     <string name="spotify_import_error_too_large">This file is too large to import.</string>
     <string name="spotify_import_error_failed">The import stopped before it finished. Songs matched so far were kept.</string>
+    <!-- SARASWATI: Phase 6 Task 3 — snooze strings (menus, Library, snackbar, snoozed-songs list). -->
+    <string name="snooze_song">Abhi nahin · Snooze for 30 days</string>
+    <string name="snooze_song_desc">Keep this song out of queues and radio for 30 days</string>
+    <string name="snoozed_songs_menu">Snoozed songs</string>
+    <string name="snoozed_songs_title">Snoozed songs</string>
+    <string name="snoozed_songs_empty">No songs are snoozed.</string>
+    <string name="snoozed_for_30_days">Snoozed for 30 days</string>
+    <string name="snoozed_back_in_days">Back in %1$d days</string>
+    <string name="snoozed_wake">Jagao</string>
+    <!-- SARASWATI: end Phase 6 Task 3 snooze strings -->
 </resources>

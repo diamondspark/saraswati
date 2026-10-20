@@ -89,6 +89,7 @@ import com.metrolist.music.ui.component.ListDialog
 import com.metrolist.music.ui.component.LocalBottomSheetPageState
 import com.metrolist.music.ui.component.Material3MenuGroup
 import com.metrolist.music.ui.component.Material3MenuItemData
+import com.metrolist.music.saraswati.craft.snooze.SnoozeViewModel
 import com.metrolist.music.ui.component.NewAction
 import com.metrolist.music.saraswati.family.FamilyError
 import com.metrolist.music.saraswati.family.messageRes
@@ -132,6 +133,8 @@ fun SongMenu(
     var refetchIconDegree by remember { mutableFloatStateOf(0f) }
 
     val cacheViewModel = hiltViewModel<CachePlaylistViewModel>()
+    // SARASWATI: Phase 6 Task 3 — the snooze menu item.
+    val snoozeViewModel = hiltViewModel<SnoozeViewModel>()
 
     val rotationAnimation by animateFloatAsState(
         targetValue = refetchIconDegree,
@@ -621,6 +624,24 @@ fun SongMenu(
             Material3MenuGroup(
                 items =
                     listOfNotNull(
+                        // SARASWATI: Phase 6 Task 3 — "Abhi nahin": keep this song out of queues and radio for 30 days.
+                        Material3MenuItemData(
+                            title = { Text(text = stringResource(R.string.snooze_song)) },
+                            description = { Text(text = stringResource(R.string.snooze_song_desc)) },
+                            icon = {
+                                Icon(
+                                    painter = painterResource(R.drawable.bedtime),
+                                    contentDescription = null,
+                                )
+                            },
+                            onClick = {
+                                onDismiss()
+                                snoozeViewModel.snooze(
+                                    song.toMediaMetadata(),
+                                    playerConnection.player.currentMediaItem?.mediaId,
+                                ) { playerConnection.player.seekToNext() }
+                            },
+                        ),
                         if (listenTogetherManager != null && listenTogetherManager.isInRoom && !listenTogetherManager.isHost) {
                             Material3MenuItemData(
                                 title = { Text(text = stringResource(R.string.suggest_to_host)) },

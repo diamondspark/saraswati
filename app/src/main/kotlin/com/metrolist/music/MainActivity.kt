@@ -138,6 +138,9 @@ import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.WatchEndpoint
 import com.metrolist.music.saraswati.SaraswatiDeepLinkPolicy
+// SARASWATI: Phase 6 Task 3 — the snooze undo snackbar.
+import com.metrolist.music.saraswati.craft.snooze.SnoozeActions
+import com.metrolist.music.saraswati.craft.snooze.SnoozeUndo
 import com.metrolist.music.saraswati.SaraswatiFeatures
 import com.metrolist.music.saraswati.family.FamilyRoutes
 import com.metrolist.music.saraswati.family.FamilyFeatureGate
@@ -276,6 +279,10 @@ class MainActivity : FragmentActivity() {
 
     @Inject
     lateinit var database: MusicDatabase
+
+    // SARASWATI: Phase 6 Task 3 — Undo on the snooze snackbar.
+    @Inject
+    lateinit var snoozeActions: SnoozeActions
 
     @Inject
     lateinit var downloadUtil: DownloadUtil
@@ -1141,6 +1148,8 @@ class MainActivity : FragmentActivity() {
                     mutableStateOf(null)
                 }
                 val snackbarHostState = remember { SnackbarHostState() }
+                // SARASWATI: Phase 6 Task 3 — "Snoozed for 30 days · Undo" from any snooze menu.
+                SnoozeUndo.Host(snackbarHostState) { videoId -> lifecycleScope.launch { snoozeActions.undo(videoId) } }
 
                 LaunchedEffect(Unit) {
                     // SARASWATI (audit A9.3): a malformed link must never crash the app.
