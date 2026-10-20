@@ -24,7 +24,7 @@ class CookieVaultTest {
     fun `round trip returns the original`() {
         val cookie = "SAPISID=abc123; HSID=def456; __Secure-3PSID=ghi789"
         val sealed = vault.seal(cookie)
-        assertEquals(cookie, vault.open(sealed))
+        assertEquals(OpenResult.Opened(cookie), vault.open(sealed))
     }
 
     @Test
@@ -41,7 +41,7 @@ class CookieVaultTest {
         bytes[bytes.size - 1] = (bytes[bytes.size - 1].toInt() xor 0x01).toByte()
         val tampered = "v1:" + Base64.getEncoder().encodeToString(bytes)
 
-        assertNull(vault.open(tampered))
+        assertEquals(OpenResult.Rejected, vault.open(tampered))
     }
 
     @Test
@@ -49,18 +49,18 @@ class CookieVaultTest {
         val sealed = vault.seal("SAPISID=abc")
         val otherVault = CookieVault(SoftwareKeyProvider())
 
-        assertNull(otherVault.open(sealed))
+        assertEquals(OpenResult.Rejected, otherVault.open(sealed))
     }
 
     @Test
     fun `unprefixed legacy plaintext opens to null`() {
-        assertNull(vault.open("SAPISID=abc; HSID=def456"))
+        assertEquals(OpenResult.Rejected, vault.open("SAPISID=abc; HSID=def456"))
     }
 
     @Test
     fun `empty string round-trips`() {
         val sealed = vault.seal("")
-        assertEquals("", vault.open(sealed))
+        assertEquals(OpenResult.Opened(""), vault.open(sealed))
     }
 
     @Test
@@ -72,7 +72,7 @@ class CookieVaultTest {
         val sealed = vault.seal("SAPISID=abc")
         val brokenVault = CookieVault(ThrowingKeyProvider())
 
-        assertNull(brokenVault.open(sealed))
+        assertEquals(OpenResult.Unavailable, brokenVault.open(sealed))
     }
 
     private class ThrowingKeyProvider : AesGcmKeyProvider {
@@ -84,5 +84,109 @@ class CookieVaultTest {
         override fun key(): SecretKey {
             throw ProviderException("Keystore is broken")
         }
+    }
+    // SARASWATI: per-slot AAD — a ciphertext is bound to the slot it was
+    // sealed for, so one slot's value can't be replayed into another's.
+    @Test
+    fun `a value sealed for one purpose does not open under another`() {
+        val sealed = vault.seal("secret", purpose = "familyAdminKey")
+
+        assertEquals(OpenResult.Opened("secret"), vault.open(sealed, purpose = "familyAdminKey"))
+        assertEquals(OpenResult.Rejected, vault.open(sealed, purpose = "familyHubSessionToken"))
+        assertEquals(OpenResult.Rejected, vault.open(sealed))
+        assertEquals(OpenResult.Rejected, vault.open(sealed, purpose = "cookie"))
+    }
+
+    @Test
+    fun `a value sealed with no purpose is the cookie's and opens only as the cookie`() {
+        val sealed = vault.seal("SAPISID=abc")
+
+        assertEquals(OpenResult.Opened("SAPISID=abc"), vault.open(sealed))
+        assertEquals(OpenResult.Opened("SAPISID=abc"), vault.open(sealed, purpose = "cookie"))
+        assertEquals(OpenResult.Rejected, vault.open(sealed, purpose = "familyAdminKey"))
+    }
+
+    @Test
+    fun `the cookie's AAD is unchanged so phones that already hold a sealed cookie keep it`() {
+        val provider = SoftwareKeyProvider()
+        val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, provider.key())
+        cipher.updateAAD("saraswati.cookie.v1".toByteArray(Charsets.UTF_8))
+        val legacy = "v1:" + Base64.getEncoder().encodeToString(cipher.iv + cipher.doFinal("SAPISID=old".toByteArray()))
+
+        assertEquals(OpenResult.Opened("SAPISID=old"), CookieVault(provider).open(legacy))
+    }
+
+    @Test
+    fun `a purpose that could blur the AAD is refused`() {
+        listOf("", "a.b", "a b", "a\u0000b", "../cookie").forEach { purpose ->
+            assertNull(purpose, runCatching { vault.seal("x", purpose = purpose) }.getOrNull())
+            assertEquals(purpose, OpenResult.Rejected, vault.open(vault.seal("x"), purpose = purpose))
+        }
+    }
+
+    // SARASWATI: fix wave A (I1) — the three answers open() gives, and the one
+    // thing each licenses a caller to do.
+    @Test
+    fun `malformed or foreign blobs are rejected`() {
+        val tooShort = "v1:" + Base64.getEncoder().encodeToString(ByteArray(27))
+        listOf(
+            "v1:" to "an empty payload",
+            "v1:!!!not base64!!!" to "bad Base64",
+            "v1:" + Base64.getEncoder().encodeToString("x".toByteArray()) to "a payload shorter than an IV",
+            tooShort to "a payload shorter than IV plus tag",
+            "V1:abcd" to "a different prefix",
+            "" to "an empty string",
+        ).forEach { (blob, what) ->
+            assertEquals(what, OpenResult.Rejected, vault.open(blob))
+        }
+        val garbage = "v1:" + Base64.getEncoder().encodeToString(ByteArray(64) { it.toByte() })
+        assertEquals(OpenResult.Rejected, vault.open(garbage))
+    }
+
+    @Test
+    fun `any Keystore or provider failure is unavailable, not rejected`() {
+        val sealed = vault.seal("SAPISID=abc")
+        val failures: List<Throwable> =
+            listOf(
+                ProviderException("keystore.db corrupted"),
+                java.security.KeyStoreException("keystore not ready"),
+                java.security.UnrecoverableKeyException("key not loadable"),
+                java.security.InvalidKeyException("key rejected"),
+                IllegalStateException("provider crashed"),
+            )
+        for (failure in failures) {
+            val broken = CookieVault(FailingKeyProvider(failure))
+            assertEquals(failure.toString(), OpenResult.Unavailable, broken.open(sealed))
+        }
+    }
+
+    @Test
+    fun `a value that is rejected does not become unavailable when the Keystore breaks later`() {
+        val broken = CookieVault(FailingKeyProvider(ProviderException("down")))
+
+        // Malformed input is judged before the Keystore is touched.
+        assertEquals(OpenResult.Rejected, broken.open("SAPISID=plaintext"))
+        assertEquals(OpenResult.Rejected, broken.open("v1:!!!"))
+    }
+
+    @Test
+    fun `openOrNull reads both non-answers as null`() {
+        val sealed = vault.seal("secret")
+
+        assertEquals("secret", vault.openOrNull(sealed))
+        assertNull(vault.openOrNull("plaintext"))
+        assertNull(CookieVault(FailingKeyProvider(ProviderException("down"))).openOrNull(sealed))
+    }
+
+    @Test
+    fun `an opened result never prints the secret`() {
+        assertFalse(OpenResult.Opened("SAPISID=abc").toString().contains("SAPISID"))
+    }
+
+    private class FailingKeyProvider(
+        private val failure: Throwable,
+    ) : AesGcmKeyProvider {
+        override fun key(): SecretKey = throw failure
     }
 }

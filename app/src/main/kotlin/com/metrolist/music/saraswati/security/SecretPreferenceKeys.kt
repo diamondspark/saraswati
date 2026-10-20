@@ -8,8 +8,9 @@
 // redirect this app's network traffic through an attacker-controlled host,
 // if it ever reached a cloud backup or a restored/hand-copied legacy
 // datastore file. SecretScrubber wipes every key here on every app start,
-// except an InnerTubeCookieKey value the vault actually accepts (i.e. one
-// this app itself sealed).
+// except a [VAULT_SEALED] key whose value the vault actually accepts (i.e.
+// one this app itself sealed): the YouTube cookie and the family hub
+// credentials.
 //
 // SecretKeyCoverageTest reflects over every Preferences.Key in
 // PreferenceKeysKt whose name looks secret-shaped and fails the build if a
@@ -19,6 +20,9 @@ package com.metrolist.music.saraswati.security
 
 import androidx.datastore.preferences.core.Preferences
 import com.metrolist.music.constants.DeeplApiKey
+import com.metrolist.music.constants.FamilyAdminKeyKey
+import com.metrolist.music.constants.FamilyHubClaimSecretKey
+import com.metrolist.music.constants.FamilyHubSessionTokenKey
 import com.metrolist.music.constants.InnerTubeCookieKey
 import com.metrolist.music.constants.LastFMSessionKey
 import com.metrolist.music.constants.ListenTogetherSessionTimestampKey
@@ -59,6 +63,27 @@ object SecretPreferenceKeys {
             ProxyTypeKey,
             ProxyUsernameKey,
             ProxyPasswordKey,
+            // Family hub credentials (Phase 3): bearer tokens for the
+            // Cloudflare Worker that holds the roster, stations and
+            // kill-switches. Sealed at rest like the cookie, because a
+            // phone-to-phone transfer or restored backup must never carry
+            // another device's admin key or session across.
+            FamilyAdminKeyKey,
+            FamilyHubSessionTokenKey,
+            FamilyHubClaimSecretKey,
+        )
+
+    // The subset of [all] this app keeps at rest, sealed by the vault, and
+    // therefore the only keys SecretScrubber lets survive (when the stored
+    // value really is vault-sealed). Everything else in [all] is wiped on
+    // every start. SealedPreferences reads this to decide what to seal and
+    // open; SecretKeyCoverageTest-style tests pin that it stays inside [all].
+    val VAULT_SEALED: Set<Preferences.Key<*>> =
+        setOf(
+            InnerTubeCookieKey,
+            FamilyAdminKeyKey,
+            FamilyHubSessionTokenKey,
+            FamilyHubClaimSecretKey,
         )
 
     // Preference keys the coverage test's name regex flags as

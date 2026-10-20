@@ -4,7 +4,7 @@ export type { AuthResult };
 
 /**
  * What a route module may use of the hub: its storage, the shared fixed-window
- * limiter, the kill switches and the clock. Handlers get this instead of the
+ * limiter, the kill switches, the roster check and the clock. Handlers get this instead of the
  * FamilyHub itself, so they can be run against a stand-in.
  */
 export interface HubContext {
@@ -12,6 +12,11 @@ export interface HubContext {
   /** True means the call is allowed (see FamilyHub.rateLimit). */
   rateLimit(key: string, windowSeconds: number, max: number): boolean;
   featureEnabled(key: FamilyFeatureKey): boolean;
+  /**
+   * True while the device is on the roster as approved. A route that awaits its body asks
+   * again afterwards, because a revoke can land in between.
+   */
+  isApproved(deviceId: string): boolean;
   /** Epoch milliseconds. */
   now(): number;
 }

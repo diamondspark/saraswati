@@ -95,4 +95,21 @@ class ControllerPolicyTest {
     fun `null caller is denied`() {
         assertFalse(ControllerPolicy.isAllowed(selfPackage, null, androidAutoDigests))
     }
+
+    // SARASWATI: final fix wave (M7) — the Sangat button is shown to the real Android Auto only.
+    @Test
+    fun `only Android Auto with its expected digest is the car`() {
+        fun caller(
+            pkg: String,
+            digest: String,
+            system: Boolean = false,
+        ) = CallerInfo(pkg, isTrusted = true, isSystemApp = system, signingSha256 = setOf(digest))
+
+        assertTrue(ControllerPolicy.isAndroidAuto(caller(ControllerPolicy.ANDROID_AUTO_PACKAGE, "expected-digest"), androidAutoDigests))
+        assertFalse("wrong certificate", ControllerPolicy.isAndroidAuto(caller(ControllerPolicy.ANDROID_AUTO_PACKAGE, "other"), androidAutoDigests))
+        assertFalse("the system UI is trusted but not the car", ControllerPolicy.isAndroidAuto(caller("com.android.systemui", "expected-digest", true), androidAutoDigests))
+        assertFalse("our own app", ControllerPolicy.isAndroidAuto(caller(selfPackage, "expected-digest"), androidAutoDigests))
+        assertFalse("unverified", ControllerPolicy.isAndroidAuto(null, androidAutoDigests))
+        assertFalse("no digest on file", ControllerPolicy.isAndroidAuto(caller(ControllerPolicy.ANDROID_AUTO_PACKAGE, "expected-digest"), emptyMap()))
+    }
 }

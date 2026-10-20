@@ -1,59 +1,22 @@
-import { env, runInDurableObject } from "cloudflare:test";
+import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import {
+  type Claimed,
+  type Stub,
+  TEST_ADMIN_KEY,
+  adminHeaders,
+  approveAndGetSessionToken as approve,
+  claimDevice,
+  claimWithToken,
+  getFamilyHubStub,
+  mintPairingToken,
+} from "./helpers";
 
-// Must match the ADMIN_KEY binding injected in vitest.config.ts.
-const TEST_ADMIN_KEY =
-  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const WRONG_BEARER = "cd".repeat(32);
 const ADMIN_BUDGET = 20;
 
-function getFamilyHubStub() {
-  const id = env.FAMILY_HUB.idFromName("family");
-  return env.FAMILY_HUB.get(id);
-}
-
-type Stub = ReturnType<typeof getFamilyHubStub>;
-
-const adminHeaders = { Authorization: `Bearer ${TEST_ADMIN_KEY}` };
-
-interface Claimed {
-  deviceId: string;
-  status: string;
-  claimSecret: string;
-}
-
-async function mintPairingToken(stub: Stub): Promise<string> {
-  const response = await stub.fetch("https://example.com/pairing/create", {
-    method: "POST",
-    headers: adminHeaders,
-  });
-  return ((await response.json()) as { token: string }).token;
-}
-
 function claimWith(stub: Stub, token: string, extra: Record<string, unknown>) {
-  return stub.fetch("https://example.com/pairing/claim", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ token, deviceName: "Role Phone", ...extra }),
-  });
-}
-
-async function claimDevice(
-  stub: Stub,
-  extra: Record<string, unknown> = {},
-): Promise<Claimed> {
-  const response = await claimWith(stub, await mintPairingToken(stub), extra);
-  expect(response.status).toBe(200);
-  return (await response.json()) as Claimed;
-}
-
-async function approve(stub: Stub, deviceId: string): Promise<string> {
-  const response = await stub.fetch(
-    `https://example.com/roster/${deviceId}/approve`,
-    { method: "POST", headers: adminHeaders },
-  );
-  expect(response.status).toBe(200);
-  return ((await response.json()) as { sessionToken: string }).sessionToken;
+  return claimWithToken(stub, token, { deviceName: "Role Phone", ...extra });
 }
 
 async function revoke(stub: Stub, deviceId: string) {
@@ -215,7 +178,7 @@ describe("GET /roster role", () => {
     const deviceId = "c0000000-0000-4000-8000-000000000001";
     await runInDurableObject(stub, (_instance, state) => {
       state.storage.sql.exec(
-        "INSERT INTO roster (deviceId, deviceName, status, sessionToken, approvedAt) VALUES (?, 'Seeded', 'pending', NULL, NULL)",
+        "INSERT INTO roster (deviceId, deviceName, status, sessionTokenHash, approvedAt, claimedAt) VALUES (?, 'Seeded', 'pending', NULL, NULL, 0)",
         deviceId,
       );
     });

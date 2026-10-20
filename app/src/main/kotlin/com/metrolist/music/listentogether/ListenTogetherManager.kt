@@ -11,8 +11,10 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import com.metrolist.innertube.YouTube
+import com.metrolist.innertube.models.YouTubeClient
 import com.metrolist.innertube.models.WatchEndpoint
 import com.metrolist.music.constants.ListenTogetherSyncVolumeKey
+import com.metrolist.music.constants.ListenTogetherUsernameKey
 import com.metrolist.music.extensions.currentMetadata
 import com.metrolist.music.extensions.metadata
 import com.metrolist.music.extensions.toMediaItem
@@ -22,6 +24,15 @@ import com.metrolist.music.models.MediaMetadata.Artist
 import com.metrolist.music.models.toMediaMetadata
 import com.metrolist.music.playback.PlayerConnection
 import com.metrolist.music.playback.queues.YouTubeQueue
+import com.metrolist.music.saraswati.family.sangat.CarConnectionKeeper
+import com.metrolist.music.saraswati.family.sangat.PassengerPlayCredit
+import com.metrolist.music.saraswati.family.sangat.tickWhilePresent
+import com.metrolist.music.saraswati.family.sangat.GuestPlaybackLock
+import com.metrolist.music.saraswati.family.sangat.RemoteControllerMode
+import com.metrolist.music.saraswati.family.sangat.RemoteControllerPolicy
+import com.metrolist.music.saraswati.family.sangat.RemoteHostGuard
+import com.metrolist.music.saraswati.family.sangat.RemoteEventRouter
+import com.metrolist.music.saraswati.family.sangat.RemoteControllerStore
 import com.metrolist.music.utils.dataStore
 import com.metrolist.music.utils.getArtistSeparator
 import com.metrolist.music.utils.joinToArtistString
@@ -30,11 +41,17 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -85,12 +102,62 @@ class ListenTogetherManager
             private const val HARD_SYNC_THRESHOLD_MS = 750L
             private const val DRIFT_CORRECTION_SPEED = 0.02f
             private const val DRIFT_CHECK_INTERVAL_MS = 250L
+            private const val PASSENGER_CREDIT_TICK_MS = 5_000L // SARASWATI
         }
 
         private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
+        // SARASWATI: Phase 4 Task 10 — remote-controller mode: a car passenger's phone shows the room and
+        // suggests songs but never plays. The router is the first stop for every room event that would drive
+        // the local player; the stored flag survives a process death so a reconnect cannot start playback.
+        private val remoteMode =
+            RemoteControllerMode(scope, client.roomState) { RemoteControllerStore.save(context, scope, it) }
+        private val remoteEventRouter =
+            RemoteEventRouter(remoteMode, isHost = { isHost }, pauseLocalPlayback = ::pauseLocalForRemoteController)
+
+        val isRemoteController = remoteMode.enabled
+        val remoteNowPlaying = remoteMode.nowPlaying
+
         init {
             observePreferences()
+            RemoteControllerStore.restore(context, scope, remoteMode)
+            observePassengerCredit()
+        }
+
+        // SARASWATI: Phase 4 Task 13 — this phone plays nothing as a remote controller, so a song it picked is
+        // credited to its own YouTube history from the room state once it has played long enough. The ticker
+        // lets a long song be credited without waiting for the next room update.
+        private fun observePassengerCredit() {
+            val credit = PassengerPlayCredit()
+            val username =
+                context.dataStore.data
+                    .map { it[ListenTogetherUsernameKey].orEmpty() }
+                    .distinctUntilChanged()
+                    .stateIn(scope, SharingStarted.Eagerly, "")
+            scope.launch {
+                tickWhilePresent(remoteNowPlaying, PASSENGER_CREDIT_TICK_MS).collect { now ->
+                    val id =
+                        credit.onRoomState(
+                            videoId = now?.track?.id,
+                            suggestedBy = now?.track?.suggestedBy,
+                            isPlaying = now?.isPlaying == true,
+                            myUsername = username.value,
+                        )
+                    if (id != null) registerPassengerPlay(id)
+                }
+            }
+        }
+
+        private fun registerPassengerPlay(videoId: String) {
+            scope.launch(Dispatchers.IO) {
+                YouTube
+                    .player(videoId, client = YouTubeClient.WEB_REMIX)
+                    .mapCatching { response ->
+                        val url = response.playbackTracking?.videostatsPlaybackUrl?.baseUrl
+                        requireNotNull(url) { "no playback tracking URL for $videoId" }
+                        YouTube.registerPlayback(null, url).getOrThrow()
+                    }.onFailure { Timber.tag(TAG).w(it, "Could not register passenger play") }
+            }
         }
 
         private var playerConnection: PlayerConnection? = null
@@ -156,6 +223,9 @@ class ListenTogetherManager
 
         val isInRoom: Boolean get() = client.isInRoom
         val isHost: Boolean get() = client.isHost
+
+        // SARASWATI: final fix wave (I1) — in a Sangat in the car the car phone stays the host; the menus hide "Transfer ownership".
+        val carModeActive: StateFlow<Boolean> get() = client.carModeActive
         val hasPersistedSession: Boolean get() = client.hasPersistedSession
 
         private val playerListener =
@@ -289,11 +359,56 @@ class ListenTogetherManager
                 }
             }
 
+        // SARASWATI: Phase 4 Task 15 — a Sangat started from the car may be the first Listen Together use since the
+        // process started: the app screen, which normally wires the manager up, has never been opened. Idempotent.
+        // Phase 4 fix wave — the manager keeps a service-made connection of its own for as long as this phone hosts
+        // a room and no app screen is bound, so opening and closing the app cannot stop a car-hosted Sangat syncing;
+        // it is disposed (with its scope) as soon as the screen binds, the room ends or the service goes.
+        private var carConnectionScope: CoroutineScope? = null
+        private val carConnection =
+            CarConnectionKeeper<PlayerConnection> {
+                it.dispose()
+                carConnectionScope?.cancel()
+                carConnectionScope = null
+            }
+
+        fun attachForCar(newConnection: (CoroutineScope) -> PlayerConnection) {
+            carConnection.register {
+                val connectionScope = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]))
+                carConnectionScope = connectionScope
+                newConnection(connectionScope)
+            }
+            if (eventCollectorJob == null) initialize()
+            if (playerConnection == null) bindPlayerConnection(carConnection.resolve(app = null, hosting = true), resync = true)
+        }
+
+        /**
+         * Drops the service-made connection, if that is what the manager holds. Safe to call at any time;
+         * [serviceGone] also forgets how to make another, for a service that is being destroyed.
+         */
+        fun releaseCarConnection(serviceGone: Boolean = false) {
+            if (carConnection.isCar(playerConnection)) bindPlayerConnection(null, resync = true)
+            carConnection.settle(playerConnection)
+            if (serviceGone) carConnection.register(null)
+        }
+
         /**
          * Set the player connection for playback sync.
          * Should be called when PlayerConnection is available.
          */
         fun setPlayerConnection(connection: PlayerConnection?) {
+            val old = playerConnection
+            val effective = carConnection.resolve(app = connection, hosting = isInRoom && isHost)
+            // Both connections drive the same player: handing a hosted room from one to the other needs no resync
+            val sameService = old != null && effective != null && carConnection.isCar(old) != carConnection.isCar(effective)
+            bindPlayerConnection(effective, resync = !sameService)
+            carConnection.settle(effective)
+        }
+
+        private fun bindPlayerConnection(
+            connection: PlayerConnection?,
+            resync: Boolean,
+        ) {
             Timber.tag(TAG).d("setPlayerConnection: ${connection != null}, isInRoom: $isInRoom")
 
             try {
@@ -320,7 +435,9 @@ class ListenTogetherManager
                 // Set up playback blocking for guests
                 connection?.shouldBlockPlaybackChanges = {
                     // Block if we're in a room as a guest (not host)
-                    isInRoom && !isHost
+                    // SARASWATI: Phase 4 review fix (8) — not while the connection is halted: nothing syncs, so the
+                    // guest's own music must not stay locked behind a room it can no longer hear
+                    GuestPlaybackLock.blocks(isInRoom, isHost, connectionState.value)
                 }
 
                 // Add listener if in room
@@ -358,7 +475,7 @@ class ListenTogetherManager
                     stopHeartbeat()
                     stopVolumeSyncObservation()
                 }
-                if (connection != null && oldConnection !== connection && isInRoom && (!isHost || oldConnection != null)) {
+                if (resync && connection != null && oldConnection !== connection && isInRoom && (!isHost || oldConnection != null)) {
                     applyNextHostSnapshot = isHost
                     client.requestSync()
                 }
@@ -390,6 +507,10 @@ class ListenTogetherManager
                     client.events.collect { event ->
                         try {
                             Timber.tag(TAG).d("Received event: $event")
+                            // SARASWATI: Phase 4 review fix (2) — a rejoin after a process death must see the stored flag
+                            if (event is ListenTogetherEvent.JoinApproved || event is ListenTogetherEvent.Reconnected) {
+                                remoteMode.awaitRestored()
+                            }
                             handleEvent(event)
                         } catch (e: Exception) {
                             Timber.tag(TAG).e(e, "Error handling event: $event")
@@ -405,7 +526,9 @@ class ListenTogetherManager
                         lastRole = newRole
 
                         val wasHost = previousRole == RoomRole.HOST
-                        if (newRole == RoomRole.HOST && !wasHost) {
+                        // SARASWATI: Phase 4 review fix (1) — a remote controller made host is about to leave (RemoteHostGuard)
+                        // and must not start publishing from its own idle player meanwhile
+                        if (RemoteHostGuard.startsHostServices(previousRole, newRole, remoteMode.enabled.value)) {
                             val connection = playerConnection
                             if (connection != null) {
                                 Timber.tag(TAG).d("Role changed to HOST, starting sync services")
@@ -437,6 +560,16 @@ class ListenTogetherManager
         }
 
         private fun handleEvent(event: ListenTogetherEvent) {
+            // SARASWATI: Phase 4 Task 15 — a remote controller is never left as the host (see RemoteHostGuard)
+            if (RemoteHostGuard.consume(event, userId.value, remoteMode.enabled.value) {
+                    Timber.tag(TAG).w("Remote controller was made host; leaving so the room can pick a host that plays")
+                    leaveRoom()
+                }
+            ) {
+                return
+            }
+            // SARASWATI: a remote controller's room events never reach the guest handlers below
+            if (remoteEventRouter.route(event)) return
             when (event) {
                 is ListenTogetherEvent.Connected -> {
                     Timber.tag(TAG).d("Connected to server with userId: ${event.userId}")
@@ -527,7 +660,7 @@ class ListenTogetherManager
 
                 is ListenTogetherEvent.BufferComplete -> {
                     Timber.tag(TAG).d("BufferComplete for track: ${event.trackId}")
-                    if (!isHost && bufferingTrackId == event.trackId) {
+                    if (!isHost && bufferingTrackId == event.trackId && remoteMode.drives(isHost)) { // SARASWATI: remote controller never plays
                         bufferCompleteReceivedForTrack = event.trackId
                         applyPendingSyncIfReady()
                     }
@@ -550,6 +683,8 @@ class ListenTogetherManager
                 is ListenTogetherEvent.Kicked -> {
                     Timber.tag(TAG).d("Kicked from room: ${event.reason}")
                     cleanup()
+                    remoteMode.clear() // SARASWATI: Phase 4 Task 10
+                    releaseCarConnection() // SARASWATI: Phase 4 fix wave
                 }
 
                 is ListenTogetherEvent.Disconnected -> {
@@ -702,7 +837,7 @@ class ListenTogetherManager
         }
 
         private fun cleanup() {
-            if (lastRole == RoomRole.GUEST) {
+            if (lastRole == RoomRole.GUEST && remoteMode.drives(isHost)) { // SARASWATI: a remote controller never touched the mute state
                 restoreGuestMuteState()
             }
             if (playerListenerRegistered) {
@@ -728,6 +863,7 @@ class ListenTogetherManager
         }
 
         private fun updateGuestMuteState() {
+            if (!remoteMode.drives(isHost)) return // SARASWATI: a remote controller never touched the mute state
             // Guests are no longer forced to mute - they can hear the music too
             val connection = playerConnection ?: return
             // Just restore any previously forced mute state (should typically be none)
@@ -773,7 +909,8 @@ class ListenTogetherManager
         }
 
         private fun applyHostVolumeIfNeeded(volume: Float?) {
-            if (!syncHostVolumeEnabled.value || isHost || !isInRoom) return
+            // SARASWATI: a remote controller leaves the phone's volume alone
+            if (!syncHostVolumeEnabled.value || isHost || !isInRoom || !RemoteControllerPolicy.drivesLocalPlayer(isHost, remoteMode.enabled.value)) return
             val connection = playerConnection ?: return
             val target = volume?.coerceIn(0f, 1f) ?: return
             connection.service.playerVolume.value = target
@@ -1767,7 +1904,9 @@ class ListenTogetherManager
         fun disconnect() {
             Timber.tag(TAG).d("Disconnecting from server")
             cleanup()
+            remoteMode.clear() // SARASWATI: Phase 4 Task 10
             client.disconnect()
+            releaseCarConnection() // SARASWATI: Phase 4 fix wave
         }
 
         /**
@@ -1775,6 +1914,7 @@ class ListenTogetherManager
          */
         fun createRoom(username: String) {
             Timber.tag(TAG).d("Creating room with username: $username")
+            remoteMode.clear() // SARASWATI: Phase 4 Task 10 — a host plays
             client.createRoom(username)
         }
 
@@ -1784,9 +1924,22 @@ class ListenTogetherManager
         fun joinRoom(
             roomCode: String,
             username: String,
+            // SARASWATI: Phase 4 Task 10 — join to watch and suggest only; this phone never plays the room
+            remoteController: Boolean = false,
         ) {
-            Timber.tag(TAG).d("Joining room $roomCode as $username")
+            Timber.tag(TAG).d("Joining room $roomCode as $username (remoteController=$remoteController)")
+            if (remoteController) remoteMode.enter() else remoteMode.clear()
             client.joinRoom(roomCode, username)
+        }
+
+        // SARASWATI: a remote controller's phone may still be playing what it played before the drive
+        private fun pauseLocalForRemoteController() {
+            try {
+                val player = playerConnection?.player ?: return
+                if (player.playWhenReady) player.pause()
+            } catch (e: Exception) {
+                Timber.tag(TAG).e(e, "Failed to pause local playback for remote controller")
+            }
         }
 
         /**
@@ -1795,7 +1948,9 @@ class ListenTogetherManager
         fun leaveRoom() {
             Timber.tag(TAG).d("Leaving room")
             cleanup()
+            remoteMode.clear() // SARASWATI: Phase 4 Task 10 — after cleanup, which must still see the mode
             client.leaveRoom()
+            releaseCarConnection() // SARASWATI: Phase 4 fix wave — a room that ends frees the car's connection
         }
 
         /**

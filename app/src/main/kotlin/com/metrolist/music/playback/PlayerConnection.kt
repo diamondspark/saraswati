@@ -31,6 +31,7 @@ import com.metrolist.music.extensions.getQueueWindows
 import com.metrolist.music.extensions.metadata
 import com.metrolist.music.extensions.togglePlayPause
 import com.metrolist.music.extensions.withUpdatedMetadata
+import com.metrolist.music.models.keepingOriginOf
 import com.metrolist.music.models.toMediaMetadata
 import com.metrolist.music.playback.MusicService.MusicBinder
 import com.metrolist.music.playback.queues.Queue
@@ -262,7 +263,8 @@ class PlayerConnection(
         repeat(player.mediaItemCount) { index ->
             val mediaItem = player.getMediaItemAt(index)
             if (mediaItem.mediaId == song.id) {
-                player.replaceMediaItem(index, mediaItem.withUpdatedMetadata(updatedMetadata))
+                // SARASWATI: Phase 4 fix wave — keep the item's origin (Parivaar Mix, who suggested it)
+                player.replaceMediaItem(index, mediaItem.withUpdatedMetadata(updatedMetadata.keepingOriginOf(mediaItem.metadata)))
             }
         }
         mediaMetadata.value = player.currentMetadata

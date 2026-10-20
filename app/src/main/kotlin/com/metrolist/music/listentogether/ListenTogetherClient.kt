@@ -30,6 +30,12 @@ import com.metrolist.music.constants.ListenTogetherAutoApproveSuggestionsKey
 import com.metrolist.music.constants.ListenTogetherIsHostKey
 import com.metrolist.music.constants.ListenTogetherRoomCodeKey
 import com.metrolist.music.constants.ListenTogetherServerUrlKey
+import com.metrolist.music.saraswati.family.FamilyFeature
+import com.metrolist.music.saraswati.family.FamilyFeatureGate
+import com.metrolist.music.saraswati.family.HubIdentity
+import com.metrolist.music.saraswati.family.sangat.SangatApprovalPolicy
+import com.metrolist.music.saraswati.family.sangat.SangatCarMode
+import com.metrolist.music.saraswati.family.sangat.SangatConnect
 import com.metrolist.music.constants.ListenTogetherSessionTimestampKey
 import com.metrolist.music.constants.ListenTogetherSessionTokenKey
 import com.metrolist.music.constants.ListenTogetherUserIdKey
@@ -50,6 +56,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -62,6 +69,7 @@ import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.coroutines.cancellation.CancellationException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -226,6 +234,11 @@ class ListenTogetherClient
     @Inject
     constructor(
         private val context: Context,
+        // SARASWATI: Phase 4 Task 9 — the hub session that authenticates the socket, the Sangat kill-switch,
+        // and car mode (which makes the host's phone approve joins and suggestions by itself).
+        private val identity: HubIdentity,
+        private val featureGate: FamilyFeatureGate,
+        private val carMode: SangatCarMode,
     ) {
         companion object {
             private const val TAG = "ListenTogether"
@@ -236,6 +249,7 @@ class ListenTogetherClient
             private const val PING_INTERVAL_MS = 25000L
             private const val INITIAL_PING_INTERVAL_MS = 250L
             private const val MAX_LOG_ENTRIES = 500
+            private const val GATE_HYDRATION_WAIT_MS = 3_000L // SARASWATI: Phase 4 review fix (M8)
             private const val SESSION_GRACE_PERIOD_MS = 10 * 60 * 1000L // 10 minutes
             private const val BACKGROUND_DISCONNECT_DELAY_MS = 30 * 60 * 1000L // 30 minutes
 
@@ -316,6 +330,16 @@ class ListenTogetherClient
             setInstance(this)
             ensureNotificationChannel()
             observeAppLifecycle()
+            // SARASWATI: Phase 4 Task 9 — car mode ends with the hosting. Final fix wave (I3): only when this process
+            // saw the phone go from host to something else; the NONE a new process starts in must not forget the
+            // car room that the saved host session is about to reconnect to.
+            scope.launch {
+                var previous = RoomRole.NONE
+                _role.collect {
+                    if (SangatCarMode.endsWith(previous, it)) carMode.end()
+                    previous = it
+                }
+            }
             scope.launch {
                 for (event in eventQueue) {
                     _events.emit(event)
@@ -461,6 +485,7 @@ class ListenTogetherClient
                     }
                     log(LogLevel.WARNING, "Session expired", "Age: ${System.currentTimeMillis() - timestamp}ms")
                     clearPersistedSession()
+                    scope.launch { carMode.forget() } // SARASWATI: final fix wave (I3)
                 }
             } catch (e: Exception) {
                 log(LogLevel.ERROR, "Failed to load persisted session", e.message)
@@ -573,7 +598,9 @@ class ListenTogetherClient
         private val pingSequence = AtomicLong(0L)
         private val lastPlaybackRevision = AtomicLong(0L)
 
-        private var webSocket: WebSocket? = null
+        // SARASWATI: Phase 4 Task 9 — volatile, and a generation that a disconnect or a refusal bumps so a connect still reading the token drops out
+        @Volatile private var webSocket: WebSocket? = null
+        private val connectGeneration = AtomicInteger(0)
         private var pingJob: Job? = null
         private var reconnectAttempts = 0
         private var backgroundDisconnectJob: Job? = null
@@ -613,14 +640,17 @@ class ListenTogetherClient
                 true
             }
 
+        // SARASWATI: Phase 4 review fix (I2) — the upgrade carries the hub bearer, so a redirect is never followed
         private val client =
-            OkHttpClient
-                .Builder()
-                .connectTimeout(30, TimeUnit.SECONDS)
-                .readTimeout(60, TimeUnit.SECONDS)
-                .writeTimeout(30, TimeUnit.SECONDS)
-                .pingInterval(60, TimeUnit.SECONDS) // Match server ping interval
-                .build()
+            SangatConnect
+                .hardened(
+                    OkHttpClient
+                        .Builder()
+                        .connectTimeout(30, TimeUnit.SECONDS)
+                        .readTimeout(60, TimeUnit.SECONDS)
+                        .writeTimeout(30, TimeUnit.SECONDS)
+                        .pingInterval(60, TimeUnit.SECONDS), // Match server ping interval
+                ).build()
 
         private fun normalizeServerUrl(url: String): String {
             val trimmed = url.trim()
@@ -632,10 +662,9 @@ class ListenTogetherClient
             }
         }
 
-        private fun getServerUrl(): String {
-            val configuredUrl = context.dataStore.get(ListenTogetherServerUrlKey, DEFAULT_SERVER_URL)
-            return normalizeServerUrl(configuredUrl)
-        }
+        // SARASWATI: Phase 4 Task 9 — always the family hub; the stored server URL (restorable, editable in
+        // an old build's settings) is never read, so nothing can point the hub bearer at another host.
+        private fun getServerUrl(): String = DEFAULT_SERVER_URL
 
         /**
          * Calculate exponential backoff delay with jitter
@@ -686,12 +715,41 @@ class ListenTogetherClient
             evaluateBackgroundDisconnectPolicy("connect")
             log(LogLevel.INFO, "Connecting to server", getServerUrl())
 
+            // SARASWATI: Phase 4 Task 9 — the upgrade carries this phone's hub session, so the token is read
+            // first (off the caller's thread). No session, Sangat switched off or no hub address: no socket.
+            val generation = connectGeneration.get()
+            scope.launch { openSocket(generation) }
+        }
+
+        private suspend fun openSocket(generation: Int) {
+            // SARASWATI: the stored kill-switches may not be read yet at a cold start (M8); a short wait, not a hang
+            withTimeoutOrNull(GATE_HYDRATION_WAIT_MS) { featureGate.awaitHydrated() }
+            val plan =
+                try {
+                    val url = getServerUrl()
+                    val enabled = featureGate.isEnabled(FamilyFeature.SANGAT)
+                    SangatConnect.plan(url, enabled, if (url.isEmpty() || !enabled) null else identity.sessionToken())
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    SangatConnect.Plan.Refuse("Could not start the Sangat connection.")
+                }
+            // disconnect() or another refusal got here first.
+            if (generation != connectGeneration.get()) return
+            if (plan !is SangatConnect.Plan.Open) {
+                // Nothing was asked of the hub, so nothing it said is a reason to forget the room.
+                haltConnection((plan as SangatConnect.Plan.Refuse).message)
+                return
+            }
+
             val request =
-                Request
-                    .Builder()
-                    .url(getServerUrl())
-                    .header("User-Agent", context.packageName)
-                    .build()
+                try {
+                    SangatConnect.request(plan.url, plan.token, context.packageName)
+                } catch (e: IllegalArgumentException) {
+                    // Not logged with its message: OkHttp quotes the header value that it rejected.
+                    haltConnection("Could not start the Sangat connection.")
+                    return
+                }
 
             webSocket =
                 client.newWebSocket(
@@ -740,7 +798,7 @@ class ListenTogetherClient
                             reason: String,
                         ) {
                             log(LogLevel.INFO, "Connection closed", "Code: $code, Reason: $reason")
-                            handleDisconnect()
+                            handleDisconnect(code) // SARASWATI: Phase 4 Task 9 — the close code decides whether to reconnect
                         }
 
                         override fun onFailure(
@@ -749,7 +807,7 @@ class ListenTogetherClient
                             response: Response?,
                         ) {
                             log(LogLevel.ERROR, "Connection failure", t.message)
-                            handleConnectionFailure(t)
+                            handleConnectionFailure(t, response?.code) // SARASWATI: Phase 4 Task 9 — the upgrade's HTTP code decides
                         }
                     },
                 )
@@ -785,6 +843,7 @@ class ListenTogetherClient
             pingJob = null
             serverClock.reset()
             lastPlaybackRevision.set(0L)
+            connectGeneration.incrementAndGet() // SARASWATI: Phase 4 Task 9 — cancels a connect still reading the token
             webSocket?.close(1000, "User disconnected")
             webSocket = null
             _connectionState.value = ConnectionState.DISCONNECTED
@@ -1009,7 +1068,14 @@ class ListenTogetherClient
             }
         }
 
-        private fun handleDisconnect() {
+        // SARASWATI: Phase 4 Task 9 — closeCode added
+        private fun handleDisconnect(closeCode: Int? = null) {
+            val failure = SangatConnect.afterFailure(null, closeCode)
+            if (failure is SangatConnect.Failure.Stop) {
+                log(LogLevel.WARNING, "Server closed the connection for good", "Code: $closeCode")
+                stopFor(failure)
+                return
+            }
             pingJob?.cancel()
             pingJob = null
             serverClock.reset()
@@ -1030,7 +1096,64 @@ class ListenTogetherClient
             evaluateBackgroundDisconnectPolicy("socket_disconnected")
         }
 
-        private fun handleConnectionFailure(t: Throwable) {
+        // SARASWATI: Phase 4 Task 9 — a refusal the hub will repeat (no or revoked session, Sangat off) ends
+        // the connection for good: no retry, no half-kept room, one ConnectionError.
+        private fun stopFor(stop: SangatConnect.Failure.Stop) {
+            if (stop.refreshGate) scope.launch { featureGate.refresh() }
+            if (stop.wipeSession) failTerminally(stop.message) else haltConnection(stop.message)
+        }
+
+        // SARASWATI: Phase 4 review fix (M9) — the same stop, but the stored room and session stay, so a hub
+        // having a bad moment (or a Keystore that is briefly closed) does not cost the family their room.
+        private fun haltConnection(message: String) {
+            connectGeneration.incrementAndGet()
+            pingJob?.cancel()
+            pingJob = null
+            webSocket = null
+            serverClock.reset()
+            releaseWakeLock()
+            _pendingJoinRequests.value = emptyList()
+            _bufferingUsers.value = emptyList()
+            reconnectAttempts = 0
+            _connectionState.value = ConnectionState.ERROR
+            emitEvent(ListenTogetherEvent.ConnectionError(message))
+            evaluateBackgroundDisconnectPolicy("connection_halted")
+        }
+
+        private fun failTerminally(message: String) {
+            connectGeneration.incrementAndGet()
+            pingJob?.cancel()
+            pingJob = null
+            webSocket = null
+            serverClock.reset()
+            releaseWakeLock()
+            sessionToken = null
+            storedRoomCode = null
+            storedUsername = null
+            pendingAction = null
+            _roomState.value = null
+            _role.value = RoomRole.NONE
+            _userId.value = null
+            _pendingJoinRequests.value = emptyList()
+            _bufferingUsers.value = emptyList()
+            lastPlaybackRevision.set(0L)
+            clearPersistedSession()
+            reconnectAttempts = 0
+            _connectionState.value = ConnectionState.ERROR
+            emitEvent(ListenTogetherEvent.ConnectionError(message))
+            evaluateBackgroundDisconnectPolicy("connection_terminal")
+        }
+
+        private fun handleConnectionFailure(
+            t: Throwable,
+            httpCode: Int? = null, // SARASWATI: Phase 4 Task 9
+        ) {
+            val failure = SangatConnect.afterFailure(httpCode, null)
+            if (failure is SangatConnect.Failure.Stop) {
+                log(LogLevel.WARNING, "Hub refused the connection for good", "HTTP $httpCode")
+                stopFor(failure)
+                return
+            }
             pingJob?.cancel()
             pingJob = null
 
@@ -1048,7 +1171,8 @@ class ListenTogetherClient
                 reconnectAttempts++
                 _connectionState.value = ConnectionState.RECONNECTING
 
-                val delayMs = calculateBackoffDelay(reconnectAttempts)
+                // SARASWATI: Phase 4 Task 9 — a 429 waits at least a minute
+                val delayMs = maxOf(calculateBackoffDelay(reconnectAttempts), (failure as SangatConnect.Failure.Retry).minBackoffMs)
                 val delaySeconds = delayMs / 1000
 
                 log(
@@ -1160,7 +1284,9 @@ class ListenTogetherClient
                         log(LogLevel.INFO, "Join request received", "User: ${payload.username}")
 
                         // Check if auto-approval is enabled
-                        val autoApprovalEnabled = context.dataStore.get(ListenTogetherAutoApprovalKey, false)
+                        // SARASWATI: Phase 4 Task 9 — a host who is driving cannot tap Approve.
+                        val autoApprovalEnabled =
+                            SangatApprovalPolicy.autoApprove(context.dataStore.get(ListenTogetherAutoApprovalKey, false), carMode.active.value)
 
                         if (_role.value == RoomRole.HOST) {
                             if (autoApprovalEnabled) {
@@ -1419,7 +1545,12 @@ class ListenTogetherClient
                             log(LogLevel.INFO, "Suggestion received", "${payload.fromUsername}: ${payload.trackInfo.title}")
 
                             // Check if auto-approval of suggestions is enabled
-                            val autoApproveSuggestionsEnabled = context.dataStore.get(ListenTogetherAutoApproveSuggestionsKey, false)
+                            // SARASWATI: Phase 4 Task 9 — as for joins.
+                            val autoApproveSuggestionsEnabled =
+                                SangatApprovalPolicy.autoApprove(
+                                    context.dataStore.get(ListenTogetherAutoApproveSuggestionsKey, false),
+                                    carMode.active.value,
+                                )
 
                             if (autoApproveSuggestionsEnabled) {
                                 // Automatically approve the suggestion
@@ -1495,9 +1626,11 @@ class ListenTogetherClient
                                         "Room: $storedRoomCode - manual intervention may be needed",
                                     )
                                     clearPersistedSession()
+                                    scope.launch { carMode.forget() } // SARASWATI: final fix wave (I3)
                                     sessionToken = null
                                 } else {
                                     clearPersistedSession()
+                                    scope.launch { carMode.forget() } // SARASWATI: final fix wave (I3)
                                     sessionToken = null
                                 }
                             }
@@ -1544,6 +1677,13 @@ class ListenTogetherClient
                             "Successfully reconnected to room",
                             "Code: ${payload.roomCode}, isHost: ${payload.isHost}, attempt was $reconnectAttempts",
                         )
+                        // SARASWATI: final fix wave (I3) — a host back in the car room it was driving is in car mode again,
+                        // and what waited for an Approve tap the driver cannot make is approved.
+                        if (payload.isHost) {
+                            scope.launch {
+                                if (carMode.resumeOnReconnect(payload.roomCode, payload.isHost)) approveEverythingWaiting()
+                            }
+                        }
                         emitEvent(ListenTogetherEvent.Reconnected(payload.roomCode, payload.userId, payload.state, payload.isHost))
                     }
 
@@ -1694,6 +1834,15 @@ class ListenTogetherClient
             releaseWakeLock()
             evaluateBackgroundDisconnectPolicy("leave_room")
         }
+
+        /** Car mode just came back on: nobody can tap Approve, so everything already waiting is approved. */
+        private fun approveEverythingWaiting() {
+            _pendingJoinRequests.value.toList().forEach { approveJoin(it.userId) }
+            _pendingSuggestions.value.toList().forEach { approveSuggestion(it.suggestionId) }
+        }
+
+        /** True while this phone is the host of a Sangat in the car (the car phone stays host; the Worker refuses a transfer). */
+        val carModeActive: StateFlow<Boolean> get() = carMode.active
 
         /**
          * Approve a join request (host only)

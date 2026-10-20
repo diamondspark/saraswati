@@ -2808,6 +2808,12 @@ object YouTube {
     suspend fun createPlaylist(title: String) =
         innerTube.createPlaylist(WEB_REMIX, title).body<CreatePlaylistResponse>().playlistId
 
+    // SARASWATI: Phase 4 Task 12 — the same call with the privacy chosen by the caller ("PRIVATE", "UNLISTED", "PUBLIC").
+    suspend fun createPlaylist(
+        title: String,
+        privacyStatus: String,
+    ) = innerTube.createPlaylist(WEB_REMIX, title, privacyStatus).body<CreatePlaylistResponse>().playlistId
+
     suspend fun renamePlaylist(
         playlistId: String,
         name: String,

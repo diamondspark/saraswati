@@ -994,4 +994,342 @@
     <string name="stream_source_web_creator_desc">Creator web client.</string>
     <string name="top_result">Top result</string>
     <string name="other">Other</string>
+
+    <!-- SARASWATI: Task 7 — Family tab, pairing and Manage Family. Hindi
+         feature names carry English subtitles. -->
+    <string name="family">Family</string>
+    <string name="family_title">Parivaar · Family</string>
+    <string name="family_manage_title">Prabandh · Manage family</string>
+    <string name="family_manage_desc">Pair phones, approve requests and see how each phone is doing.</string>
+    <string name="family_join_title">Parivaar se judein · Join the family</string>
+    <string name="family_join_desc">Open the link your family owner sent you.</string>
+    <string name="family_paired_title">Part of the family</string>
+    <string name="family_paired_desc">The family owner approved this phone.</string>
+    <string name="family_waiting_title">Waiting for approval · Code %1$s</string>
+    <string name="family_waiting_desc">Say this code to the family owner. They approve this phone from Manage family.</string>
+    <string name="family_waiting_open_join">Open Join</string>
+    <string name="family_owner_setup_link">Family owner? Set up this phone</string>
+    <string name="family_owner_setup_title">Owner setup</string>
+    <string name="family_owner_setup_desc">Paste the admin key you saved when you set up the family hub. The hub checks it, then it is kept encrypted on this phone only.</string>
+    <string name="family_admin_key_label">Admin key</string>
+    <string name="family_admin_key_save">Check and save</string>
+    <string name="family_admin_key_checking">Checking…</string>
+    <string name="family_pairing_title">Pair a new phone</string>
+    <string name="family_pairing_desc">Make a one-time link or QR code, send it to the person, then approve their phone here.</string>
+    <string name="family_pairing_create">New pairing link</string>
+    <string name="family_pairing_creating">Making a link…</string>
+    <string name="family_pairing_ready">Valid for 15 minutes, for one phone. Nothing happens until you approve that phone below.</string>
+    <string name="family_pairing_qr_desc">QR code for the pairing link</string>
+    <string name="family_pairing_share_message">Join our family music app: %1$s</string>
+    <string name="family_pairing_copied">Link copied</string>
+    <string name="family_requests_title">Waiting for your approval</string>
+    <string name="family_requests_empty">No requests right now. A new phone shows up here a few seconds after it opens the link.</string>
+    <string name="family_requests_hint">Say the code aloud with the person before you approve.</string>
+    <string name="family_request_code">Code %1$s</string>
+    <string name="family_request_age_now">just now</string>
+    <string name="family_request_age_minutes">%1$d min ago</string>
+    <string name="family_request_age_hours">%1$d h ago</string>
+    <string name="family_request_expired">Expired</string>
+    <string name="family_approve">Approve</string>
+    <string name="family_deny">Deny</string>
+    <string name="family_phones_title">Family phones</string>
+    <string name="family_phones_empty">No phones have joined yet.</string>
+    <string name="family_refresh">Refresh</string>
+    <string name="family_unnamed_phone">Unnamed phone</string>
+    <string name="family_role_adult">Adult</string>
+    <string name="family_role_grandparent">Grandparent</string>
+    <string name="family_role_grandparent_hindi">दादा-दादी · नाना-नानी</string>
+    <string name="family_role_adult_desc">Full app: Home, Search, Library, Family</string>
+    <string name="family_role_grandparent_desc">Saral easy mode: huge tiles, voice search</string>
+    <string name="family_phone_line">%1$s · v%2$d · %3$s local</string>
+    <string name="family_phone_line_no_time">%1$s · v%2$d</string>
+    <string name="family_phone_no_report">No report from this phone yet</string>
+    <string name="family_phone_seen">Seen %1$s</string>
+    <string name="family_switch_to_grandparent">Switch to grandparent mode</string>
+    <string name="family_switch_to_adult">Switch to adult</string>
+    <string name="family_switch_grandparent_confirm">Set %1$s to grandparent mode? It will show only the big station tiles, with no settings. You can switch it back here.</string>
+    <string name="family_switch_adult_confirm">Set %1$s to adult? It will show the full app again.</string>
+    <string name="family_revoke">Remove phone</string>
+    <string name="family_revoke_confirm">Remove %1$s from the family? It stops getting family content straight away.</string>
+    <string name="family_join_heading">Join the family</string>
+    <string name="family_join_hint">Open the link your family owner sent you, or paste it here.</string>
+    <string name="family_join_field">Pairing link</string>
+    <string name="family_join_paste">Paste</string>
+    <string name="family_join_continue">Continue</string>
+    <string name="family_join_name_label">Name this phone</string>
+    <string name="family_join_name_hint">The owner sees this name when approving.</string>
+    <string name="family_join_who">Who is this phone for?</string>
+    <string name="family_join_send">Send request</string>
+    <string name="family_join_sending">Sending…</string>
+    <string name="family_join_waiting_title">Request sent</string>
+    <string name="family_join_code">Code: %1$s</string>
+    <string name="family_join_still_waiting_title">Still waiting</string>
+    <string name="family_join_still_waiting_desc">The family owner has not approved this phone yet. Check again when they are ready.</string>
+    <string name="family_join_check_again">Check again</string>
+    <string name="family_join_waiting_desc">Waiting for the family owner to approve this phone. Keep this screen open, or come back to Join later to check.</string>
+    <string name="family_join_done_title">All set</string>
+    <string name="family_join_done_adult">This phone is part of the family now. Find it under Family.</string>
+    <string name="family_join_done_grandparent">The owner set this phone up for grandparents.</string>
+    <string name="family_join_already">This phone is already part of the family.</string>
+    <string name="family_join_close">Done</string>
+    <string name="family_error_no_admin_key">This phone does not hold the family admin key.</string>
+    <string name="family_error_invalid_input">That did not look right. Check it and try again.</string>
+    <string name="family_error_unauthorized">The family hub did not accept this phone\'s key.</string>
+    <string name="family_error_not_found">The family hub no longer knows this request.</string>
+    <string name="family_error_gone">This link has expired or was already used. Ask for a new one.</string>
+    <string name="family_error_expired">This request has expired. Ask them to send a new request.</string>
+    <string name="family_error_rate_limited">Too many requests. Wait a minute and try again.</string>
+    <string name="family_error_offline">Cannot reach the family hub. Check the connection and try again.</string>
+    <string name="family_error_not_configured">This build of the app has no family hub.</string>
+    <string name="family_error_server">The family hub had a problem. Try again in a moment.</string>
+    <string name="family_error_unknown">Something went wrong. Try again.</string>
+    <string name="family_error_station_limit">A station list needs 1 to 6 stations.</string>
+    <!-- SARASWATI: Task 8 — station and kill-switch owner editor. -->
+    <string name="family_stations_title">Stations</string>
+    <string name="family_stations_desc">The big tiles on a grandparent\'s phone. Up to 6.</string>
+    <string name="family_stations_draft">Not saved yet. Give every station a video link and the list saves.</string>
+    <string name="family_station_add">Add a station</string>
+    <string name="family_station_add_title">New station</string>
+    <string name="family_station_edit_title">Edit station</string>
+    <string name="family_station_name_label">Name</string>
+    <string name="family_station_video_label">YouTube video link</string>
+    <string name="family_station_video_hint">A song that starts this station: paste its link or video ID.</string>
+    <string name="family_station_video_invalid">That is not a YouTube video link.</string>
+    <string name="family_station_needs_video">Needs a video link</string>
+    <string name="family_station_icon_label">Icon</string>
+    <string name="family_station_icon_option">Icon %1$d</string>
+    <string name="family_station_save">Save</string>
+    <string name="family_station_edit">Edit station</string>
+    <string name="family_station_move_up">Move up</string>
+    <string name="family_station_move_down">Move down</string>
+    <string name="family_station_remove">Remove station</string>
+    <string name="family_station_remove_confirm">Remove the station \"%1$s\"?</string>
+    <string name="family_features_title">Features</string>
+    <string name="family_features_desc">Switch a family feature off for everyone. If the hub cannot be reached, features stay on.</string>
+    <string name="family_feature_sangat">Sangat · Listen together</string>
+    <string name="family_feature_sangat_desc">Off hides listening together with family.</string>
+    <string name="family_feature_parivaar_mix">Parivaar Mix · Family mix</string>
+    <string name="family_feature_parivaar_mix_desc">Off hides the mix made from the whole family\'s taste.</string>
+    <string name="family_feature_family_playlists">Family playlists</string>
+    <string name="family_feature_family_playlists_desc">Off hides playlists the family shares.</string>
+    <string name="family_feature_cast_relay">Cast relay</string>
+    <string name="family_feature_cast_relay_desc">Off hides casting from one family phone to another.</string>
+
+    <!-- SARASWATI: Task 9 — Saral, the grandparents' screen. Hindi on purpose: the one screen built only for them,
+         so none of it is translatable. The copy is the approved mockup's, except the lines marked NEW, which
+         need a native-speaker read. -->
+    <string name="saral_identity" translatable="false">सरस्वती · सरल</string>
+    <string name="saral_station_bollywood" translatable="false">बॉलीवुड क्लासिक्स</string>
+    <string name="saral_station_bhajan" translatable="false">भजन और भक्ति गीत</string>
+    <string name="saral_station_ghazal" translatable="false">ग़ज़लें और पुराने गीत</string>
+    <string name="saral_station_meditation" translatable="false">शांति और ध्यान</string>
+    <string name="saral_idle" translatable="false">टाइल दबाएं और सुनें</string>
+    <string name="saral_now_playing" translatable="false">%1$s बज रहा है</string>
+    <string name="saral_play" translatable="false">चलाएं</string>
+    <string name="saral_pause" translatable="false">रोकें</string>
+    <string name="saral_next" translatable="false">आगे वाला गीत</string>
+    <string name="saral_previous" translatable="false">पिछला गीत</string>
+    <string name="saral_voice_search" translatable="false">बोलकर खोजें</string>
+    <string name="saral_listening" translatable="false">सुन रहे हैं…</string>
+    <string name="saral_say_song" translatable="false">गाने का नाम बोलें</string>
+    <string name="saral_close" translatable="false">बंद करें</string>
+    <string name="saral_searching" translatable="false">ढूँढ रहे हैं…</string>
+    <string name="saral_sign_in" translatable="false">यूट्यूब म्यूज़िक में साइन इन करें · Sign in</string>
+    <!-- NEW: not in the approved mockup. -->
+    <string name="saral_empty" translatable="false">स्टेशन अभी तैयार नहीं हैं</string>
+    <string name="saral_starting" translatable="false">%1$s शुरू हो रहा है…</string>
+    <string name="saral_paused" translatable="false">%1$s रुका है</string>
+    <string name="saral_problem_offline" translatable="false">इंटरनेट नहीं है</string>
+    <string name="saral_problem_could_not_play" translatable="false">गाना नहीं चल सका</string>
+    <string name="saral_voice_not_found" translatable="false">गाना नहीं मिला, फिर से बोलें</string>
+    <string name="saral_voice_not_heard" translatable="false">समझ नहीं आया, फिर से बोलें</string>
+    <string name="saral_voice_offline" translatable="false">इंटरनेट के बिना खोज नहीं हो सकती</string>
+    <string name="saral_voice_failed" translatable="false">अभी खोज नहीं हो सकी</string>
+    <string name="saral_voice_unavailable" translatable="false">इस फ़ोन पर बोलकर खोजना उपलब्ध नहीं है</string>
+    <!-- SARASWATI: fix wave A (M5) — the crash screen on a Saral phone: one plain line and one button, no
+         trace, no Share. NEW (not in the approved mockup); needs a native-speaker read. -->
+    <string name="saral_crash_message" translatable="false">कुछ गड़बड़ हो गई</string>
+    <string name="saral_crash_restart" translatable="false">फिर से शुरू करें</string>
+
+    <!-- SARASWATI: Task 10 — festival banner (Home, English like the rest of the app) and ribbon (Saral, Hindi,
+         never translated). The Hindi greetings are in FestivalCalendar (Diwali's is the approved copy). The Saral
+         words below are the mockup's, except the festival names and "का संगीत", which are NEW and need a
+         native-speaker read. -->
+    <string name="festival_banner_subtitle">A radio of %1$s favourites, one tap away</string>
+    <string name="festival_radio_failed">Couldn\'t start the festival radio</string>
+    <string name="festival_banner_play_desc">Play festival music</string>
+    <string name="saral_festival_listen" translatable="false">सुनें</string>
+    <string name="saral_festival_ready" translatable="false">त्योहार के गीत तैयार हैं</string>
+    <string name="saral_festival_listen_desc" translatable="false">%1$s के गीत सुनें</string>
+    <string name="saral_festival_music" translatable="false">%1$s का संगीत</string>
+    <string name="saral_festival_diwali" translatable="false">दीपावली</string>
+    <string name="saral_festival_holi" translatable="false">होली</string>
+    <string name="saral_festival_navratri" translatable="false">नवरात्रि</string>
+    <string name="saral_festival_raksha_bandhan" translatable="false">रक्षाबंधन</string>
+    <string name="saral_festival_janmashtami" translatable="false">जन्माष्टमी</string>
+    <string name="saral_festival_generic" translatable="false">त्योहार</string>
+
+    <!-- SARASWATI: Task 11 — the car's four tabs. Home, Library and Family reuse existing strings. -->
+    <string name="car_tab_stations">Stations</string>
+    <!-- SARASWATI: Phase 4 Task 15 — the car's Family folder and Sangat button. The row "coming soon" it replaces is gone. -->
+    <string name="car_family_parivaar_mix">Parivaar Mix · Family mix</string>
+    <string name="car_family_sangat_start">Start Sangat</string>
+    <string name="car_family_sangat_end">End Sangat · %1$d joined</string>
+    <string name="car_sangat_button_end">End Sangat</string>
+    <string name="car_sangat_pair_first">Pair this phone first</string>
+    <string name="car_sangat_off">Sangat is off</string>
+    <string name="car_sangat_no_connection">No connection</string>
+    <!-- SARASWATI: Phase 4 Task 19 — the Sangat section on Family, the live banner, the car prompt and the remote controller. Reworded to the approved mockups in the fix wave. -->
+    <string name="family_sangat_title">Sangat · Listen together</string>
+    <string name="family_sangat_desc">Everyone hears the same song at the same time, each on their own phone.</string>
+    <string name="family_sangat_start">Start Sangat</string>
+    <string name="family_sangat_hosting_title">You\'re hosting Sangat</string>
+    <string name="family_sangat_hosting_desc">Family can see your room and join. %1$d listening yet.</string>
+    <string name="family_sangat_end">End Sangat</string>
+    <string name="family_sangat_live_heading">Live now</string>
+    <string name="family_sangat_none">Nobody is listening together right now.</string>
+    <string name="family_sangat_join">Join</string>
+    <string name="family_sangat_leave_short">Leave</string>
+    <string name="family_sangat_open_room">Open room</string>
+    <string name="family_sangat_room_title">%1$s\'s Sangat</string>
+    <string name="family_sangat_in_car_tag">In the car</string>
+    <string name="family_sangat_listening">%1$d listening</string>
+    <string name="family_sangat_listening_song">%1$d listening · %2$s</string>
+    <string name="family_sangat_in_sync_here">Playing in sync on this phone</string>
+    <string name="family_sangat_remote_here">Adding songs from this phone</string>
+    <string name="family_sangat_leave">Leave Sangat</string>
+    <string name="family_sangat_name_title">Your name</string>
+    <string name="family_sangat_name_desc">The family sees this name in the room.</string>
+    <string name="family_sangat_name_label">Name</string>
+    <string name="family_sangat_name_save">Save and continue</string>
+    <string name="family_sangat_live_title">Sangat live · %1$s\'s room</string>
+    <string name="family_sangat_live_sync">Playing in sync with %1$s</string>
+    <string name="family_sangat_car_prompt_title">%1$s started Sangat in the car</string>
+    <string name="family_sangat_car_prompt_hindi">%1$s ने गाड़ी में संगत शुरू की है</string>
+    <string name="family_sangat_car_prompt_desc">You can add songs for the drive from your phone. Nothing will play on this phone.</string>
+    <string name="family_sangat_car_prompt_join">Join</string>
+    <string name="family_sangat_car_prompt_not_now">Not now</string>
+    <string name="family_sangat_car_prompt_dismissed">Okay. You can join later from Family · Sangat.</string>
+    <string name="family_sangat_car_prompt_show_again">Show again</string>
+    <string name="sangat_remote_title">Sangat in the car · Remote</string>
+    <string name="sangat_remote_title_host">%1$s\'s Sangat</string>
+    <string name="sangat_remote_subtitle">In the car · %1$d listening</string>
+    <string name="sangat_remote_nothing_plays">Nothing plays on this phone. The car is playing.</string>
+    <string name="sangat_remote_now">Now playing in the car</string>
+    <string name="sangat_remote_nothing_yet">Nothing playing yet</string>
+    <string name="sangat_remote_artist_added_by">%1$s · added by %2$s</string>
+    <string name="sangat_remote_up_next">Up next</string>
+    <string name="sangat_remote_up_next_count">· %1$d songs</string>
+    <string name="sangat_remote_nothing_queued">Nothing queued yet.</string>
+    <string name="sangat_remote_by">by %1$s</string>
+    <string name="sangat_remote_you">You</string>
+    <string name="sangat_remote_add">Add a song</string>
+    <string name="sangat_remote_add_caption">Songs you add play in the car and don\'t change %1$s\'s recommendations.</string>
+    <string name="sangat_remote_add_caption_generic">Songs you add play in the car and don\'t change the host\'s recommendations.</string>
+    <string name="sangat_remote_leave">Leave Sangat</string>
+    <string name="sangat_remote_not_in_car">You are not in a car Sangat.</string>
+    <string name="sangat_remote_back">Back</string>
+    <string name="sangat_add_search_hint">Search for a song</string>
+    <string name="sangat_add_add">Add</string>
+    <string name="sangat_add_added">Added</string>
+    <string name="sangat_add_done">Done</string>
+    <string name="sangat_add_close">Close</string>
+    <string name="sangat_add_searching">Searching…</string>
+    <string name="sangat_add_failed">Search did not work. Check your connection and try again.</string>
+    <string name="sangat_add_none">No songs found.</string>
+
+    <!-- SARASWATI: Phase 4 Task 20 — Parivaar Mix card, Taste & history, family playlists and the song menu's add.
+         Copy follows the approved Phase 4 mockups (Main, Home, Taste, FamilyPlaylist). English only: the Family
+         and Home screens have no Hindi in this app. The playlist read-only line cannot name the creator yet
+         (the hub's playlist rows carry only the device id), so it says "the family phone that made this". -->
+    <string name="parivaar_mix_title">Parivaar Mix · Family mix</string>
+    <string name="parivaar_mix_today">Today\'s Parivaar Mix</string>
+    <plurals name="parivaar_mix_count">
+        <item quantity="one">%1$d song from everyone\'s favourites.</item>
+        <item quantity="other">%1$d songs from everyone\'s favourites.</item>
+    </plurals>
+    <string name="parivaar_mix_play">Play mix</string>
+    <string name="parivaar_mix_needs_two">Needs two family members with songs. It builds once they have played some music.</string>
+    <string name="parivaar_mix_footnote">Plays here stay out of your taste.</string>
+    <string name="parivaar_mix_change_taste">Change in Taste settings</string>
+    <string name="taste_title">Taste &amp; history</string>
+    <string name="parivaar_taste_title">Count Sangat and Parivaar Mix plays toward my taste</string>
+    <string name="taste_explain_off">Only songs you choose shape your History and weekly top songs. Songs others add in Sangat, and Parivaar Mix plays, stay out.</string>
+    <string name="taste_explain_on">Songs others add in Sangat, and Parivaar Mix plays, now shape your History and next week\'s top songs.</string>
+    <string name="taste_what_counts">What counts</string>
+    <string name="taste_what_counts_sub">· History and weekly top songs</string>
+    <string name="taste_row_own">A song you play yourself</string>
+    <string name="taste_row_own_sangat">A song you add in Sangat</string>
+    <string name="taste_row_others_sangat">A song someone else adds in Sangat</string>
+    <string name="taste_row_parivaar">Parivaar Mix plays</string>
+    <string name="taste_note_always">Always</string>
+    <string name="taste_note_counted">Counted, because this is on</string>
+    <string name="taste_note_not_counted">Not counted while this is off</string>
+    <string name="taste_chip_counts">✓ Counts</string>
+    <string name="taste_chip_not_counted">– Not counted</string>
+    <string name="taste_footnote">A play that doesn\'t count is not saved to History, is not sent to YouTube Music, and is not used for your weekly top-songs playlist.</string>
+    <string name="family_playlists_title">Family playlists</string>
+    <string name="family_playlists_sub">· Shared with everyone</string>
+    <string name="family_playlists_empty">No family playlists yet</string>
+    <string name="family_playlists_new">New family playlist</string>
+    <string name="family_playlists_name_label">Playlist name</string>
+    <string name="family_playlists_create">Create</string>
+    <string name="family_playlist_by_you">by You</string>
+    <string name="family_playlist_by_other">by another phone in the family</string>
+    <string name="family_playlist_status_edit">You can edit</string>
+    <string name="family_playlist_status_read">Read-only</string>
+    <string name="family_playlist_label">FAMILY PLAYLIST</string>
+    <string name="family_playlist_yours_note">You made this. Everyone in the family can listen; only you can change it.</string>
+    <string name="family_playlist_read_only">Only the family phone that made this can change it. You can listen to it.</string>
+    <string name="family_playlist_play">Play</string>
+    <string name="family_playlist_open">Open playlist</string>
+    <string name="family_playlist_not_found">This playlist is no longer on the family list.</string>
+    <string name="family_playlist_add_title">Add to family playlist</string>
+    <string name="family_playlist_added">Added to %1$s</string>
+    <!-- SARASWATI: Phase 4 Task 21 — Import from Spotify (English only; AGENTS.md). Copy is the approved mockup's. -->
+    <string name="spotify_import_menu">Import from Spotify</string>
+    <string name="spotify_import_title">Import from Spotify</string>
+    <string name="spotify_import_step_file">File</string>
+    <string name="spotify_import_step_matching">Matching</string>
+    <string name="spotify_import_step_review">Review</string>
+    <string name="spotify_import_step_done">Done</string>
+    <string name="spotify_import_step_text">Step %1$d of 4 · %2$s</string>
+    <string name="spotify_import_pick_title">Bring your Spotify playlists to Saraswati</string>
+    <string name="spotify_import_pick_request">In Spotify, ask for a copy of your data and download the file when it arrives.</string>
+    <string name="spotify_import_pick_choose">Choose that file here. We match each song on YouTube Music.</string>
+    <string name="spotify_import_pick_privacy">The file is read on this phone only. Nothing is sent to Spotify.</string>
+    <string name="spotify_import_phone_only">Import works on the phone only, not in the car.</string>
+    <string name="spotify_import_choose_file">Choose file</string>
+    <string name="spotify_import_choose_other">Choose another file</string>
+    <string name="spotify_import_chosen_summary">%1$d playlists · %2$d songs</string>
+    <string name="spotify_import_playlist_songs">%1$d songs</string>
+    <string name="spotify_import_cut_notice">The list was cut at 10,000 songs. Songs past that were not read.</string>
+    <string name="spotify_import_start">Start matching</string>
+    <string name="spotify_import_matching_title">Matching your songs</string>
+    <string name="spotify_import_matching_desc">Finding each one on YouTube Music</string>
+    <string name="spotify_import_progress">%1$d of %2$d</string>
+    <string name="spotify_import_cancel">Cancel</string>
+    <string name="spotify_import_review_title">%1$d songs need a look</string>
+    <string name="spotify_import_review_desc">%1$d matched on their own. For these, search for the right song or skip.</string>
+    <string name="spotify_import_review_search">Search</string>
+    <string name="spotify_import_review_query">Song or artist</string>
+    <string name="spotify_import_review_local">On this phone</string>
+    <string name="spotify_import_review_youtube">YouTube Music</string>
+    <string name="spotify_import_review_no_results">No matches found.</string>
+    <string name="spotify_import_review_use">Use this</string>
+    <string name="spotify_import_review_skip">Skip</string>
+    <string name="spotify_import_review_undo">Undo</string>
+    <string name="spotify_import_review_using">Using: %1$s</string>
+    <string name="spotify_import_review_skipped">Skipped</string>
+    <string name="spotify_import_review_summary">%1$d chosen · %2$d skipped. Songs not looked at are skipped too.</string>
+    <string name="spotify_import_finish">Finish import</string>
+    <string name="spotify_import_done_title">Done</string>
+    <string name="spotify_import_done_summary">%1$d songs were added to your playlists.</string>
+    <string name="spotify_import_done_skipped">%1$d songs were skipped.</string>
+    <string name="spotify_import_done_overlimit">%1$d songs past the 500-per-playlist limit were not imported.</string>
+    <string name="spotify_import_open_playlist">Open playlist</string>
+    <string name="spotify_import_another">Import another file</string>
+    <string name="spotify_import_error_unsupported">This is not a Spotify export. Choose the zip or JSON file from your Spotify data.</string>
+    <string name="spotify_import_error_too_large">This file is too large to import.</string>
+    <string name="spotify_import_error_failed">The import stopped before it finished. Songs matched so far were kept.</string>
 </resources>

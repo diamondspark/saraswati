@@ -15,6 +15,8 @@
 // and reviewing what it needs. See docs/strip-checklist.md.
 package com.metrolist.music.saraswati
 
+import com.metrolist.music.BuildConfig
+
 object SaraswatiFeatures {
     const val DISCORD = false
     const val LASTFM = false
@@ -24,6 +26,10 @@ object SaraswatiFeatures {
     const val WIDGETS = false
     const val PROXY = false
     const val REMOTE_CIPHER_CODE = false
+
+    // SARASWATI: Phase 4 Task 17 — whole-queue Cast through the LAN relay. Debug builds only until the Task 24
+    // spike has run on real Cast hardware; release builds keep upstream's five-item Cast window.
+    val CAST_RELAY: Boolean = BuildConfig.DEBUG
 
     // SARASWATI: registry keys (not display names) for the four lyrics
     // providers this fork keeps. Dropped: KuGou, Paxsenix, LyricsPlus (six

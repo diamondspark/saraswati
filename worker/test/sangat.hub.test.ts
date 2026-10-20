@@ -2,6 +2,7 @@
 // must cut live sockets at once, a revoke (4001) and the "sangat" kill switch (4003).
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { sha256Hex } from "./helpers";
 import {
   closeAllClients,
   createRoom,
@@ -114,10 +115,25 @@ describe("GET /sangat/live", () => {
           carMode: false,
           memberCount: 2,
           startedAt: new Date(createdAt).toISOString(),
+          nowPlaying: null,
         },
       ],
     });
     expect((await live(hub, devices[0].token)).body.rooms[0].startedAt).toMatch(ISO);
+  });
+
+  it("shows the song on now as a capped title and artist, and nothing else about the track", async () => {
+    const hub = hubStub();
+    const { devices, host } = await openFamily(hub, ["a", "b"]);
+    await host.client.send("playback_action", {
+      action: "change_track",
+      track_info: { id: "secret-video-id", title: "Pal Pal Dil Ke Paas", artist: "Kishore Kumar", duration: 240000 },
+    });
+    await until(async () => (await live(hub, devices[1].token)).body.rooms[0].nowPlaying !== null, "the song to show");
+
+    const [room] = (await live(hub, devices[1].token)).body.rooms;
+    expect(room.nowPlaying).toEqual({ title: "Pal Pal Dil Ke Paas", artist: "Kishore Kumar" });
+    expect(JSON.stringify(room)).not.toContain("secret-video-id");
   });
 
   it("answers an admin as well, and an empty list when nothing is live", async () => {
@@ -193,6 +209,7 @@ describe("PUT /sangat/car", () => {
       carMode: true,
       memberCount: 2,
       startedAt: new Date(createdAt).toISOString(),
+      nowPlaying: null,
     });
     const rooms = (await live(hub, devices[1].token)).body.rooms as { roomCode: string; carMode: boolean }[];
     expect(rooms.map((r) => [r.roomCode, r.carMode])).toEqual([[host.code, true]]);
@@ -276,19 +293,17 @@ describe("PUT /sangat/car", () => {
     expect(response.body).toEqual({ error: "feature disabled" });
   });
 
-  it("is switched off again when the room passes to another device's host", async () => {
+  it("the host cannot hand a car room to another device: it stays with the car phone and in car mode", async () => {
     const hub = hubStub();
     const { devices, host, guests } = await openFamily(hub, ["a", "b"]);
     await setCar(hub, devices[0].token, { roomCode: host.code, carMode: true });
 
     await host.client.send("transfer_host", { new_host_id: guests[0].userId });
-    await host.client.next("host_changed");
+    expect((await host.client.next("error")).payload.code).toBe("not_allowed");
 
     const rooms = (await live(hub, devices[0].token)).body.rooms;
-    expect(rooms).toEqual([expect.objectContaining({ hostDeviceId: devices[1].deviceId, carMode: false })]);
-    // The old host's device can no longer change it; the new one can.
-    expect((await setCar(hub, devices[0].token, { roomCode: host.code, carMode: true })).status).toBe(403);
-    expect((await setCar(hub, devices[1].token, { roomCode: host.code, carMode: true })).status).toBe(200);
+    expect(rooms).toEqual([expect.objectContaining({ hostDeviceId: devices[0].deviceId, carMode: true })]);
+    expect((await setCar(hub, devices[1].token, { roomCode: host.code, carMode: true })).status).toBe(403);
   });
 });
 
@@ -347,7 +362,6 @@ describe("POST /roster/{id}/revoke", () => {
     const hub = hubStub();
     const { devices, host, guests } = await openFamily(hub, ["a", "b"]);
     const [bharat] = guests;
-    await setCar(hub, devices[0].token, { roomCode: host.code, carMode: true });
 
     await revoke(hub, devices[0].deviceId);
 
@@ -380,8 +394,9 @@ describe("POST /roster/{id}/revoke", () => {
     expect((await refusedUpgrade(hub, b.token)).status).toBe(401);
     // Even if the owner approved the phone again later, the old seat is gone.
     const fresh = "ab".repeat(32);
+    const freshHash = await sha256Hex(fresh);
     await sql(hub, (db) => {
-      db.exec("UPDATE roster SET status = 'approved', sessionToken = ? WHERE deviceId = ?", fresh, b.deviceId);
+      db.exec("UPDATE roster SET status = 'approved', sessionTokenHash = ? WHERE deviceId = ?", freshHash, b.deviceId);
     });
     const again = await SangatClient.connect(hub, fresh);
     await again.send("reconnect", { session_token: bharat.token });

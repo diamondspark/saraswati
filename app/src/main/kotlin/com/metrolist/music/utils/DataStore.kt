@@ -17,12 +17,13 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.preferencesDataStore
-import com.metrolist.music.constants.InnerTubeCookieKey
 import com.metrolist.music.extensions.toEnum
 import com.metrolist.music.saraswati.security.SaraswatiVault
+import com.metrolist.music.saraswati.security.SealedPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -69,55 +70,31 @@ suspend fun Context.safeDataStoreEdit(
     }
 }
 
-// SARASWATI: InnerTubeCookieKey is sealed at rest (CookieVault); every read
-// through this file's helpers must open it here so no caller ever sees
-// ciphertext, and no caller ever sees a legacy/restored plaintext value
-// that SecretScrubber didn't catch (defense in depth — open() rejects
-// anything that isn't our own sealed format anyway).
-@Suppress("UNCHECKED_CAST")
+// SARASWATI: the sign-in cookie and the family hub credentials
+// (SecretPreferenceKeys.VAULT_SEALED) are sealed at rest by CookieVault, so
+// every read through this file's helpers must open them here and no caller
+// ever sees ciphertext, nor a legacy/restored plaintext value that
+// SecretScrubber didn't catch (defense in depth — open() rejects anything
+// that isn't our own sealed format anyway). The rules themselves live in
+// SealedPreferences so a JVM test can drive them; these helpers only bind
+// them to the Keystore-backed vault. Their names predate the hub
+// credentials and are kept to keep this file's diff against upstream small.
 private fun <T> unsealIfCookie(
     key: Preferences.Key<T>,
     raw: T?,
-): T? =
-    if (key == InnerTubeCookieKey) {
-        (raw as? String)?.let { SaraswatiVault.cookieVault.open(it) } as T?
-    } else {
-        raw
-    }
+): T? = SealedPreferences.unseal(key, raw, SaraswatiVault.cookieVault)
 
-// SARASWATI: the write-side counterpart of unsealIfCookie — seal the
-// cookie before it ever touches disk, and write it through
-// writeMaybeSealed (below) rather than a plain `prefs[key] = ...` so an
-// empty cookie removes the key instead of sealing "".
-@Suppress("UNCHECKED_CAST")
-private fun <T> sealIfCookie(
-    key: Preferences.Key<T>,
-    value: T,
-): T =
-    if (key == InnerTubeCookieKey) {
-        SaraswatiVault.cookieVault.seal(value as String) as T
-    } else {
-        value
-    }
-
-// SARASWATI: an empty cookie means "no cookie" — both logout paths
-// (AccountSettings.kt's sign-out and logoutKeepData) write "" through
-// rememberPreference. Remove the key instead of sealing an empty
-// string: there is no secret to protect, so sealing it is unnecessary
-// churn, and it keeps unsealIfCookie from ever opening a sealed "" for
-// no reason.
-@Suppress("UNCHECKED_CAST")
+// SARASWATI: the write-side counterpart of unsealIfCookie — seal a sealed
+// key's value before it ever touches disk, and write through this rather
+// than a plain `prefs[key] = ...`. An empty value for a sealed key (both
+// logout paths write "" through rememberPreference) removes the key instead
+// of sealing an empty string: there is no secret to protect, and it keeps
+// unsealIfCookie from ever opening a sealed "" for no reason.
 private fun <T> writeMaybeSealed(
     prefs: MutablePreferences,
     key: Preferences.Key<T>,
     value: T,
-) {
-    if (key == InnerTubeCookieKey && (value as String).isEmpty()) {
-        prefs.remove(key)
-        return
-    }
-    prefs[key] = sealIfCookie(key, value)
-}
+) = SealedPreferences.write(prefs, key, value, SaraswatiVault.cookieVault)
 
 operator fun <T> DataStore<Preferences>.get(key: Preferences.Key<T>): T? =
     runBlocking(Dispatchers.IO) {
@@ -154,9 +131,21 @@ fun <T> rememberPreference(
 
     val state =
         remember {
-            context.dataStore.data
-                .map { unsealIfCookie(key, it[key]) ?: defaultValue }
-                .distinctUntilChanged()
+            // SARASWATI (I4): a sealed key is decrypted with the Keystore, which must not run on
+            // Main (collectAsStateWithLifecycle collects there), and only when its own raw value
+            // changed, not on every unrelated preference write. Other keys are read as upstream does.
+            if (SealedPreferences.isSealed(key)) {
+                context.dataStore.data
+                    .map { it[key] }
+                    .distinctUntilChanged()
+                    .map { unsealIfCookie(key, it) ?: defaultValue }
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.IO)
+            } else {
+                context.dataStore.data
+                    .map { unsealIfCookie(key, it[key]) ?: defaultValue }
+                    .distinctUntilChanged()
+            }
         }.collectAsStateWithLifecycle(defaultValue)
 
     return remember {

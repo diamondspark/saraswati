@@ -19,6 +19,10 @@ export function createSangatTables(sql: SqlStorage): void {
   )`);
   // One row per person in a room, connected or inside the reconnect grace.
   // rowid order is join order, which is how the next host is chosen.
+  // sessionToken is stored as plaintext by design. It is scoped to one room and bound to
+  // the device it was issued to (useless without that device's hashed hub bearer), and it
+  // is deleted on leave, expiry, revoke and the kill switch. Hashing it would put an
+  // await inside the synchronous handler transaction.
   sql.exec(`CREATE TABLE IF NOT EXISTS sangat_members (
     userId TEXT PRIMARY KEY,
     roomCode TEXT NOT NULL,

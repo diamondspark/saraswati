@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 
@@ -530,6 +531,80 @@ val AndroidAutoSectionsOrderKey = stringPreferencesKey("androidAutoSectionsOrder
 val AndroidAutoTargetPlaylistKey = stringPreferencesKey("androidAutoTargetPlaylist")
 val AndroidAutoSearchLocalLimitKey = intPreferencesKey("androidAutoSearchLocalLimit")
 val InnerTubeCookieKey = stringPreferencesKey("innerTubeCookie")
+
+// SARASWATI: Task 6 — family hub bearer credentials. Registered in
+// SecretPreferenceKeys.all and sealed at rest exactly like InnerTubeCookieKey
+// (SecretPreferenceKeys.VAULT_SEALED, SealedPreferences): read them through
+// dataStore[key] / rememberPreference so they are opened, and write them
+// through rememberPreference or SealedPreferences.write(...) — a plain
+// settings[key] = plaintext is wiped by SecretScrubber on the next start, and
+// a bare vault.seal(...) uses the cookie's slot, which does not open here:
+// each key seals under its own purpose (SealedPreferences.purposeOf).
+// The owner's admin key, this phone's own hub session token (issued on
+// approval), and the one-time claim secret that proves this phone is the one
+// that claimed a pairing token while it waits for approval.
+val FamilyAdminKeyKey = stringPreferencesKey("familyAdminKey")
+val FamilyHubSessionTokenKey = stringPreferencesKey("familyHubSessionToken")
+val FamilyHubClaimSecretKey = stringPreferencesKey("familyHubClaimSecret")
+
+// SARASWATI: Task 7 — not secrets, so stored plain. True only on the phone
+// whose owner pasted a hub-accepted admin key into Manage Family; the Family
+// tab shows "Manage family" only there (the admin key itself is what the hub
+// checks). The hub-issued id of this phone, needed for its own health
+// reports; kept next to the session token (or the claim) it belongs to.
+val IsFamilyOwnerKey = booleanPreferencesKey("isFamilyOwner")
+val FamilyDeviceIdKey = stringPreferencesKey("familyDeviceId")
+
+// SARASWATI: fix wave B2 — how many 401s the hub has given this phone's session in a row, and when the
+// last counted one came (epoch ms). Not secrets, so plain. The hub answers one generic 401 for every
+// failure, so one 401 never ends a pairing: SessionVerdict clears the session on the third counted one.
+val FamilyUnauthorizedCountKey = intPreferencesKey("familyUnauthorizedCount")
+val FamilyUnauthorizedAtKey = longPreferencesKey("familyUnauthorizedAt")
+
+// SARASWATI: Task 8 — set the first time the owner saves a station list to the
+// hub. Until then an empty list from the hub means "nobody has set any yet" and
+// the editor starts on four defaults; after it, an empty list is shown as empty.
+val FamilyStationsSavedKey = booleanPreferencesKey("familyStationsSaved")
+
+// SARASWATI: Task 9 — a CACHE of the role the hub holds for this phone, not a
+// setting. true makes MainActivity host Saral (the grandparents' easy mode) as
+// the whole app. It is written only from the hub's own answer
+// (GrandparentRoleSync) and is never offered as a toggle, so the one way out of
+// Saral is the owner switching the role in Manage Family. Kept out of backups
+// (BackupPolicy) so a restore can neither lock a phone into Saral nor free it.
+val GrandparentRoleKey = booleanPreferencesKey("grandparentRole")
+
+// SARASWATI: Task 9 — the last station list the hub gave this phone, as JSON.
+// Saral and the car's Stations folder read it without waiting for the network
+// (StationsCache). Not a secret; not restored from backups.
+val FamilyStationsCacheKey = stringPreferencesKey("familyStationsCache")
+
+// SARASWATI: Phase 4 Task 8 — the family features the owner has switched off on the hub, as their kill-switch
+// keys (FamilyFeatureGate). A cache of hub data, not a setting: a restored backup must not switch a feature
+// off or back on (BackupPolicy). Absent means every feature is on.
+val FamilyFeaturesDisabledKey = stringSetPreferencesKey("familyFeaturesDisabled")
+
+// SARASWATI: final fix wave (I3) — the code of the Sangat room this phone is hosting in car mode, kept so car mode
+// survives the app process dying mid-drive (SangatCarMode). Live room state, so never restored from a backup.
+val SangatCarRoomCodeKey = stringPreferencesKey("saraswatiSangatCarRoomCode")
+
+// SARASWATI: Phase 4 Task 11 — the last Parivaar Mix this phone built, as JSON (ParivaarMixStore). Derived from
+// the family's listening, so a restored backup must not plant one (BackupPolicy).
+val ParivaarMixKey = stringPreferencesKey("parivaarMix")
+
+// SARASWATI: Phase 4 Task 12 — this phone's own Parivaar top-songs playlist on YouTube (its id) and when the weekly
+// sync last finished and was registered with the hub (epoch ms). Both belong to this phone's YouTube account and hub
+// registration, so a restored backup must not point a phone at another account's playlist (BackupPolicy).
+val ParivaarPlaylistIdKey = stringPreferencesKey("parivaarPlaylistId")
+val ParivaarTopSongsSyncedAtKey = longPreferencesKey("parivaarTopSongsSyncedAt")
+
+// SARASWATI: Phase 4 Task 13 — off by default: plays of a song someone else picked in a Sangat, and of the Parivaar
+// Mix, leave no listen history and no YouTube watch history (TastePolicy). On, they count like any other play.
+val CountSharedPlaysKey = booleanPreferencesKey("saraswatiCountSharedPlays")
+
+// SARASWATI: Phase 4 Task 14 — the family playlists the hub last listed, as JSON (FamilyPlaylistsCache). Hub data,
+// so a restored backup must not plant playlists (BackupPolicy).
+val FamilyPlaylistsCacheKey = stringPreferencesKey("familyPlaylistsCache")
 val AccountNameKey = stringPreferencesKey("accountName")
 val AccountEmailKey = stringPreferencesKey("accountEmail")
 val AccountChannelHandleKey = stringPreferencesKey("accountChannelHandle")

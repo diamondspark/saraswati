@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Saraswati setup guide: Samsung</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+
+<p class="back"><a href="./">&larr; All phones</a></p>
+<h1 lang="hi">सरस्वती</h1>
+<p class="sub">Saraswati · Setup on Samsung</p>
+
+<p>These steps are for Samsung Galaxy phones and tablets. Your organiser is on the video call with you. Menu names change a little between Android versions. If you cannot find one, type its name into the search bar at the top of Settings, or ask the organiser.</p>
+
+<h2><span class="n">1.</span> Messages</h2>
+<p>You need two private messages from the organiser: this guide, and a pairing link. Do not open the pairing link yet. You use it in step 4.</p>
+
+<h2><span class="n">2.</span> Install Saraswati Updates</h2>
+<p>Saraswati Updates is a small helper app. It installs Saraswati and keeps it up to date.</p>
+<ol class="steps">
+  <li><span class="only">Samsung only</span> Switch <strong>Auto Blocker</strong> off for now: Settings, Security and privacy, Auto Blocker. It blocks installs from outside the app stores, which would stop this step. You switch it back on in step 3. If an install is blocked later, check that Auto Blocker has not switched itself back on.</li>
+  <li>Open Chrome and go to <a href="https://github.com/diamondspark/saraswati/releases/latest" rel="noopener noreferrer">https://github.com/diamondspark/saraswati/releases/latest</a>.</li>
+  <li>Under <strong>Assets</strong>, tap the file whose name starts with <code>saraswati-updater</code> and ends in <code>.apk</code>. Not the one that ends in <code>.sha256</code>, and not the one that is only called <code>saraswati</code>. If Chrome asks whether to keep the file, tap Keep.</li>
+  <li>When the download finishes, tap <strong>Open</strong>. Android says your phone is not allowed to install unknown apps from Chrome. Tap <strong>Settings</strong>, switch on <strong>Allow from this source</strong>, then press back.</li>
+  <li>Tap <strong>Install</strong>, then <strong>Open</strong>.</li>
+</ol>
+
+<h2><span class="n">3.</span> Install Saraswati</h2>
+<ol class="steps">
+  <li>Saraswati Updates offers to install Saraswati. Follow its prompts. The buttons say <strong>Allow installing (one time)</strong> and then <strong>Install</strong>.</li>
+  <li>When Saraswati Updates says <strong>All done. Now switch the permission off.</strong>, do exactly that. Switch <strong>Install unknown apps</strong> off for Saraswati Updates, and for Chrome too.
+    <ul>
+      <li>Where: Settings, Apps, the three-dot menu at the top right, Special access, Install unknown apps.</li>
+      <li>Or type "Install unknown apps" into the search bar at the top of Settings.</li>
+    </ul>
+  </li>
+  <li><span class="only">Samsung only</span> Switch <strong>Auto Blocker</strong> back on: Settings, Security and privacy, Auto Blocker.</li>
+  <li><span class="only">Samsung only</span> Let Saraswati keep playing when the screen is locked. Open Settings, Apps, Saraswati, Battery, then choose <strong>Unrestricted</strong>.</li>
+</ol>
+
+<p>If Play Protect asks to scan the app, let it. Never switch it off.</p>
+
+<h2><span class="n">4.</span> Pair the phone</h2>
+<p>The organiser makes a one-time pairing link in Saraswati's Manage Family screen and sends it to you privately. It looks like this:</p>
+<code class="link">https://saraswati-sangat.pandey-mohitk.workers.dev/pair#&lt;token&gt;</code>
+<p>The real link has a long string of 64 letters and numbers where <code>&lt;token&gt;</code> is. It is different every time, it works for one phone, once, and it stops working after 15 minutes. Never post it or send it on, and never put a real one in a message when asking for help.</p>
+<ol class="steps">
+  <li>When the organiser says it is ready, tap the pairing link in the message. Saraswati opens on <strong>Join the family</strong>.</li>
+  <li>Give the phone a name the organiser will recognise, and pick <strong>Adult</strong>. Pick Adult even if this phone is for a grandparent: you sign in to YouTube first, and then the organiser switches the phone to the grandparent screen. Tap <strong>Send request</strong>.</li>
+  <li>The app shows a short 4-character code. Read it to the organiser. They compare it with the one on their screen before they approve, so that only your phone is let in.</li>
+  <li>The organiser sees your phone in Manage Family and approves it. <strong>Keep the Join screen open until it says approved.</strong> Do not close it or go back. You do not need to do anything else; Saraswati checks every few seconds.</li>
+  <li>Sign in to YouTube inside Saraswati, with your own hands and your own password.</li>
+  <li>Grandparent phones: now the organiser switches this phone to the grandparent screen from their Manage Family. It changes the next time Saraswati is opened. There is nothing for you to pick.</li>
+</ol>
+<div class="note">
+  <p><strong>The link opened a web page instead?</strong> If it says "Open this link on a phone that has Saraswati installed", Saraswati is not installed yet (finish step 3), or Android did not pass the link on. Open Saraswati, tap <strong>Family</strong>, tap <strong>Join the family</strong>, then copy the link, tap <strong>Paste</strong>, and tap <strong>Continue</strong>.</p>
+  <p>If the link says it has expired, ask the organiser for a new one. A request can only be approved within 1 hour, so if you waited longer, ask for a new link.</p>
+  <p>If your first try says the link was <strong>already used</strong>, someone else may have used it. Do not try again. Tell the organiser straight away: they remove every waiting phone they do not recognise before they make you a new link.</p>
+</div>
+
+<h2><span class="n">5.</span> Car and Google check</h2>
+<h3>Android Auto (only if you drive with it)</h3>
+<ol class="steps">
+  <li>Open the Android Auto settings on the phone.</li>
+  <li>Scroll to the bottom and tap <strong>Version</strong> ten times. Accept the message that appears.</li>
+  <li>Open the three-dot menu, then <strong>Developer settings</strong>, and switch on <strong>Unknown sources</strong>.</li>
+</ol>
+<p>Without this, Android Auto hides apps that were not installed from the Play Store. It is Android Auto's own setting. It does not turn on your phone's Developer options.</p>
+
+<h3>Google developer verification</h3>
+<p>Google checks that apps outside the Play Store come from a registered developer, and each phone has to be authorised once. The organiser sends you a link or QR code from Google. Open it on this phone and confirm the message on the screen. Only use one that the organiser sent you themselves.</p>
+<p>The organiser may ask you to do this before step 2. Either order works. The full procedure is in <a href="https://github.com/diamondspark/saraswati/blob/main/docs/developer-verification.md" rel="noopener noreferrer">the developer verification notes</a>.</p>
+
+<h2>When you are done</h2>
+<ul>
+  <li>A song plays, and keeps playing with the screen locked.</li>
+  <li>Install unknown apps is off for Chrome, Saraswati Updates and Saraswati.</li>
+  <li>Auto Blocker is on.</li>
+</ul>
+
+<footer>
+  <p>Saraswati is a private family app, not on the Play Store. If something here does not match your screen, stop and ask the organiser.</p>
+</footer>
+
+</main>
+</body>
+</html>

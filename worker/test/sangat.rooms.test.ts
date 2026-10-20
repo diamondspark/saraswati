@@ -73,7 +73,7 @@ describe("GET /ws guards", () => {
     const hub = hubStub();
     const device = await seedDevice(hub, "revoked");
     await sql(hub, (db) =>
-      db.exec("UPDATE roster SET status = 'revoked', sessionToken = NULL WHERE deviceId = ?", device.deviceId),
+      db.exec("UPDATE roster SET status = 'revoked', sessionTokenHash = NULL WHERE deviceId = ?", device.deviceId),
     );
 
     const response = await hub.fetch(`${HUB_ORIGIN}/ws`, wsRequest(device.token));
@@ -582,6 +582,7 @@ describe("Sangat methods the hub routes call", () => {
         carMode: false,
         memberCount: 2,
         startedAt: expect.any(Number),
+        nowPlaying: null,
       },
     ]);
   });

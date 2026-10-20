@@ -1,16 +1,11 @@
-import { env, runInDurableObject } from "cloudflare:test";
+import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-
-// Must match the ADMIN_KEY binding injected in vitest.config.ts.
-const TEST_ADMIN_KEY =
-  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-
-function getFamilyHubStub() {
-  const id = env.FAMILY_HUB.idFromName("family");
-  return env.FAMILY_HUB.get(id);
-}
-
-type Stub = ReturnType<typeof getFamilyHubStub>;
+import {
+  type Stub,
+  TEST_ADMIN_KEY,
+  getFamilyHubStub,
+  sha256Hex,
+} from "./helpers";
 
 // rateLimit is private, so it is reached through the real DO instance rather
 // than a mock, the same cast roster.test.ts uses for authenticate().
@@ -190,11 +185,17 @@ describe("POST /pairing/claim rate limit", () => {
     );
   }
 
-  function seedAttempts(stub: Stub, token: string, count: number) {
+  /** The counter key for a pairing token: its hash, never the token itself. */
+  async function claimKey(token: string) {
+    return `claim:${await sha256Hex(token)}`;
+  }
+
+  async function seedAttempts(stub: Stub, token: string, count: number) {
+    const key = await claimKey(token);
     return runInDurableObject(stub, (_instance, state) => {
       state.storage.sql.exec(
         "INSERT OR REPLACE INTO rate_limits (key, windowStart, count) VALUES (?, ?, ?)",
-        `claim:${token}`,
+        key,
         Date.now(),
         count,
       );
@@ -215,7 +216,7 @@ describe("POST /pairing/claim rate limit", () => {
     expect((await claim(stub, token)).status).toBe(429);
 
     expect(await countRoster(stub)).toBe(rosterBefore);
-    const rows = await readRow(stub, `claim:${token}`);
+    const rows = await readRow(stub, await claimKey(token));
     expect(rows[0].count).toBe(CLAIM_MAX_ATTEMPTS);
   });
 
@@ -229,17 +230,34 @@ describe("POST /pairing/claim rate limit", () => {
 
     expect(response.status).toBe(429);
     expect(await countRoster(stub)).toBe(rosterBefore);
+    const tokenHash = await sha256Hex(token);
     const usedAt = await runInDurableObject(
       stub,
       (_instance, state) =>
         state.storage.sql
           .exec<{ usedAt: number | null }>(
-            "SELECT usedAt FROM pairing_tokens WHERE token = ?",
-            token,
+            "SELECT usedAt FROM pairing_tokens WHERE tokenHash = ?",
+            tokenHash,
           )
           .one().usedAt,
     );
     expect(usedAt).toBeNull();
+  });
+
+  it("keys the counter on the token's hash, so the rate_limits table never holds the token", async () => {
+    const stub = getFamilyHubStub();
+    const token = await createToken(stub);
+    await claim(stub, token);
+
+    const keys = await runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql
+        .exec<{ key: string }>("SELECT key FROM rate_limits")
+        .toArray()
+        .map((row) => row.key),
+    );
+
+    expect(keys).toContain(await claimKey(token));
+    expect(keys.join("\n")).not.toContain(token);
   });
 
   it("counts attempts per token, so spending one token's attempts does not block another", async () => {
@@ -258,7 +276,7 @@ describe("POST /pairing/claim rate limit", () => {
     await seedAttempts(stub, token, CLAIM_MAX_ATTEMPTS);
     expect((await claim(stub, token)).status).toBe(429);
 
-    await ageWindow(stub, `claim:${token}`, 900_000);
+    await ageWindow(stub, await claimKey(token), 900_000);
 
     expect((await claim(stub, token)).status).toBe(200);
   });

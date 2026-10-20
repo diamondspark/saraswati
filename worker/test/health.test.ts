@@ -1,9 +1,13 @@
-import { env, runInDurableObject } from "cloudflare:test";
+import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import {
+  type Stub,
+  TEST_ADMIN_KEY,
+  approveAndGetSessionToken,
+  getFamilyHubStub,
+  seedPendingDevice,
+} from "./helpers";
 
-// Must match the ADMIN_KEY binding injected in vitest.config.ts.
-const TEST_ADMIN_KEY =
-  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const WRONG_BEARER = "cd".repeat(32);
 const HEALTH_WINDOW_MS = 5 * 60 * 1000;
 
@@ -18,13 +22,6 @@ interface DeviceHealth extends HealthReport {
   deviceName: string | null;
   lastSeenAt: number;
 }
-
-function getFamilyHubStub() {
-  const id = env.FAMILY_HUB.idFromName("family");
-  return env.FAMILY_HUB.get(id);
-}
-
-type Stub = ReturnType<typeof getFamilyHubStub>;
 
 let deviceCounter = 0;
 
@@ -75,29 +72,6 @@ async function adminHealth(stub: Stub): Promise<DeviceHealth[]> {
 
 async function healthOf(stub: Stub, deviceId: string) {
   return (await adminHealth(stub)).find((d) => d.deviceId === deviceId);
-}
-
-async function seedPendingDevice(
-  stub: Stub,
-  deviceId: string,
-  deviceName: string,
-) {
-  await runInDurableObject(stub, (_instance, state) => {
-    state.storage.sql.exec(
-      "INSERT INTO roster (deviceId, deviceName, status, sessionToken, approvedAt) VALUES (?, ?, 'pending', NULL, NULL)",
-      deviceId,
-      deviceName,
-    );
-  });
-}
-
-async function approveAndGetSessionToken(stub: Stub, deviceId: string) {
-  const response = await stub.fetch(
-    `https://example.com/roster/${deviceId}/approve`,
-    { method: "POST", headers: { Authorization: `Bearer ${TEST_ADMIN_KEY}` } },
-  );
-  expect(response.status).toBe(200);
-  return ((await response.json()) as { sessionToken: string }).sessionToken;
 }
 
 async function approvedDeviceToken(

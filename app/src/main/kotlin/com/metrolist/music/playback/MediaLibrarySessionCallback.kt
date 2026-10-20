@@ -3,9 +3,12 @@
  * Licensed under GPL-3.0 | See git history for contributors
  */
 
+// SARASWATI: Task 11 — imports removed from this file with the code that used them: android.content.ContentResolver
+// (the icon uri builder moved to carDrawableUri in CarMediaItems.kt) and the YouTube-playlists preference's key (Home
+// is no longer behind that setting). Fix wave B2 — the Home tab is served from CarHomeSnapshot. Phase 4 Task 15 — the
+// Family folder, the Parivaar Mix, a family playlist and the Sangat row are chosen here too.
 package com.metrolist.music.playback
 
-import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
@@ -64,10 +67,32 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import javax.inject.Inject
 import com.metrolist.music.constants.AndroidAutoSectionsOrderKey
-import com.metrolist.music.constants.AndroidAutoYouTubePlaylistsKey
 import com.metrolist.music.constants.AutoRadioQueueKey
 import com.metrolist.music.playback.queues.ListQueue
 import com.metrolist.music.playback.queues.YouTubeQueue
+import com.metrolist.music.saraswati.car.CarBrowseTree
+import com.metrolist.music.saraswati.car.CarHomeHolder
+import com.metrolist.music.saraswati.car.CarHomeSnapshot
+import com.metrolist.music.saraswati.car.FileCarHomeStore
+import com.metrolist.music.saraswati.car.CarFamilyTree
+import com.metrolist.music.saraswati.car.CarResources
+import com.metrolist.music.saraswati.car.carFamilyChanges
+import com.metrolist.music.saraswati.family.FamilyFeature
+import com.metrolist.music.saraswati.family.FamilyFeatureGate
+import com.metrolist.music.saraswati.family.parivaar.ParivaarMixQueue
+import com.metrolist.music.saraswati.family.parivaar.ParivaarMixStore
+import com.metrolist.music.saraswati.family.playlists.FamilyPlaylistsRepository
+import com.metrolist.music.saraswati.family.sangat.CarSangatController
+import com.metrolist.music.saraswati.family.sangat.CarSangatResult
+import com.metrolist.music.saraswati.family.sangat.RepeatSelectionGuard
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
+import com.metrolist.music.saraswati.car.CarStations
+import com.metrolist.music.saraswati.car.carBrowsableMediaItem
+import com.metrolist.music.saraswati.car.carDrawableUri
+import com.metrolist.music.saraswati.culture.radioEndpointFor
+import com.metrolist.music.saraswati.family.StationsCache
 import com.metrolist.music.saraswati.security.AndroidPackageLookup
 import com.metrolist.music.saraswati.security.CallerInfoFactory
 import com.metrolist.music.saraswati.security.ControllerPolicy
@@ -75,6 +100,7 @@ import com.metrolist.music.ui.screens.settings.AndroidAutoSection
 import com.metrolist.music.ui.screens.settings.deserializeSections
 import com.metrolist.music.ui.screens.settings.serializeSections
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.cancellation.CancellationException
 
 class MediaLibrarySessionCallback
 @Inject
@@ -82,8 +108,73 @@ constructor(
     @ApplicationContext val context: Context,
     val database: MusicDatabase,
     val downloadUtil: DownloadUtil,
+    // SARASWATI: Task 11 — the family stations the car's Stations tab shows.
+    stationsCache: StationsCache,
+    // SARASWATI: Phase 4 Task 15 — what the car's Family folder shows, and the Sangat row's controller.
+    private val parivaarMixStore: ParivaarMixStore,
+    private val familyPlaylists: FamilyPlaylistsRepository,
+    private val featureGate: FamilyFeatureGate,
+    private val carSangat: CarSangatController,
 ) : MediaLibrarySession.Callback {
     private val scope = CoroutineScope(Dispatchers.Main) + Job()
+
+    // SARASWATI: fix wave B2 — see CarHomeSnapshot.
+    private val homeSnapshot =
+        CarHomeSnapshot(
+            store = FileCarHomeStore.of(context),
+            fetch = ::loadHomeShelves,
+            scope = scope,
+        ).also(CarHomeHolder::register)
+
+    /** How many rows the car's Home tab now has, each time a background refresh brought a new one. */
+    val homeChanges get() = homeSnapshot.changes
+
+    // SARASWATI: Phase 4 Task 15 — the Family folder's rows from what the phone already holds; never waits.
+    private val carResources = CarResources.of(context)
+    private fun familyRows(): List<MediaItem> =
+        CarFamilyTree.children(
+            parivaarMixStore.cached(),
+            familyPlaylists.cached(),
+            featureGate::isEnabled,
+            carSangat.state.value,
+            carResources,
+        )
+
+    /** How many rows the car's Family folder now has, each time something it shows may have changed. */
+    val familyChanges: Flow<Int> =
+        carFamilyChanges(
+            triggers =
+                listOf(
+                    flow {
+                        parivaarMixStore.awaitHydrated()
+                        emitAll(parivaarMixStore.mix)
+                    },
+                    familyPlaylists.playlists,
+                    featureGate.enabled,
+                    carSangat.state,
+                ),
+            items = ::familyRows,
+        )
+
+    // SARASWATI: Task 11 — the car's four tabs (Home, Library, Stations, Family). The root and each tab are
+    // answered by the tree; everything below them is still answered here, as before.
+    private val carTree =
+        CarBrowseTree(
+            resources = CarResources.of(context),
+            stations = stationsCache,
+            librarySections = {
+                deserializeSections(
+                    context.dataStore.get(
+                        AndroidAutoSectionsOrderKey,
+                        serializeSections(AndroidAutoSection.values().map { it to true }),
+                    ),
+                )
+            },
+            // SARASWATI: fix wave B2 — Home answers from its last good snapshot at once and refreshes in the
+            // background (8 s at most), so a slow or failing YouTube never leaves the car's Home tab blank.
+            homeShelves = { homeSnapshot.current() },
+            familyItems = ::familyRows,
+        )
     private val packageLookup = AndroidPackageLookup(context)
     private val tag = "MediaLibrarySessionCallback"
     lateinit var service: MusicService
@@ -93,6 +184,8 @@ constructor(
     var addToTargetPlaylist: () -> Unit = {}
 
     fun release() {
+        // SARASWATI: fix wave B3 — a released callback must not be what a later sign-out tries to clear.
+        CarHomeHolder.unregister(homeSnapshot)
         scope.cancel()
     }
 
@@ -102,14 +195,28 @@ constructor(
     // rules; logs every denial at WARN so a real Android Auto / Bluetooth
     // / Assistant connection that gets refused is visible immediately
     // (Review Focus #1).
+    private fun callerOf(controller: MediaSession.ControllerInfo) =
+        CallerInfoFactory.create(
+            controllerPackage = controller.packageName,
+            controllerUid = controller.uid,
+            isTrusted = controller.isTrusted,
+            lookup = packageLookup,
+        )
+
+    // SARASWATI: final fix wave (M7) — the Sangat button is for the car only; a phone's notification or lock
+    // screen must not be able to start a room that approves joins by itself.
+    fun isAndroidAutoController(controller: MediaSession.ControllerInfo): Boolean =
+        ControllerPolicy.isAndroidAuto(callerOf(controller), ControllerPolicy.ANDROID_AUTO_DIGESTS)
+
+    override fun onPostConnect(
+        session: MediaSession,
+        controller: MediaSession.ControllerInfo,
+    ) {
+        if (isAndroidAutoController(controller)) service.refreshCustomLayout()
+    }
+
     private fun isCallerAllowed(controller: MediaSession.ControllerInfo): Boolean {
-        val caller =
-            CallerInfoFactory.create(
-                controllerPackage = controller.packageName,
-                controllerUid = controller.uid,
-                isTrusted = controller.isTrusted,
-                lookup = packageLookup,
-            )
+        val caller = callerOf(controller)
         val allowed = ControllerPolicy.isAllowed(context.packageName, caller, ControllerPolicy.ANDROID_AUTO_DIGESTS)
         if (!allowed) {
             val reason =
@@ -147,6 +254,7 @@ constructor(
                 .add(MediaSessionConstants.CommandToggleShuffle)
                 .add(MediaSessionConstants.CommandToggleRepeatMode)
                 .add(MediaSessionConstants.CommandAddToTargetPlaylist)
+                .add(MediaSessionConstants.CommandToggleSangat) // SARASWATI: Phase 4 Task 15
                 .build(),
             connectionResult.availablePlayerCommands,
         )
@@ -167,8 +275,26 @@ constructor(
 
             MediaSessionConstants.ACTION_TOGGLE_REPEAT_MODE -> session.player.toggleRepeatMode()
             MediaSessionConstants.ACTION_ADD_TO_TARGET_PLAYLIST -> addToTargetPlaylist()
+            MediaSessionConstants.ACTION_TOGGLE_SANGAT -> toggleSangat() // SARASWATI: Phase 4 Task 15
         }
         return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+    }
+
+    // SARASWATI: Phase 4 Task 15 — the Sangat row and the Sangat button. The answer to the car comes at once; the
+    // room takes a moment, and a failure is told in one short phrase.
+    private val sangatSelection = RepeatSelectionGuard()
+
+    private fun toggleSangat() {
+        scope.launch {
+            val message =
+                when (carSangat.toggle()) {
+                    CarSangatResult.PairRequired -> R.string.car_sangat_pair_first
+                    CarSangatResult.Disabled -> R.string.car_sangat_off
+                    CarSangatResult.NoConnection -> R.string.car_sangat_no_connection
+                    CarSangatResult.Started, CarSangatResult.Ended -> null
+                }
+            message?.let { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_SHORT).show() }
+        }
     }
 
     @Suppress("OVERRIDE_DEPRECATION")
@@ -230,116 +356,17 @@ constructor(
     ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> =
         scope.future(Dispatchers.IO) {
             try {
+                // SARASWATI: Task 11 — the root and the four tabs. Checked first: Stations and Family are
+                // answered from the cache at once and must not wait behind a database or network lookup.
+                carTree.childrenOf(parentId)?.let { children ->
+                    return@future LibraryResult.ofItemList(children.paginate(page, pageSize), params)
+                }
+
                 loadLocalChildren(parentId, page, pageSize)?.let { children ->
                     return@future LibraryResult.ofItemList(children, params)
                 }
 
                 val children = when (parentId) {
-                    MusicService.ROOT -> {
-                        val sectionsRaw = context.dataStore.get(
-                            AndroidAutoSectionsOrderKey,
-                            serializeSections(AndroidAutoSection.values().map { it to true })
-                        )
-                        val sections = deserializeSections(sectionsRaw)
-                        val showYoutubePlaylists = context.dataStore.get(AndroidAutoYouTubePlaylistsKey, false)
-                        val rootItems = sections
-                            .filter { (_, enabled) -> enabled }
-                            .ifEmpty { listOf(AndroidAutoSection.LIKED to true) }
-                            .map { (section, _) ->
-                                when (section) {
-                                    AndroidAutoSection.LIKED -> browsableMediaItem(
-                                        "${MusicService.PLAYLIST}/${PlaylistEntity.LIKED_PLAYLIST_ID}",
-                                        context.getString(R.string.liked_songs),
-                                        null,
-                                        drawableUri(R.drawable.favorite),
-                                        MediaMetadata.MEDIA_TYPE_PLAYLIST,
-                                    )
-                                   AndroidAutoSection.SONGS -> browsableMediaItem(
-                                        MusicService.SONG,
-                                        context.getString(R.string.songs),
-                                        null,
-                                        drawableUri(R.drawable.music_note),
-                                        MediaMetadata.MEDIA_TYPE_PLAYLIST,
-                                    )
-                                    AndroidAutoSection.ARTISTS -> browsableMediaItem(
-                                        MusicService.ARTIST,
-                                        context.getString(R.string.artists),
-                                        null,
-                                        drawableUri(R.drawable.artist),
-                                        MediaMetadata.MEDIA_TYPE_FOLDER_ARTISTS,
-                                    )
-                                    AndroidAutoSection.ALBUMS -> browsableMediaItem(
-                                        MusicService.ALBUM,
-                                        context.getString(R.string.albums),
-                                        null,
-                                        drawableUri(R.drawable.album),
-                                        MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS,
-                                    )
-                                    AndroidAutoSection.PLAYLISTS -> browsableMediaItem(
-                                        MusicService.PLAYLIST,
-                                        context.getString(R.string.playlists),
-                                        null,
-                                        drawableUri(R.drawable.queue_music),
-                                        MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS,
-                                    )
-                                }
-                            }
-                        if (showYoutubePlaylists) {
-                            rootItems + browsableMediaItem(
-                                MusicService.YOUTUBE_PLAYLIST,
-                                context.getString(R.string.mixes),
-                                null,
-                                drawableUri(R.drawable.explore_outlined),
-                                MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS,
-                            )
-                        } else {
-                            rootItems
-                        }
-                    }
-                    MusicService.YOUTUBE_PLAYLIST -> {
-                        if (!context.dataStore.get(AndroidAutoYouTubePlaylistsKey, false)) {
-                            emptyList()
-                        } else {
-                            try {
-                                val allSections = mutableListOf<com.metrolist.innertube.pages.HomePage.Section>()
-                                var continuation: String? = null
-                                val maxPages = 4
-
-                                for (page in 0 until maxPages) {
-                                    val result = YouTube.home(continuation)
-                                        .onFailure { reportException(it) }
-                                        .getOrNull() ?: break
-                                    allSections.addAll(result.sections)
-                                    continuation = result.continuation
-                                    if (continuation == null) break
-                                }
-
-                                // Drop playlists already saved to the local library,
-                                // which are exposed under MusicService.PLAYLIST.
-                                val savedBrowseIds = database.bookmarkedPlaylistBrowseIds().toSet()
-
-                                val playlists = allSections
-                                    .flatMap { it.items }
-                                    .filterIsInstance<PlaylistItem>()
-                                    .filterNot { it.id in savedBrowseIds }
-                                    .distinctBy { it.id }
-
-                                playlists.map { playlist ->
-                                    browsableMediaItem(
-                                        "${MusicService.YOUTUBE_PLAYLIST}/${playlist.id}",
-                                        playlist.title,
-                                        playlist.author?.name,
-                                        playlist.thumbnail?.toUri(),
-                                        MediaMetadata.MEDIA_TYPE_PLAYLIST,
-                                    )
-                                }
-                            } catch (e: Exception) {
-                                reportException(e)
-                                emptyList()
-                            }
-                        }
-                    }
-
                     else ->
                         when {
                             parentId.startsWith("${MusicService.YOUTUBE_PLAYLIST}/") -> {
@@ -401,6 +428,50 @@ constructor(
                 reportException(e)
                 LibraryResult.ofItemList(emptyList(), params)
             }
+        }
+
+    // SARASWATI: Task 11 — what the "Mixes" folder (MusicService.YOUTUBE_PLAYLIST) used to hold, moved here
+    // unchanged except that the setting that used to switch it on is no longer read: it is the car's Home tab,
+    // always offered. Fix wave B2: a failure is null (CarHomeSnapshot then keeps what it has), never an error.
+    private suspend fun loadHomeShelves(): List<MediaItem>? =
+        try {
+            val allSections = mutableListOf<com.metrolist.innertube.pages.HomePage.Section>()
+            var continuation: String? = null
+            val maxPages = 4
+
+            for (page in 0 until maxPages) {
+                val result = YouTube.home(continuation)
+                    .onFailure { reportException(it) }
+                    .getOrNull() ?: break
+                allSections.addAll(result.sections)
+                continuation = result.continuation
+                if (continuation == null) break
+            }
+
+            // Drop playlists already saved to the local library,
+            // which are exposed under MusicService.PLAYLIST.
+            val savedBrowseIds = database.bookmarkedPlaylistBrowseIds().toSet()
+
+            val playlists = allSections
+                .flatMap { it.items }
+                .filterIsInstance<PlaylistItem>()
+                .filterNot { it.id in savedBrowseIds }
+                .distinctBy { it.id }
+
+            playlists.map { playlist ->
+                browsableMediaItem(
+                    "${MusicService.YOUTUBE_PLAYLIST}/${playlist.id}",
+                    playlist.title,
+                    playlist.author?.name,
+                    playlist.thumbnail?.toUri(),
+                    MediaMetadata.MEDIA_TYPE_PLAYLIST,
+                )
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            reportException(e)
+            null
         }
 
     private suspend fun loadLocalChildren(
@@ -776,6 +847,19 @@ constructor(
                 }
 
                 MusicService.YOUTUBE_PLAYLIST -> {
+                    // SARASWATI: Phase 4 Task 15 — a family playlist chosen in the Family folder is
+                    // youtube_playlist/<id> with no song: the whole playlist, from the top.
+                    if (path.size == 2) {
+                        val songs = try {
+                            YouTube.playlist(path[1]).getOrNull()?.songs?.map { it.toMediaItem() } ?: emptyList()
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            reportException(e)
+                            emptyList()
+                        }
+                        return@future if (songs.isEmpty()) defaultResult else MediaItemsWithStartPosition(songs, 0, C.TIME_UNSET)
+                    }
                     val songId = path.getOrNull(2) ?: return@future defaultResult
                     val playlistId = path.getOrNull(1) ?: return@future defaultResult
 
@@ -802,6 +886,49 @@ constructor(
                             C.TIME_UNSET
                         )
                     }
+                }
+
+                // SARASWATI: Task 11 — a station chosen in the car's Stations tab: the radio of the seed video the
+                // row's id carries (CarStations.seedFrom checks the id before it is believed). Built the way a Saral
+                // tile builds it. A station is a radio whatever the "auto radio" setting says.
+                MusicService.CAR_STATIONS -> {
+                    val seed = CarStations.seedFrom(mediaItems.first().mediaId) ?: return@future defaultResult
+                    val radioQueue = YouTubeQueue(radioEndpointFor(seed))
+                    val radioStatus = runCatching {
+                        withContext(Dispatchers.IO) {
+                            radioQueue
+                                .getInitialStatus()
+                                .filterExplicit(context.dataStore.get(HideExplicitKey, false))
+                                .filterVideoSongs(context.dataStore.get(HideVideoSongsKey, false))
+                        }
+                    }.getOrNull()
+                    if (radioStatus == null || radioStatus.items.isEmpty()) return@future defaultResult
+                    withContext(Dispatchers.Main) {
+                        service.adoptQueue(radioQueue, radioStatus.title, radioStatus.items.size)
+                    }
+                    MediaItemsWithStartPosition(radioStatus.items, 0, C.TIME_UNSET)
+                }
+
+                // SARASWATI: Phase 4 Task 15 — the Family folder's Parivaar Mix row: the last mix built, from the
+                // phone's own copy (nothing is fetched), and the Sangat row: toggle Sangat and leave what is
+                // playing exactly as it is.
+                CarFamilyTree.PARIVAAR_MIX_ID -> {
+                    if (path.size != 1 || !featureGate.isEnabled(FamilyFeature.PARIVAAR_MIX)) return@future defaultResult
+                    val tracks = parivaarMixStore.cached().tracks
+                    if (tracks.isEmpty()) return@future defaultResult
+                    val queue = ParivaarMixQueue(tracks)
+                    val status = queue.getInitialStatus()
+                    withContext(Dispatchers.Main) { service.adoptQueue(queue, status.title, status.items.size) }
+                    MediaItemsWithStartPosition(status.items, 0, C.TIME_UNSET)
+                }
+
+                // Phase 4 fix wave: a repeat of the selection does not toggle again, and the player's own queue is
+                // never set again (that rebuffers the song, and a paused player may then start): the request ends
+                // as "not supported", which media3 reports to the car without touching the player.
+                CarFamilyTree.SANGAT_TOGGLE_ID -> {
+                    if (path.size != 1) return@future defaultResult
+                    if (sangatSelection.shouldAct()) toggleSangat()
+                    throw UnsupportedOperationException("the Sangat row changes no queue")
                 }
 
                 MusicService.SEARCH -> {
@@ -926,15 +1053,11 @@ constructor(
             }
         }
 
+    // SARASWATI: Task 11 — the body of this helper (and of browsableMediaItem below) moved to
+    // CarMediaItems.kt so the car tabs build their rows the same way; both only delegate now.
     private fun drawableUri(
         @DrawableRes id: Int,
-    ) = Uri
-        .Builder()
-        .scheme(ContentResolver.SCHEME_ANDROID_RESOURCE)
-        .authority(context.resources.getResourcePackageName(id))
-        .appendPath(context.resources.getResourceTypeName(id))
-        .appendPath(context.resources.getResourceEntryName(id))
-        .build()
+    ) = carDrawableUri(context, id)
 
     private fun browsableMediaItem(
         id: String,
@@ -942,21 +1065,7 @@ constructor(
         subtitle: String?,
         iconUri: Uri?,
         mediaType: Int = MediaMetadata.MEDIA_TYPE_MUSIC,
-    ) = MediaItem
-        .Builder()
-        .setMediaId(id)
-        .setMediaMetadata(
-            MediaMetadata
-                .Builder()
-                .setTitle(title)
-                .setSubtitle(subtitle)
-                .setArtist(subtitle)
-                .setArtworkUri(iconUri)
-                .setIsPlayable(false)
-                .setIsBrowsable(true)
-                .setMediaType(mediaType)
-                .build(),
-        ).build()
+    ) = carBrowsableMediaItem(id, title, subtitle, iconUri, mediaType)
 
     private fun Song.toMediaItem(path: String, isPlayable: Boolean = true, isBrowsable: Boolean = false): MediaItem {
         return MediaItem
@@ -991,6 +1100,11 @@ internal fun isBrowsableMediaId(mediaId: String): Boolean =
         mediaId == MusicService.ALBUM ||
         mediaId == MusicService.PLAYLIST ||
         mediaId == MusicService.YOUTUBE_PLAYLIST ||
+        // SARASWATI: Task 11 — the car's four tabs.
+        mediaId == MusicService.CAR_HOME ||
+        mediaId == MusicService.CAR_LIBRARY ||
+        mediaId == MusicService.CAR_STATIONS ||
+        mediaId == MusicService.CAR_FAMILY ||
         mediaId.startsWith("${MusicService.ARTIST}/") ||
         mediaId.startsWith("${MusicService.ALBUM}/") ||
         mediaId.startsWith("${MusicService.PLAYLIST}/") ||

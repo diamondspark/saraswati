@@ -35,6 +35,9 @@ data class MediaMetadata(
     val suggestedBy: String? = null,
     val isEpisode: Boolean = false,
     val uploadEntityId: String? = null,
+    // SARASWATI: Phase 4 fix wave — set on every Parivaar Mix track so a finished play can tell it came from the
+    // mix even after the queue was swapped or restored as a plain list (the tag is persisted with the queue).
+    val fromParivaarMix: Boolean = false,
 ) : Serializable {
     val isVideoSong: Boolean
         get() = musicVideoType != null && musicVideoType != MUSIC_VIDEO_TYPE_ATV
@@ -82,6 +85,10 @@ data class MediaMetadata(
         uploadEntityId = uploadEntityId
     )
 }
+
+// SARASWATI: Phase 4 fix wave — a refreshed copy of a song's row must not forget where the playing item came from.
+fun MediaMetadata.keepingOriginOf(old: MediaMetadata?): MediaMetadata =
+    if (old == null) this else copy(fromParivaarMix = old.fromParivaarMix, suggestedBy = old.suggestedBy)
 
 fun Song.toMediaMetadata() =
     MediaMetadata(

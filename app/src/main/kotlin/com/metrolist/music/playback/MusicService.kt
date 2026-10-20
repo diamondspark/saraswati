@@ -25,6 +25,13 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.audiofx.AudioEffect
 import com.metrolist.music.playback.audio.VolumeNormalizationAudioProcessor
+import com.metrolist.music.constants.ListenTogetherUsernameKey
+import com.metrolist.music.saraswati.castrelay.CacheRelayAudioSource
+import com.metrolist.music.saraswati.castrelay.CastRelayController
+import com.metrolist.music.saraswati.castrelay.WifiAddress
+import com.metrolist.music.saraswati.family.FamilyFeature
+import com.metrolist.music.saraswati.family.PlaybackStatsPlan
+import com.metrolist.music.saraswati.family.TastePolicy
 import com.metrolist.music.saraswati.security.StartActions
 import com.metrolist.music.utils.safeDataStoreEdit
 import android.net.ConnectivityManager
@@ -113,6 +120,7 @@ import com.metrolist.music.constants.AutoDownloadOnLikeKey
 import com.metrolist.music.constants.AutoLoadMoreKey
 import com.metrolist.music.constants.AutoSkipNextOnErrorKey
 import com.metrolist.music.constants.AutoplayKey
+import com.metrolist.music.constants.CountSharedPlaysKey
 import com.metrolist.music.constants.CrossfadeDurationKey
 import com.metrolist.music.constants.CrossfadeEnabledKey
 import com.metrolist.music.constants.CrossfadeGaplessKey
@@ -253,6 +261,7 @@ import okhttp3.OkHttpClient
 import timber.log.Timber
 import java.io.ObjectInputStream
 import java.io.ObjectOutputStream
+import java.security.SecureRandom
 import java.time.LocalDateTime
 import javax.inject.Inject
 import kotlin.random.Random
@@ -283,6 +292,10 @@ class MusicService :
     @Inject
     lateinit var mediaLibrarySessionCallback: MediaLibrarySessionCallback
 
+    // SARASWATI: Task 11 — read here only to tell the car's Stations tab to ask again once it loads or changes.
+    @Inject
+    lateinit var stationsCache: com.metrolist.music.saraswati.family.StationsCache
+
     @Inject
     lateinit var equalizerService: EqualizerService
 
@@ -294,6 +307,16 @@ class MusicService :
 
     @Inject
     lateinit var listenTogetherManager: com.metrolist.music.listentogether.ListenTogetherManager
+
+    // SARASWATI: Phase 4 Task 15 — the car's Start/End Sangat button, shown only while the owner has Sangat on.
+    @Inject
+    lateinit var carSangat: com.metrolist.music.saraswati.family.sangat.CarSangatController
+
+    @Inject
+    lateinit var carSangatRoom: com.metrolist.music.saraswati.family.sangat.ListenTogetherCarRoom
+
+    @Inject
+    lateinit var familyFeatureGate: com.metrolist.music.saraswati.family.FamilyFeatureGate
 
     private lateinit var audioManager: AudioManager
     private var audioFocusRequest: AudioFocusRequest? = null
@@ -554,6 +577,25 @@ class MusicService :
     var castConnectionHandler: CastConnectionHandler? = null
         private set
 
+    // SARASWATI: Task 17 — the Cast relay reads through its own CacheDataSource over the playback path, so it
+    // never shares read state with the player. Built on the first Cast session that needs it.
+    internal val castRelayController: CastRelayController by lazy {
+        CastRelayController(
+            random = SecureRandom(),
+            source =
+                CacheRelayAudioSource(
+                    cache = downloadCache,
+                    upstream = createDataSourceFactory(VolumeNormalizationAudioProcessor(), { null }),
+                    storedMimeType = ::castRelayStoredMimeType,
+                ),
+            storedMimeType = ::castRelayStoredMimeType,
+            featureEnabled = { familyFeatureGate.isEnabled(FamilyFeature.CAST_RELAY) },
+            localAddress = { WifiAddress.current(connectivityManager) },
+        )
+    }
+
+    private suspend fun castRelayStoredMimeType(mediaId: String): String? = database.format(mediaId).first()?.mimeType
+
     private val screenStateReceiver =
         object : BroadcastReceiver() {
             override fun onReceive(
@@ -717,6 +759,36 @@ class MusicService :
                     ),
                 ).setBitmapLoader(CoilBitmapLoader(this, scope))
                 .build()
+        // SARASWATI: Task 11 — the car's Stations tab is answered from the cache at once, which may not
+        // have loaded yet when the car first asks. Tell the car to ask again whenever the cache loads or
+        // the stations it would show change; with no car subscribed this does nothing.
+        scope.launch {
+            com.metrolist.music.saraswati.car.carStationsChanges(stationsCache).collect { count ->
+                mediaSession?.notifyChildrenChanged(MusicService.CAR_STATIONS, count, null)
+            }
+        }
+        // SARASWATI: Phase 4 Task 15 — the same for the Family folder (the mix, the playlists, a feature switch,
+        // Sangat starting or ending), and the Sangat button follows the switch and the state.
+        scope.launch {
+            mediaLibrarySessionCallback.familyChanges.collect { count ->
+                mediaSession?.notifyChildrenChanged(MusicService.CAR_FAMILY, count, null)
+            }
+        }
+        scope.launch {
+            combine(carSangat.state, familyFeatureGate.enabled) { sangat, features ->
+                sangat to (features[com.metrolist.music.saraswati.family.FamilyFeature.SANGAT] != false)
+            }.distinctUntilChanged().collect { updateNotification() }
+        }
+        carSangatRoom.attachPlayer = {
+            listenTogetherManager.attachForCar { connectionScope -> PlayerConnection(this@MusicService, binder, database, connectionScope) }
+        }
+        // SARASWATI: fix wave B2 — the same for Home, which answers from its last snapshot at once and tells
+        // the car to ask again when a background refresh brought a different one.
+        scope.launch {
+            mediaLibrarySessionCallback.homeChanges.collect { count ->
+                mediaSession?.notifyChildrenChanged(MusicService.CAR_HOME, count, null)
+            }
+        }
         player.repeatMode = startupPrefs!![RepeatModeKey] ?: REPEAT_MODE_OFF
 
         if (startupPrefs!![RememberShuffleAndRepeatKey] ?: true) {
@@ -1574,8 +1646,11 @@ class MusicService :
         player.pause()
     }
 
+    // SARASWATI: final fix wave (M7) — called when Android Auto connects, so it gets its Sangat button at once.
+    fun refreshCustomLayout() = updateNotification()
+
     private fun updateNotification(isLiked: Boolean? = currentSong.value?.song?.let { if (it.isEpisode) it.inLibrary != null else it.liked }) {
-        mediaSession?.setCustomLayout(
+        val layout =
             listOf(
                 CommandButton
                     .Builder()
@@ -1631,7 +1706,29 @@ class MusicService :
                     .setSessionCommand(CommandAddToTargetPlaylist)
                     .setEnabled(currentSong.value != null)
                     .build(),
-            ),
+            )
+        mediaSession?.setCustomLayout(layout)
+        // SARASWATI: final fix wave (M7) — the Sangat button goes to the Android Auto controller only, not to the
+        // session-wide layout that the notification and the lock screen share.
+        mediaSession?.let { session ->
+            val withSangat = layout + sangatButton()
+            session.connectedControllers
+                .filter { mediaLibrarySessionCallback.isAndroidAutoController(it) }
+                .forEach { session.setCustomLayout(it, withSangat) }
+        }
+    }
+
+    // SARASWATI: Phase 4 Task 15 — Start Sangat / End Sangat, only while the owner has Sangat switched on.
+    private fun sangatButton(): List<CommandButton> {
+        if (!familyFeatureGate.isEnabled(com.metrolist.music.saraswati.family.FamilyFeature.SANGAT)) return emptyList()
+        val hosting = carSangat.state.value.hosting
+        return listOf(
+            CommandButton
+                .Builder()
+                .setDisplayName(getString(if (hosting) R.string.car_sangat_button_end else R.string.car_family_sangat_start))
+                .setIconResId(R.drawable.group_outlined)
+                .setSessionCommand(com.metrolist.music.constants.MediaSessionConstants.CommandToggleSangat)
+                .build(),
         )
     }
 
@@ -4051,9 +4148,25 @@ class MusicService :
         val mediaItem = eventTime.timeline.getWindow(eventTime.windowIndex, Timeline.Window()).mediaItem
         val historyDurationMs = dataStore[HistoryDuration]?.times(1000f) ?: 30000f
 
-        if (playbackStats.totalPlayTimeMs >= historyDurationMs &&
-            !dataStore.get(PauseListenHistoryKey, false)
-        ) {
+        // SARASWATI: Phase 4 Task 13 — a song someone else picked in a Sangat, and the Parivaar Mix, do not shape
+        // this person's taste unless CountSharedPlaysKey is on; the same verdict gates the local row and YouTube.
+        val playContext =
+            TastePolicy.resolve(
+                inRoom = listenTogetherManager.isInRoom,
+                isHost = listenTogetherManager.isHost,
+                myUsername = dataStore.get(ListenTogetherUsernameKey, ""),
+                suggestedBy = mediaItem.metadata?.suggestedBy,
+                itemIsParivaarMix = mediaItem.metadata?.fromParivaarMix == true,
+            )
+        val plan =
+            PlaybackStatsPlan.of(
+                totalPlayTimeMs = playbackStats.totalPlayTimeMs,
+                historyDurationMs = historyDurationMs.toLong(),
+                historyPaused = dataStore.get(PauseListenHistoryKey, false),
+                counts = TastePolicy.counts(playContext, dataStore.get(CountSharedPlaysKey, false)),
+            )
+
+        if (plan.writeLocalEvent) {
             database.query {
                 incrementTotalPlayTime(mediaItem.mediaId, playbackStats.totalPlayTimeMs)
                 try {
@@ -4069,7 +4182,7 @@ class MusicService :
             }
         }
 
-        if (playbackStats.totalPlayTimeMs >= historyDurationMs) {
+        if (plan.registerWithYouTube) {
             scope.launch(Dispatchers.IO) {
                 val playbackUrl =
                     playbackUrlCache[cacheKey(mediaItem.mediaId)]
@@ -4275,6 +4388,7 @@ class MusicService :
             }
         }
 
+        listenTogetherManager.releaseCarConnection(serviceGone = true) // SARASWATI: Phase 4 fix wave — nothing may outlive the service
         try {
             unregisterReceiver(screenStateReceiver)
         } catch (e: Exception) {
@@ -5050,6 +5164,12 @@ class MusicService :
         const val ALBUM = "album"
         const val PLAYLIST = "playlist"
         const val YOUTUBE_PLAYLIST = "youtube_playlist"
+
+        // SARASWATI: Task 11 — the car's four top-level tabs (Home, Library, Stations, Family).
+        const val CAR_HOME = "car_home"
+        const val CAR_LIBRARY = "car_library"
+        const val CAR_STATIONS = "car_stations"
+        const val CAR_FAMILY = "car_family"
         const val SEARCH = "search"
         const val SHUFFLE_ACTION = "__shuffle__"
 

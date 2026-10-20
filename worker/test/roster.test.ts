@@ -1,28 +1,11 @@
 import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-
-// Must match the ADMIN_KEY binding injected in vitest.config.ts.
-const TEST_ADMIN_KEY =
-  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-
-function getFamilyHubStub() {
-  const id = env.FAMILY_HUB.idFromName("family");
-  return env.FAMILY_HUB.get(id);
-}
-
-async function seedPendingDevice(
-  stub: ReturnType<typeof getFamilyHubStub>,
-  deviceId: string,
-  deviceName: string,
-) {
-  await runInDurableObject(stub, (_instance, state) => {
-    state.storage.sql.exec(
-      "INSERT INTO roster (deviceId, deviceName, status, sessionToken, approvedAt) VALUES (?, ?, 'pending', NULL, NULL)",
-      deviceId,
-      deviceName,
-    );
-  });
-}
+import {
+  TEST_ADMIN_KEY,
+  approveAndGetSessionToken,
+  getFamilyHubStub,
+  seedPendingDevice,
+} from "./helpers";
 
 describe("GET /roster", () => {
   it("returns 401 without admin auth", async () => {
@@ -59,7 +42,7 @@ describe("GET /roster", () => {
 });
 
 describe("POST /roster/{id}/approve", () => {
-  it("sets status=approved and mints a session token for a pending device", async () => {
+  it("sets status=approved for a pending device and hands the owner no session token", async () => {
     const stub = getFamilyHubStub();
     const deviceId = "22222222-2222-2222-2222-222222222222";
     await seedPendingDevice(stub, deviceId, "Papa's Phone");
@@ -70,14 +53,7 @@ describe("POST /roster/{id}/approve", () => {
     );
 
     expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      deviceId: string;
-      sessionToken: string;
-      status: string;
-    };
-    expect(body.deviceId).toBe(deviceId);
-    expect(body.status).toBe("approved");
-    expect(body.sessionToken).toMatch(/^[0-9a-f]{64}$/);
+    expect(await response.json()).toEqual({ deviceId, status: "approved" });
   });
 
   it("returns 404 when approving an already-approved device", async () => {
@@ -158,20 +134,27 @@ describe("POST /roster/{id}/revoke", () => {
     const device = rosterBody.devices.find((d) => d.deviceId === deviceId);
     expect(device?.status).toBe("revoked");
 
-    // GET /roster's response shape (Global Constraints' API table) doesn't
-    // surface sessionToken at all, so confirm it's cleared to NULL the only
-    // way left: reading the real DO's own storage directly.
-    const sessionTokenAfterRevoke = await runInDurableObject(
+    // GET /roster never surfaces credentials, so confirm every credential
+    // column is cleared the only way left: reading the real DO's storage.
+    const credentialsAfterRevoke = await runInDurableObject(
       stub,
       (_instance, state) =>
         state.storage.sql
-          .exec<{ sessionToken: string | null }>(
-            "SELECT sessionToken FROM roster WHERE deviceId = ?",
+          .exec<{
+            sessionTokenHash: string | null;
+            pendingSessionToken: string | null;
+            claimSecretHash: string | null;
+          }>(
+            "SELECT sessionTokenHash, pendingSessionToken, claimSecretHash FROM roster WHERE deviceId = ?",
             deviceId,
           )
-          .one().sessionToken,
+          .one(),
     );
-    expect(sessionTokenAfterRevoke).toBeNull();
+    expect(credentialsAfterRevoke).toEqual({
+      sessionTokenHash: null,
+      pendingSessionToken: null,
+      claimSecretHash: null,
+    });
   });
 
   it("returns 401 without admin auth", async () => {
@@ -221,18 +204,6 @@ describe("admin-only routes reject every non-admin bearer token", () => {
       });
       expect(response.status, `${method} ${path}`).toBe(401);
     }
-  }
-
-  async function approveAndGetSessionToken(
-    stub: ReturnType<typeof getFamilyHubStub>,
-    deviceId: string,
-  ) {
-    const response = await stub.fetch(
-      `https://example.com/roster/${deviceId}/approve`,
-      { method: "POST", headers: { Authorization: `Bearer ${TEST_ADMIN_KEY}` } },
-    );
-    expect(response.status).toBe(200);
-    return ((await response.json()) as { sessionToken: string }).sessionToken;
   }
 
   function authenticateAs(

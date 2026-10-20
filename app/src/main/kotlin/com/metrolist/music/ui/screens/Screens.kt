@@ -45,7 +45,32 @@ sealed class Screens(
         route = "library"
     )
 
+    // SARASWATI: Task 7 — the Family tab (Home · Search · Library · Family),
+    // shaped exactly like ListenTogether above.
+    object Family : Screens(
+        titleId = R.string.family,
+        iconIdInactive = R.drawable.group_outlined,
+        iconIdActive = R.drawable.group_filled,
+        route = "family"
+    )
+
+    // SARASWATI: Phase 4 Task 19 — a car passenger's remote-controller screen. Not a tab, so not in MainScreens.
+    object SangatRemote : Screens(
+        titleId = R.string.sangat_remote_title,
+        iconIdInactive = R.drawable.group_outlined,
+        iconIdActive = R.drawable.group_filled,
+        route = "sangat/remote",
+    )
+
+    // SARASWATI: Phase 4 Task 21 — Import from Spotify, opened from the Library menu. Not a tab.
+    object SpotifyImport : Screens(
+        titleId = R.string.spotify_import_title,
+        iconIdInactive = R.drawable.upload,
+        iconIdActive = R.drawable.upload,
+        route = "spotify_import",
+    )
+
     companion object {
-        val MainScreens = listOf(Home, Search, ListenTogether, Library)
+        val MainScreens = listOf(Home, Search, ListenTogether, Library, Family)
     }
 }

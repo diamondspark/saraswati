@@ -373,6 +373,19 @@ dependencies {
     implementation(libs.ktor.client.encoding)
     implementation(libs.ktor.serialization.json)
 
+    // SARASWATI: Task 6 (HubClient) — parses the family hub Worker's JSON with
+    // kotlinx.serialization directly. It already resolves transitively
+    // (Ktor), declared explicitly so HubClient does not depend on Ktor
+    // happening to expose it. OkHttp is deliberately NOT declared here:
+    // the app already imports okhttp3 through Coil/Ktor/Media3, and a direct
+    // implementation(libs.okhttp) changes what the generateLocaleConfig
+    // classpath resolves to, pulling in an unverified
+    // org.jetbrains.compose.annotation-internal 1.8.0 .module.
+    implementation(libs.kotlinx.serialization.json)
+    // SARASWATI: Task 7 — renders the owner's pairing link as a QR code
+    // (QrCode.kt). Encoding only; no camera or scanning code is added.
+    implementation(libs.zxing.core)
+
     // Protobuf for message serialization (lite version for Android)
     implementation(libs.protobuf.javalite)
     implementation(libs.protobuf.kotlin.lite)
@@ -393,6 +406,9 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.ktor.client.mock)
+    // SARASWATI: Task 6 — HubClientTest runs HubClient against a real local
+    // HTTP server instead of a mocked OkHttp Call.
+    testImplementation(libs.okhttp.mockwebserver)
 
     // SARASWATI: Task 12 instrumented proof that the network security
     // config's deny-by-default egress allowlist is enforced on-device
@@ -434,9 +450,35 @@ android {
         buildConfigField("String", "LASTFM_SECRET", "\"\"")
     }
 
+    // SARASWATI: Task 6 — base URL of the family hub Worker (HubClient).
+    // The URL's host must also be allowlisted in network_security_config.xml
+    // and security/egress-allowlist.json. foss/izzy never ship (gms only),
+    // so they get an empty URL: HubClient then fails every call with
+    // "not configured" instead of talking to a hub nobody vetted for them.
+    //
+    // SARASWATI: Task 7 — the same host is the pairing link's host
+    // (https://<host>/pair#<token>): app/src/gms/AndroidManifest.xml reads it
+    // as ${hubHost}, so the link filter and HubClient can never disagree.
+    val gmsHubBaseUrl = "https://saraswati-sangat.pandey-mohitk.workers.dev"
     productFlavors {
+        getByName("foss") {
+            buildConfigField("String", "HUB_BASE_URL", "\"\"")
+        }
         getByName("gms") {
             buildConfigField("Boolean", "UPDATER_AVAILABLE", "false")
+            buildConfigField("String", "HUB_BASE_URL", "\"$gmsHubBaseUrl\"")
+            manifestPlaceholders["hubHost"] = gmsHubBaseUrl.substringAfter("://").substringBefore("/")
+        }
+        getByName("izzy") {
+            buildConfigField("String", "HUB_BASE_URL", "\"\"")
         }
     }
+}
+
+// SARASWATI: fix wave B3 — hands the strict mode of FestivalCalendarTest to the test JVM:
+// -Psaraswati.strictFestivalTable=true makes "the festival table is running out" a failure instead of a skip.
+// Only the weekly festival-table workflow and a deliberate manual run pass it; saraswati-ci and the release
+// verify job never do (docs/release-runbook.md, "Before every release").
+tasks.withType<Test>().configureEach {
+    providers.gradleProperty("saraswati.strictFestivalTable").orNull?.let { systemProperty("saraswati.strictFestivalTable", it) }
 }

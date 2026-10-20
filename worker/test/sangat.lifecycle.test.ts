@@ -387,7 +387,7 @@ describe("expiry and the alarm", () => {
     await expectAlarm(hub, (emptied?.emptySince as number) + EMPTY_CLEANUP);
   });
 
-  it("the alarm is always the earliest pending deadline", async () => {
+  it("the alarm is never later than the earliest pending deadline", async () => {
     const hub = hubStub();
     const [a, b, d] = await Promise.all(["a", "b", "d"].map((n) => seedDevice(hub, n)));
     await expectAlarm(hub, null);
