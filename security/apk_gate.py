@@ -476,9 +476,11 @@ def check_hub_agreement(
             f"the manifest's pairing-link host is {', '.join(sorted(pairing_hosts))}"
         )
 
-    if (host, False) not in parse_network_config_domains(nsc_xml_text):
+    nsc_domains = parse_network_config_domains(nsc_xml_text)
+    if (host, False) not in nsc_domains:
         violations.append(
             f"hub host mismatch: network_security_config has no exact (includeSubdomains=false) entry for {host}"
+            f" (parsed {len(nsc_domains)} domains; hub-like: {[d for d in nsc_domains if 'workers' in d[0]]})"
         )
 
     allowed = {(entry.get("name"), bool(entry.get("subdomains"))) for entry in egress_allowlist.get("allowed", [])}
