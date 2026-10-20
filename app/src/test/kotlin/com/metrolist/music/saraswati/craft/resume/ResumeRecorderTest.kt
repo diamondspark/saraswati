@@ -48,14 +48,22 @@ class ResumeRecorderTest {
 
     private fun <T> blocking(block: suspend () -> T): T = runBlocking { withTimeout(10_000) { block() } }
 
-    // Recording launches the write on the store's scope, so each check waits for the stored value to settle.
+    // Recording launches the write on the store's scope. With no expected value this keeps the
+    // original single-delay read; the throttle test below passes the value it is waiting for and
+    // polls for it, since that write can still be in flight on a slower CI machine.
     private fun awaitStored(
         store: ResumeStore,
         sourceId: String,
+        expected: Long? = null,
     ): ResumePoint? =
         blocking {
-            delay(50)
-            store.points.first()[sourceId]
+            var last: ResumePoint? = null
+            repeat(if (expected == null) 1 else 40) {
+                delay(50)
+                last = store.points.first()[sourceId]
+                if (expected != null && last?.positionMs == expected) return@blocking last
+            }
+            last
         }
 
     private val album = ResumableQueue("album-1", ListQueue(items = listOf(MediaItem.Builder().setMediaId("a").build())), null)
@@ -116,10 +124,10 @@ class ResumeRecorderTest {
         recorder.onProgress(album, 0, "song-0", 10, 1_000L, 200_000L, force = false)
         now += 4_000
         recorder.onProgress(album, 0, "song-0", 10, 5_000L, 200_000L, force = false)
-        assertEquals(1_000L, awaitStored(store, "album-1")?.positionMs)
+        assertEquals(1_000L, awaitStored(store, "album-1", expected = 1_000L)?.positionMs)
 
         now += 6_000
         recorder.onProgress(album, 0, "song-0", 10, 11_000L, 200_000L, force = false)
-        assertEquals(11_000L, awaitStored(store, "album-1")?.positionMs)
+        assertEquals(11_000L, awaitStored(store, "album-1", expected = 11_000L)?.positionMs)
     }
 }
