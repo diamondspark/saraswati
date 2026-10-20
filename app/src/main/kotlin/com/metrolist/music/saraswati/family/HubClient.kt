@@ -23,6 +23,10 @@
 //    a hostile roster entry cannot rewrite the path ("..", "/", "?").
 package com.metrolist.music.saraswati.family
 
+import com.metrolist.music.saraswati.ask.AskHub
+import com.metrolist.music.saraswati.ask.AskLimitReached
+import com.metrolist.music.saraswati.ask.AskReply
+import com.metrolist.music.saraswati.ask.AskWire
 import com.metrolist.music.saraswati.family.sangat.SangatHubApi
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.SerializationException
@@ -32,6 +36,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -41,6 +46,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
+import java.time.Instant
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -49,7 +55,8 @@ class HubClient(
     private val baseUrl: String,
     client: OkHttpClient,
 ) : HubApi,
-    SangatHubApi {
+    SangatHubApi,
+    AskHub {
     // Shares the caller's connection pool, dispatcher and timeouts; only the
     // redirect policy is pinned here.
     private val http: OkHttpClient =
@@ -197,6 +204,18 @@ class HubClient(
             json.decodeFromString<HealthResponse>(it).devices
         }
 
+    // SARASWATI: Phase 6 Task 10 — one ask. Never retried: a failure is the caller's to answer (search, or silence).
+    // A daily-limit 429 is AskLimitReached with the reset time; any other failure is a plain failure whose message
+    // carries nothing from the request or the answer.
+    override suspend fun ask(
+        sessionToken: String,
+        question: String,
+        locale: String,
+    ): Result<AskReply> =
+        send("POST", listOf("ask"), sessionToken, json.encodeToString(AskWireRequest(question, locale)), onLimit = ::dailyLimitOrNull) {
+            AskWire.reply(json.decodeFromString<AskWireReply>(it), question)
+        }
+
     // SARASWATI: Phase 4 Task 8 — the Sangat, Parivaar Mix and family-playlist routes. They are on HubClient
     // alone, not on HubApi: only the Phase 4 packages call them, and the Phase 3 view models and their
     // fakes stay as they were. Same contract as above: a Result, never a throw.
@@ -266,6 +285,7 @@ class HubClient(
         path: List<String>,
         bearer: String?,
         body: String?,
+        onLimit: ((String) -> Throwable?)? = null,
         parse: (String) -> T,
     ): Result<T> {
         val base =
@@ -294,7 +314,7 @@ class HubClient(
 
         val raw =
             try {
-                http.newCall(request).await()
+                http.newCall(request).await(readLimitBody = onLimit != null)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -302,6 +322,7 @@ class HubClient(
             }
 
         if (raw.code !in 200..299) {
+            if (raw.code == 429) onLimit?.invoke(raw.body)?.let { return Result.failure(it) }
             return Result.failure(HubException(raw.code, "hub answered HTTP ${raw.code}"))
         }
         return try {
@@ -323,6 +344,19 @@ class HubClient(
             .toMap()
     }
 
+    /** The daily-limit answer ({"error":"daily limit","resetAt":ISO}) as [AskLimitReached]; any other 429 is null. */
+    private fun dailyLimitOrNull(body: String): Throwable? =
+        try {
+            val obj = json.parseToJsonElement(body) as JsonObject
+            if (obj["error"]?.jsonPrimitive?.content != "daily limit") {
+                null
+            } else {
+                AskLimitReached(Instant.parse(obj.getValue("resetAt").jsonPrimitive.content))
+            }
+        } catch (e: Exception) {
+            null
+        }
+
     private fun isSafeSegment(segment: String): Boolean = SAFE_SEGMENT.matches(segment)
 
     private fun <T> invalidDeviceId(): Result<T> = Result.failure(IllegalArgumentException("invalid device id"))
@@ -336,7 +370,7 @@ class HubClient(
      * Runs the call on OkHttp's dispatcher and reads the (bounded) body there,
      * not on the caller's thread, so a caller on Main never does blocking I/O.
      */
-    private suspend fun Call.await(): RawResponse =
+    private suspend fun Call.await(readLimitBody: Boolean): RawResponse =
         suspendCancellableCoroutine { continuation ->
             continuation.invokeOnCancellation { cancel() }
             enqueue(
@@ -353,7 +387,7 @@ class HubClient(
                         response: Response,
                     ) {
                         try {
-                            continuation.resume(response.use { RawResponse(it.code, if (it.isSuccessful) it.readBounded() else "") })
+                            continuation.resume(response.use { RawResponse(it.code, if (it.isSuccessful || (readLimitBody && it.code == 429)) it.readBounded() else "") })
                         } catch (e: Exception) {
                             continuation.resumeWithException(e)
                         }

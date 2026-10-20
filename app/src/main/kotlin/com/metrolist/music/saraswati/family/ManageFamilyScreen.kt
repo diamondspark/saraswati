@@ -606,6 +606,7 @@ private fun FeatureRow(
             FamilyFeature.PARIVAAR_MIX -> R.string.family_feature_parivaar_mix to R.string.family_feature_parivaar_mix_desc
             FamilyFeature.FAMILY_PLAYLISTS -> R.string.family_feature_family_playlists to R.string.family_feature_family_playlists_desc
             FamilyFeature.CAST_RELAY -> R.string.family_feature_cast_relay to R.string.family_feature_cast_relay_desc
+            FamilyFeature.ASK_SARASWATI -> R.string.family_feature_ask_saraswati to R.string.family_feature_ask_saraswati_desc
         }
     Row(
         modifier =

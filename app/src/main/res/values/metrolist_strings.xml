@@ -1114,6 +1114,8 @@
     <string name="family_feature_family_playlists_desc">Off hides playlists the family shares.</string>
     <string name="family_feature_cast_relay">Cast relay</string>
     <string name="family_feature_cast_relay_desc">Off hides casting from one family phone to another.</string>
+    <string name="family_feature_ask_saraswati">Ask Saraswati</string>
+    <string name="family_feature_ask_saraswati_desc">Off hides the Poochho Saraswati button in Search.</string>
 
     <!-- SARASWATI: Task 9 — Saral, the grandparents' screen. Hindi on purpose: the one screen built only for them,
          so none of it is translatable. The copy is the approved mockup's, except the lines marked NEW, which
