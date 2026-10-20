@@ -25,6 +25,7 @@ import com.metrolist.music.saraswati.family.HubClient
 import com.metrolist.music.saraswati.family.HubConfig
 import com.metrolist.music.saraswati.family.HubIdentity
 import com.metrolist.music.saraswati.family.parivaar.DatabaseTopSongsSource
+import com.metrolist.music.saraswati.family.recap.RecapSnapshotStore
 import com.metrolist.music.saraswati.family.parivaar.HubClientParivaarHub
 import com.metrolist.music.saraswati.family.parivaar.InnerTubePlaylistPort
 import com.metrolist.music.saraswati.family.parivaar.MixDownloader
@@ -220,6 +221,7 @@ object FamilyModule {
         downloadUtil: DownloadUtil,
         database: MusicDatabase,
         gate: FamilyFeatureGate,
+        recap: RecapSnapshotStore,
         @ApplicationContext context: Context,
     ): ParivaarMixRefresher =
         ParivaarMixRefresher(
@@ -229,6 +231,8 @@ object FamilyModule {
             store,
             MixDownloader.create(context, downloadUtil, database),
             enabled = { gate.allows(FamilyFeature.PARIVAAR_MIX) },
+            // SARASWATI: Phase 6 Task 14 — the Family Recap gets each refresh's members.
+            recap = recap,
         )
 
     // SARASWATI: Phase 4 Task 14 — the family's shared playlists. Collaboration stays the "unavailable" stand-in

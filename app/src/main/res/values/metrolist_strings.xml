@@ -1383,4 +1383,22 @@
     <string name="saraswati_chatur_shuffle">Shuffle</string>
     <string name="saraswati_chatur_smart">Smart</string>
     <string name="saraswati_chatur_smart_pick">Smart pick</string>
+    <!-- SARASWATI: Phase 6 Task 15 — Parivaar Saar (Family Recap card). English defaults only. -->
+    <string name="family_recap_title">Parivaar Saar</string>
+    <string name="family_recap_week">Week of %1$s</string>
+    <string name="family_recap_anthem_label">Family anthem</string>
+    <string name="family_recap_anthem_none">No song is on two family lists yet.</string>
+    <string name="family_recap_anthem_play">Play its radio</string>
+    <plurals name="family_recap_lists">
+        <item quantity="one">On %d list</item>
+        <item quantity="other">On %d lists</item>
+    </plurals>
+    <string name="family_recap_favourites">Everyone\'s number one</string>
+    <string name="family_recap_shared_title">Songs in common</string>
+    <plurals name="family_recap_shared_count">
+        <item quantity="one">You and %1$s share %2$d song</item>
+        <item quantity="other">You and %1$s share %2$d songs</item>
+    </plurals>
+    <string name="family_recap_new_title">New this week</string>
+    <string name="family_recap_manage">Manage Family</string>
 </resources>
