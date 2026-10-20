@@ -45,6 +45,19 @@ object ControllerPolicy {
         mapOf(ANDROID_AUTO_PACKAGE to setOf(ANDROID_AUTO_SIGNING_DIGEST))
 
     /**
+     * Whether [caller] is the real Android Auto: its verified package, and a signing certificate in [expectedDigests].
+     * For what only the car should be shown (the Sangat button); it grants nothing, [isAllowed] still decides access.
+     */
+    fun isAndroidAuto(
+        caller: CallerInfo?,
+        expectedDigests: Map<String, Set<String>>,
+    ): Boolean {
+        if (caller == null || caller.packageName != ANDROID_AUTO_PACKAGE) return false
+        val expected = expectedDigests[ANDROID_AUTO_PACKAGE] ?: return false
+        return caller.signingSha256.any { it in expected }
+    }
+
+    /**
      * Rules, checked in this exact order — the first match decides:
      *  1. [caller] is null (its package name could not be verified against its uid) -> deny.
      *  2. [caller]'s package is [selfPackage] -> allow.

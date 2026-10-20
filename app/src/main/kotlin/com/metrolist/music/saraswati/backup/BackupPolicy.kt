@@ -43,6 +43,8 @@ import com.metrolist.music.constants.DiscordButton2UrlKey
 import com.metrolist.music.constants.DiscordNameKey
 import com.metrolist.music.constants.DiscordUsernameKey
 import com.metrolist.music.constants.FamilyDeviceIdKey
+import com.metrolist.music.constants.FamilyFeaturesDisabledKey
+import com.metrolist.music.constants.FamilyPlaylistsCacheKey
 import com.metrolist.music.constants.FamilyStationsCacheKey
 import com.metrolist.music.constants.FamilyStationsSavedKey
 import com.metrolist.music.constants.FamilyUnauthorizedAtKey
@@ -54,7 +56,12 @@ import com.metrolist.music.constants.ListenTogetherSessionTimestampKey
 import com.metrolist.music.constants.MaxImageCacheSizeKey
 import com.metrolist.music.constants.MaxSongCacheSizeKey
 import com.metrolist.music.constants.OpenRouterBaseUrlKey
+import com.metrolist.music.constants.ParivaarMixKey
+import com.metrolist.music.constants.ParivaarPlaylistIdKey
+import com.metrolist.music.constants.ParivaarTopSongsSyncedAtKey
+import com.metrolist.music.constants.SangatCarRoomCodeKey
 import com.metrolist.music.constants.VisitorDataKey
+import com.metrolist.music.saraswati.family.sangat.RemoteControllerStore
 import com.metrolist.music.saraswati.security.SecretPreferenceKeys
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
@@ -139,6 +146,20 @@ object BackupPolicy {
                 // cache is hub data, refreshed from the hub, not a backup item.
                 GrandparentRoleKey,
                 FamilyStationsCacheKey,
+                // SARASWATI: Phase 4 Task 8 — the cached kill-switches are hub data too.
+                FamilyFeaturesDisabledKey,
+                // SARASWATI: Phase 4 Task 11 — the built Parivaar Mix is derived from the family's listening.
+                ParivaarMixKey,
+                // SARASWATI: Phase 4 Task 14 — the family playlists are the hub's list, cached.
+                FamilyPlaylistsCacheKey,
+                // SARASWATI: Phase 4 Task 12 — this phone's own top-songs playlist and the time of its last sync.
+                ParivaarPlaylistIdKey,
+                ParivaarTopSongsSyncedAtKey,
+                // SARASWATI: Phase 4 review fix (6) — "this phone is a remote controller" is live room state; a restored
+                // `true` would bring the phone up silent in the Sangat, a restored absence would let it play.
+                RemoteControllerStore.Key,
+                // SARASWATI: final fix wave (I3) — the car room this phone hosts is live room state, like the flag above.
+                SangatCarRoomCodeKey,
                 // SARASWATI: Task 7/8 fix round 1 — this phone's own hub state,
                 // none of it a credential by name but all of it identity. A
                 // restore must not plant or clear the owner flag (Manage

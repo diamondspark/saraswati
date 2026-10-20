@@ -1,0 +1,140 @@
+[
+  {
+    "client": "A",
+    "type": "error",
+    "payload": {
+      "code": "unknown_message_type",
+      "message": "Unknown message type: frobnicate"
+    }
+  },
+  {
+    "client": "A",
+    "type": "error",
+    "payload": {
+      "code": "unknown_message_type",
+      "message": "Unknown message type: room_created"
+    }
+  },
+  {
+    "client": "A",
+    "type": "error",
+    "payload": {
+      "code": "invalid_message",
+      "message": "Invalid message format"
+    }
+  },
+  {
+    "client": "A",
+    "type": "error",
+    "payload": {
+      "code": "invalid_message",
+      "message": "Invalid message format"
+    }
+  },
+  {
+    "client": "A",
+    "type": "error",
+    "payload": {
+      "code": "invalid_message",
+      "message": "Message type is required"
+    }
+  },
+  {
+    "client": "A",
+    "type": "error",
+    "payload": {
+      "code": "invalid_message",
+      "message": "Invalid message format"
+    }
+  },
+  {
+    "client": "A",
+    "type": "error",
+    "payload": {
+      "code": "invalid_message",
+      "message": "Invalid message format"
+    }
+  },
+  {
+    "client": "A",
+    "type": "error",
+    "payload": {
+      "code": "invalid_payload",
+      "message": "Invalid create room payload"
+    }
+  },
+  {
+    "client": "A",
+    "type": "error",
+    "payload": {
+      "code": "invalid_payload",
+      "message": "Invalid join room payload"
+    }
+  },
+  {
+    "client": "A",
+    "type": "error",
+    "payload": {
+      "code": "invalid_payload",
+      "message": "Invalid ping payload"
+    }
+  },
+  {
+    "client": "B",
+    "type": "error",
+    "payload": {
+      "code": "unsupported_client",
+      "message": "Protobuf support is required"
+    }
+  },
+  {
+    "client": "B",
+    "type": "server_capabilities",
+    "payload": {
+      "supports_protobuf": true,
+      "supports_compression": true,
+      "server_version": "1"
+    }
+  },
+  {
+    "client": "B",
+    "type": "error",
+    "payload": {
+      "code": "capabilities_already_set",
+      "message": "Client capabilities have already been configured"
+    }
+  },
+  {
+    "client": "C",
+    "type": "room_created",
+    "payload": {
+      "room_code": "$ROOM1",
+      "user_id": "$USER1",
+      "session_token": "$TOKEN1"
+    }
+  },
+  {
+    "client": "C",
+    "type": "error",
+    "payload": {
+      "code": "capabilities_too_late",
+      "message": "Client capabilities must be sent before joining a room"
+    }
+  },
+  {
+    "client": "C",
+    "type": "error",
+    "payload": {
+      "code": "invalid_payload",
+      "message": "Invalid playback action payload"
+    }
+  },
+  {
+    "client": "C",
+    "type": "error",
+    "payload": {
+      "code": "invalid_payload",
+      "message": "Invalid approve suggestion payload"
+    }
+  }
+]

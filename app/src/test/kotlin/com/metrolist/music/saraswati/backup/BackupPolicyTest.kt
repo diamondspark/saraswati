@@ -25,6 +25,9 @@ import com.metrolist.music.constants.FamilyHubClaimSecretKey
 import com.metrolist.music.constants.FamilyDeviceIdKey
 import com.metrolist.music.constants.FamilyHubSessionTokenKey
 import com.metrolist.music.constants.FamilyStationsSavedKey
+import com.metrolist.music.constants.FamilyFeaturesDisabledKey
+import com.metrolist.music.constants.SangatCarRoomCodeKey
+import com.metrolist.music.constants.FamilyPlaylistsCacheKey
 import com.metrolist.music.constants.FamilyStationsCacheKey
 import com.metrolist.music.constants.GrandparentRoleKey
 import com.metrolist.music.constants.IsFamilyOwnerKey
@@ -33,10 +36,14 @@ import com.metrolist.music.constants.LastFMSessionKey
 import com.metrolist.music.constants.ListenTogetherServerUrlKey
 import com.metrolist.music.constants.OpenRouterApiKey
 import com.metrolist.music.constants.OpenRouterBaseUrlKey
+import com.metrolist.music.constants.ParivaarMixKey
+import com.metrolist.music.constants.ParivaarPlaylistIdKey
+import com.metrolist.music.constants.ParivaarTopSongsSyncedAtKey
 import com.metrolist.music.constants.ProxyPasswordKey
 import com.metrolist.music.constants.ProxyUrlKey
 import com.metrolist.music.constants.SongSortTypeKey
 import com.metrolist.music.constants.VisitorDataKey
+import com.metrolist.music.saraswati.family.sangat.RemoteControllerStore
 import com.metrolist.music.saraswati.security.SecretPreferenceKeys
 import androidx.datastore.preferences.core.mutablePreferencesOf
 import org.junit.Assert.assertEquals
@@ -262,12 +269,22 @@ class BackupPolicyTest {
             mutablePreferencesOf(
                 GrandparentRoleKey to true,
                 FamilyStationsCacheKey to "{}",
+                FamilyFeaturesDisabledKey to setOf("sangat"),
+                ParivaarMixKey to "{}",
+                FamilyPlaylistsCacheKey to "[]",
+                ParivaarPlaylistIdKey to "PLabcdefghij",
+                ParivaarTopSongsSyncedAtKey to 1L,
             ).toPreferences()
 
         val sanitized = BackupPolicy.sanitize(prefs)
 
         assertNull(sanitized[GrandparentRoleKey])
         assertNull(sanitized[FamilyStationsCacheKey])
+        assertNull(sanitized[FamilyFeaturesDisabledKey])
+        assertNull(sanitized[ParivaarMixKey])
+        assertNull(sanitized[FamilyPlaylistsCacheKey])
+        assertNull(sanitized[ParivaarPlaylistIdKey])
+        assertNull(sanitized[ParivaarTopSongsSyncedAtKey])
     }
 
     @Test
@@ -371,5 +388,25 @@ class BackupPolicyTest {
             "These family hub preference keys can be exported or restored: " + missing.joinToString(", ") { it.name },
             missing.isEmpty(),
         )
+    }
+
+    // SARASWATI: Phase 4 review fix (6)
+    @Test
+    fun `a backup cannot plant or export the remote-controller flag`() {
+        assertTrue(RemoteControllerStore.Key in BackupPolicy.NEVER_EXPORT_OR_RESTORE)
+        val planted = mutablePreferencesOf(RemoteControllerStore.Key to true, SongSortTypeKey to "NAME").toPreferences()
+
+        val sanitized = BackupPolicy.sanitize(planted)
+
+        assertNull(sanitized[RemoteControllerStore.Key])
+    }
+
+    // SARASWATI: final fix wave (I3)
+    @Test
+    fun `a backup cannot plant or export the car room code`() {
+        assertTrue(SangatCarRoomCodeKey in BackupPolicy.NEVER_EXPORT_OR_RESTORE)
+        val planted = mutablePreferencesOf(SangatCarRoomCodeKey to "ABCD1234", SongSortTypeKey to "NAME").toPreferences()
+
+        assertNull(BackupPolicy.sanitize(planted)[SangatCarRoomCodeKey])
     }
 }

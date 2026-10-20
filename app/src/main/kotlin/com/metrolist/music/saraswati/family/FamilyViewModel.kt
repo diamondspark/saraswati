@@ -20,6 +20,10 @@
 // is sent. A list that is not complete yet (the four starting defaults have no
 // video until the owner picks one) is kept as an unsaved draft, never sent.
 //
+// Phase 4 Task 8: the owner's phone is also a family member that needs its own device-bearer session (the
+// Sangat WebSocket and the Parivaar and family-playlist routes refuse the admin key), so [ensureSelfPaired]
+// runs the whole pairing on the owner's phone by itself.
+//
 // Task 9: every list the hub confirms (loaded or saved) also refreshes the
 // StationsCache that Saral and the car read. A draft never does, and a cache
 // that cannot be written never turns a saved edit into an error.
@@ -30,6 +34,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -37,6 +42,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.util.UUID
 import javax.inject.Inject
 import kotlin.coroutines.cancellation.CancellationException
@@ -84,10 +90,20 @@ class FamilyViewModel
         private val stationsCache: StationsCache,
         scope: CoroutineScope,
         private val newStationId: () -> String = { UUID.randomUUID().toString() },
+        // SARASWATI: Phase 4 review fix (M7, M12) — asks the feature gate to read the kill-switches again: after
+        // the owner phone's own self-pairing (it had no session to ask with before) and after its own toggle.
+        private val refreshGate: suspend () -> Unit = {},
     ) : ViewModel(scope) {
         @Inject
-        constructor(hub: HubApi, store: FamilyStore, config: HubConfig, stationsCache: StationsCache) :
-            this(hub, store, config, stationsCache, CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate))
+        constructor(hub: HubApi, store: FamilyStore, config: HubConfig, stationsCache: StationsCache, gate: FamilyFeatureGate) :
+            this(
+                hub,
+                store,
+                config,
+                stationsCache,
+                CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+                refreshGate = { gate.refresh() },
+            )
 
         private val _pairingState = MutableStateFlow<PairingUiState>(PairingUiState.Idle)
         val pairingState: StateFlow<PairingUiState> = _pairingState.asStateFlow()
@@ -139,6 +155,70 @@ class FamilyViewModel
 
         /** The four-character code of that waiting claim (what the person says to the owner), or null. */
         val pendingClaimCode: StateFlow<String?> = _pendingClaimCode.asStateFlow()
+
+        // One self-pairing at a time: a second call while one runs would claim a second device.
+        private val selfPairLock = Mutex()
+
+        /**
+         * SARASWATI: Phase 4 Task 8 — gives the owner's own phone a hub session. Does nothing unless this phone
+         * holds the admin key and no session. Then it makes a pairing link, claims it as [deviceName], approves
+         * its own claim and collects the session token, and only then stores it ([FamilyStore.completeClaim]);
+         * a failure at any step stores nothing, and a phone already claimed on the hub is revoked again so the
+         * roster does not collect devices nobody holds. Silent on failure: the next call tries again.
+         */
+        fun ensureSelfPaired(deviceName: String) {
+            viewModelScope.launch {
+                if (!selfPairLock.tryLock()) return@launch
+                try {
+                    selfPair(deviceName)
+                } finally {
+                    selfPairLock.unlock()
+                }
+            }
+        }
+
+        private suspend fun selfPair(deviceName: String) {
+            val key = adminKey() ?: return
+            // The raw slot, not session(): a token the Keystore cannot open right now is still a session. A
+            // probe that fails counts as "has one": pairing over a live session would replace it.
+            val hasSession =
+                try {
+                    store.hasStoredSession()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    true
+                }
+            if (hasSession) return
+            val pairing = hub.createPairing(key).getOrNull() ?: return
+            val claim = hub.claimPairing(pairing.token, deviceName).getOrNull() ?: return
+            var kept = false
+            try {
+                hub.approveDevice(key, claim.deviceId).getOrNull() ?: return
+                val approved = hub.pairingStatus(claim.deviceId, claim.claimSecret).getOrNull() as? PairingStatus.Approved ?: return
+                try {
+                    store.completeClaim(claim.deviceId, approved.sessionToken)
+                    kept = true
+                    refreshGateQuietly()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // Nothing was kept; the claim is revoked below.
+                }
+            } finally {
+                if (!kept) withContext(NonCancellable) { hub.revokeDevice(key, claim.deviceId) }
+            }
+        }
+
+        private suspend fun refreshGateQuietly() {
+            try {
+                refreshGate()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // The gate keeps its last answer.
+            }
+        }
 
         fun refreshMembership() {
             viewModelScope.launch {
@@ -305,8 +385,10 @@ class FamilyViewModel
             }
             hub
                 .setKillSwitches(adminKey, mapOf(key to enabled))
-                .onSuccess { _killSwitches.value = withEveryFeature(it) }
-                .onFailure { fail(it) }
+                .onSuccess {
+                    _killSwitches.value = withEveryFeature(it)
+                    refreshGate()
+                }.onFailure { fail(it) }
         }
 
         /**

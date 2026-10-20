@@ -121,9 +121,17 @@ import com.metrolist.music.LocalPlayerConnection
 import com.metrolist.music.R
 import com.metrolist.music.saraswati.SaraswatiFeatures
 import com.metrolist.music.saraswati.culture.FestivalBanner
+import com.metrolist.music.saraswati.family.sangat.CarSangatDismissedNote
+import com.metrolist.music.saraswati.family.sangat.CarSangatPrompt
+import com.metrolist.music.saraswati.family.sangat.SangatLiveBanner
+import com.metrolist.music.saraswati.family.sangat.SangatNameDialog
+import com.metrolist.music.saraswati.family.sangat.SangatViewModel
 import com.metrolist.music.saraswati.culture.FestivalRadio
 import com.metrolist.music.saraswati.culture.FestivalSeed
 import com.metrolist.music.saraswati.culture.radioEndpointFor
+import com.metrolist.music.saraswati.family.parivaar.ParivaarMixCard
+import com.metrolist.music.saraswati.family.parivaar.ParivaarUiState
+import com.metrolist.music.saraswati.family.parivaar.ParivaarViewModel
 import com.metrolist.music.saraswati.culture.rememberCurrentFestival
 import com.metrolist.music.saraswati.saral.YouTubeSaralSearch
 import com.metrolist.music.saraswati.update.SaraswatiUpdateHttpFetcher
@@ -671,6 +679,16 @@ fun HomeScreen(
 ) {
     val navController = LocalNavController.current
     val menuState = LocalMenuState.current
+
+    // SARASWATI: Phase 4 Task 19 — the Sangat live banner, the car prompt and the one-time name ask.
+    val sangatViewModel: SangatViewModel = hiltViewModel()
+    val sangatBanner by sangatViewModel.banner.collectAsStateWithLifecycle()
+    val sangatDismissedNote by sangatViewModel.dismissedNote.collectAsStateWithLifecycle()
+    val sangatPrompt by sangatViewModel.prompt.collectAsStateWithLifecycle()
+    val sangatAskName by sangatViewModel.askName.collectAsStateWithLifecycle()
+    LaunchedEffect(sangatViewModel) {
+        sangatViewModel.enteredCarRoom.collect { navController.navigate(Screens.SangatRemote.route) }
+    }
     val bottomSheetPageState = LocalBottomSheetPageState.current
     val database = LocalDatabase.current
     val playerConnection = LocalPlayerConnection.current ?: return
@@ -804,6 +822,9 @@ fun HomeScreen(
     // festival's search and starts that song's radio, the way a Saral tile does; it is a
     // one-off suggestion, never one of the owner's stations. While it is finding the song
     // the button is off, so a second tap cannot start a second radio.
+    // SARASWATI: Phase 4 Task 20 — the Parivaar Mix card's state (Hidden or NeedsTwoMembers show no card).
+    val parivaarViewModel: ParivaarViewModel = hiltViewModel()
+    val parivaarState by parivaarViewModel.state.collectAsStateWithLifecycle()
     val festival by rememberCurrentFestival()
     val festivalRadio = remember { FestivalRadio(YouTubeSaralSearch()) }
     var festivalStarting by remember { mutableStateOf(false) }
@@ -1247,12 +1268,49 @@ fun HomeScreen(
                     )
                 }
 
+            sangatPrompt?.let { room ->
+                CarSangatPrompt(
+                    room = room,
+                    onJoin = { sangatViewModel.join(room) },
+                    onNotNow = { sangatViewModel.dismissPrompt(room.roomCode) },
+                )
+            }
+            if (sangatAskName) {
+                SangatNameDialog(
+                    onSubmit = sangatViewModel::submitName,
+                    onDismiss = sangatViewModel::cancelNameRequest,
+                )
+            }
+            sangatDismissedNote?.let { code ->
+                LaunchedEffect(code) {
+                    kotlinx.coroutines.delay(SANGAT_NOTE_MS)
+                    sangatViewModel.clearDismissedNote()
+                }
+                CarSangatDismissedNote(
+                    onShowAgain = { sangatViewModel.showPromptAgain(code) },
+                    modifier =
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(LocalPlayerAwareWindowInsets.current.asPaddingValues()),
+                )
+            }
+
             LazyColumn(
                 state = lazylistState,
                 contentPadding = LocalPlayerAwareWindowInsets.current.asPaddingValues(),
             ) {
-                // SARASWATI: Task 10 — banner order on Home is: Sangat live (Phase 4,
-                // not built yet), then the festival banner, then the Sudhaar banner.
+                // SARASWATI: Task 10 — banner order on Home is: Sangat live (Phase 4 Task 19),
+                // then the festival banner, then the Sudhaar banner.
+                sangatBanner?.let { banner ->
+                    item(key = "sangat_live_banner") {
+                        SangatLiveBanner(
+                            banner = banner,
+                            onJoin = { sangatViewModel.join(banner.room) },
+                            onLeave = sangatViewModel::leave,
+                        )
+                    }
+                }
+
                 festival?.let { today ->
                     item(key = "festival_banner") {
                         // SARASWATI: fix wave B2 — a Listen Together guest follows the host's queue, so the
@@ -1320,6 +1378,28 @@ fun HomeScreen(
                                 }
                             },
                         )
+                    }
+                }
+
+                // SARASWATI: Phase 4 Task 20 — the Parivaar Mix card, shown only once there is a mix to play. A Listen
+                // Together guest follows the host's queue, so it is off for them, like the festival banner.
+                if (parivaarState is ParivaarUiState.Ready) {
+                    item(key = "parivaar_mix_card") {
+                        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                            Text(
+                                stringResource(R.string.parivaar_mix_title),
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            ParivaarMixCard(
+                                state = parivaarState,
+                                onPlay = {
+                                    if (!isListenTogetherGuest) {
+                                        parivaarViewModel.play { playerConnection?.playQueue(it) }
+                                    }
+                                },
+                            )
+                        }
                     }
                 }
 
@@ -2779,3 +2859,6 @@ fun HomeScreen(
         )
     }
 }
+
+// SARASWATI: how long Home keeps the "Okay. You can join later" note after a car prompt is dismissed.
+private const val SANGAT_NOTE_MS = 8_000L

@@ -1,0 +1,66 @@
+[
+  {
+    "client": "A",
+    "type": "error",
+    "payload": {
+      "code": "session_not_found",
+      "message": "Session not found or expired"
+    }
+  },
+  {
+    "client": "A",
+    "type": "error",
+    "payload": {
+      "code": "missing_session_token",
+      "message": "Session token is required"
+    }
+  },
+  {
+    "client": "A",
+    "type": "room_created",
+    "payload": {
+      "room_code": "$ROOM1",
+      "user_id": "$USER1",
+      "session_token": "$TOKEN1"
+    }
+  },
+  {
+    "client": "A",
+    "type": "error",
+    "payload": {
+      "code": "already_in_room",
+      "message": "Leave the current room before reconnecting"
+    }
+  },
+  {
+    "client": "A",
+    "type": "join_request",
+    "payload": {
+      "user_id": "$USER2",
+      "username": "Bharat"
+    }
+  },
+  {
+    "client": "B",
+    "type": "error",
+    "payload": {
+      "code": "already_pending",
+      "message": "Cancel the pending join request before reconnecting"
+    }
+  },
+  {
+    "client": "B",
+    "type": "join_rejected",
+    "payload": {
+      "reason": "Room is no longer available"
+    }
+  },
+  {
+    "client": "A",
+    "type": "error",
+    "payload": {
+      "code": "session_not_found",
+      "message": "Session not found or expired"
+    }
+  }
+]

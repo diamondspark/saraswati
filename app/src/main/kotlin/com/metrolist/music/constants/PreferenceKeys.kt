@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 
@@ -577,6 +578,33 @@ val GrandparentRoleKey = booleanPreferencesKey("grandparentRole")
 // Saral and the car's Stations folder read it without waiting for the network
 // (StationsCache). Not a secret; not restored from backups.
 val FamilyStationsCacheKey = stringPreferencesKey("familyStationsCache")
+
+// SARASWATI: Phase 4 Task 8 — the family features the owner has switched off on the hub, as their kill-switch
+// keys (FamilyFeatureGate). A cache of hub data, not a setting: a restored backup must not switch a feature
+// off or back on (BackupPolicy). Absent means every feature is on.
+val FamilyFeaturesDisabledKey = stringSetPreferencesKey("familyFeaturesDisabled")
+
+// SARASWATI: final fix wave (I3) — the code of the Sangat room this phone is hosting in car mode, kept so car mode
+// survives the app process dying mid-drive (SangatCarMode). Live room state, so never restored from a backup.
+val SangatCarRoomCodeKey = stringPreferencesKey("saraswatiSangatCarRoomCode")
+
+// SARASWATI: Phase 4 Task 11 — the last Parivaar Mix this phone built, as JSON (ParivaarMixStore). Derived from
+// the family's listening, so a restored backup must not plant one (BackupPolicy).
+val ParivaarMixKey = stringPreferencesKey("parivaarMix")
+
+// SARASWATI: Phase 4 Task 12 — this phone's own Parivaar top-songs playlist on YouTube (its id) and when the weekly
+// sync last finished and was registered with the hub (epoch ms). Both belong to this phone's YouTube account and hub
+// registration, so a restored backup must not point a phone at another account's playlist (BackupPolicy).
+val ParivaarPlaylistIdKey = stringPreferencesKey("parivaarPlaylistId")
+val ParivaarTopSongsSyncedAtKey = longPreferencesKey("parivaarTopSongsSyncedAt")
+
+// SARASWATI: Phase 4 Task 13 — off by default: plays of a song someone else picked in a Sangat, and of the Parivaar
+// Mix, leave no listen history and no YouTube watch history (TastePolicy). On, they count like any other play.
+val CountSharedPlaysKey = booleanPreferencesKey("saraswatiCountSharedPlays")
+
+// SARASWATI: Phase 4 Task 14 — the family playlists the hub last listed, as JSON (FamilyPlaylistsCache). Hub data,
+// so a restored backup must not plant playlists (BackupPolicy).
+val FamilyPlaylistsCacheKey = stringPreferencesKey("familyPlaylistsCache")
 val AccountNameKey = stringPreferencesKey("accountName")
 val AccountEmailKey = stringPreferencesKey("accountEmail")
 val AccountChannelHandleKey = stringPreferencesKey("accountChannelHandle")

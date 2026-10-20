@@ -12,7 +12,7 @@
 //  - Stations are the cached family stations, read at once (never from the hub),
 //    with Saral's Hindi names for the four starting ones, each carrying its seed
 //    so choosing one plays a radio;
-//  - Family is one greyed "Sangat · Listen together (coming soon)" row and nothing else.
+//  - Family is CarFamilyTree's rows (Phase 4 Task 15), asked of a function handed in, never of the hub.
 // An empty cache that has not finished loading is told apart from one that has:
 // both answer an empty list at once, but only the first has to ask again.
 package com.metrolist.music.saraswati.car
@@ -24,7 +24,11 @@ import com.metrolist.music.R
 import com.metrolist.music.db.entities.PlaylistEntity
 import com.metrolist.music.playback.MusicService
 import com.metrolist.music.saraswati.family.FakeStationsCache
+import com.metrolist.music.saraswati.family.FamilyPlaylist
 import com.metrolist.music.saraswati.family.FamilyViewModel
+import com.metrolist.music.saraswati.family.parivaar.MixTrack
+import com.metrolist.music.saraswati.family.parivaar.ParivaarMix
+import com.metrolist.music.saraswati.family.sangat.CarSangatState
 import com.metrolist.music.saraswati.family.Station
 import com.metrolist.music.ui.screens.settings.AndroidAutoSection
 import kotlinx.coroutines.CompletableDeferred
@@ -61,6 +65,9 @@ class CarBrowseTreeTest {
     private var home: List<MediaItem> = emptyList()
     private var sectionCalls = 0
     private var homeCalls = 0
+    private var familyCalls = 0
+    private var mix = ParivaarMix.EMPTY
+    private var familyPlaylists = emptyList<FamilyPlaylist>()
 
     private fun tree(cache: FakeStationsCache = FakeStationsCache()) =
         CarBrowseTree(
@@ -73,6 +80,10 @@ class CarBrowseTreeTest {
             homeShelves = {
                 homeCalls++
                 home
+            },
+            familyItems = {
+                familyCalls++
+                CarFamilyTree.children(mix, familyPlaylists, { true }, CarSangatState.IDLE, resources)
             },
         )
 
@@ -284,6 +295,7 @@ class CarBrowseTreeTest {
                 stations = FakeStationsCache(listOf(bollywood)),
                 librarySections = { never.await().let { sections } },
                 homeShelves = { never.await() },
+                familyItems = { emptyList() },
             )
 
         val result = children(hanging, MusicService.CAR_STATIONS)
@@ -322,21 +334,22 @@ class CarBrowseTreeTest {
     // --- Family: one greyed row ----------------------------------------------------------------------
 
     @Test
-    fun `Family is exactly one row, Sangat coming soon, that can be neither opened nor played`() {
+    fun `Family is what CarFamilyTree gives, with the Sangat row last and nothing greyed`() {
+        mix = ParivaarMix(1L, listOf(MixTrack("abcdefghijk", "Song", "Artist", null, 1000L)))
+        familyPlaylists = listOf(FamilyPlaylist("1", "PLfamily_one-1", "Road songs", "dev1", "2026-10-19T00:00:00Z"))
+
         val family = children(tree(FakeStationsCache(listOf(bollywood))), MusicService.CAR_FAMILY)!!
 
-        assertEquals(1, family.size)
-        assertEquals(text(R.string.car_family_sangat_soon), family.single().title)
-        assertEquals(false, family.single().mediaMetadata.isPlayable)
-        assertEquals(false, family.single().mediaMetadata.isBrowsable)
+        assertEquals(listOf("parivaar_mix", "youtube_playlist/PLfamily_one-1", "sangat_toggle"), family.map { it.mediaId })
+        assertTrue(family.all { it.mediaMetadata.isPlayable == true })
     }
 
     @Test
-    fun `Family does not change with the cache or the sections and asks for neither`() {
-        val before = children(tree(), MusicService.CAR_FAMILY)
-        val after = children(tree(FakeStationsCache(listOf(bollywood, bhajan))), MusicService.CAR_FAMILY)
+    fun `Family with nothing cached is the Sangat row alone, and asks neither the sections nor Home`() {
+        val family = children(tree(), MusicService.CAR_FAMILY)!!
 
-        assertEquals(before!!.map { it.mediaId to it.title }, after!!.map { it.mediaId to it.title })
+        assertEquals(listOf("sangat_toggle"), family.map { it.mediaId })
+        assertEquals(1, familyCalls)
         assertEquals(0, sectionCalls + homeCalls)
     }
 

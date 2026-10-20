@@ -1,7 +1,26 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "./index";
+import type { HubContext, RouteHandler } from "./hubContext";
+import {
+  isNonEmptyString,
+  json,
+  parseJsonObject,
+  readBoundedBody,
+  readJsonBody,
+  readStrictJsonObject,
+} from "./http";
 import { migrate } from "./migrations";
 import { bearerToken, matchRoute } from "./routes";
+import { tooLarge } from "./routes/common";
+import {
+  addFamilyPlaylist,
+  deleteFamilyPlaylist,
+  listFamilyPlaylists,
+} from "./routes/familyPlaylists";
+import { listParivaarPlaylists, putParivaarPlaylist } from "./routes/parivaar";
+import { CLOSE_DEVICE_REVOKED, CLOSE_SANGAT_DISABLED } from "./sangat/limits";
+import { Sangat, type LiveRoom } from "./sangat/Sangat";
+import { normalizeRoomCode } from "./sangat/sanitize";
 import { randomHex, secretsMatch, sha256Hex } from "./secrets";
 
 const PAIRING_TOKEN_TTL_MS = 15 * 60 * 1000;
@@ -17,6 +36,10 @@ const MIN_ADMIN_KEY_LENGTH = 32;
 // STRIPPED_NAME_CHARACTERS for the two joiners that are kept).
 const MAX_DEVICE_NAME_LENGTH = 64;
 const MAX_STATIONS = 6;
+// PUT /sangat/car: a room code and a boolean. The code is checked at 32 characters before it
+// is normalized (which cuts it to 10 bytes), so a huge string is never cleaned.
+const MAX_CAR_BODY_BYTES = 1024;
+const MAX_CAR_ROOM_CODE_LENGTH = 32;
 
 // /health: at most one accepted report per device per 5 minutes.
 const HEALTH_WINDOW_SECONDS = 5 * 60;
@@ -43,7 +66,7 @@ const FAMILY_FEATURE_KEYS = [
   "family_playlists",
   "cast_relay",
 ] as const;
-type FamilyFeatureKey = (typeof FAMILY_FEATURE_KEYS)[number];
+export type FamilyFeatureKey = (typeof FAMILY_FEATURE_KEYS)[number];
 
 // What the owner has set a phone up as. Not to be confused with AuthResult's
 // "admin" | "device" `role`, which says who is calling.
@@ -52,7 +75,7 @@ type DeviceRole = (typeof DEVICE_ROLES)[number];
 const DEFAULT_DEVICE_ROLE: DeviceRole = "adult";
 const ROLE_ERROR = `role must be one of: ${DEVICE_ROLES.join(", ")}`;
 
-type AuthResult =
+export type AuthResult =
   | { role: "admin" }
   | { role: "device"; deviceId: string }
   | null;
@@ -136,54 +159,6 @@ interface Station {
   title: string;
   seedVideoId: string;
   iconIndex: number;
-}
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
-}
-
-async function readJsonBody(
-  request: Request,
-): Promise<Record<string, unknown>> {
-  try {
-    const parsed = await request.json();
-    return typeof parsed === "object" && parsed !== null
-      ? (parsed as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
-  }
-}
-
-/**
- * Unlike readJsonBody, which maps anything unparseable to `{}`, this tells
- * "no valid JSON object" (null) apart from an empty object, so a PUT that
- * replaces stored state can reject a malformed body instead of treating it
- * as a no-op.
- */
-async function readStrictJsonObject(
-  request: Request,
-): Promise<Record<string, unknown> | null> {
-  try {
-    const parsed: unknown = await request.json();
-    if (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      !Array.isArray(parsed)
-    ) {
-      return parsed as Record<string, unknown>;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0;
 }
 
 /** Returns the cleaned station list, or null if any part of it is invalid. */
@@ -284,6 +259,11 @@ function isFamilyFeatureKey(key: string): key is FamilyFeatureKey {
   return (FAMILY_FEATURE_KEYS as readonly string[]).includes(key);
 }
 
+/** A room as the hub's JSON routes show it: LiveRoom with startedAt as an ISO time. */
+function liveRoomJson(room: LiveRoom) {
+  return { ...room, startedAt: new Date(room.startedAt).toISOString() };
+}
+
 /**
  * Single global Durable Object backing the Saraswati family hub.
  *
@@ -292,8 +272,23 @@ function isFamilyFeatureKey(key: string): key is FamilyFeatureKey {
  * and request handling.
  */
 export class FamilyHub extends DurableObject<Env> {
+  private readonly sangat: Sangat;
+  private readonly hubContext: HubContext;
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    this.sangat = new Sangat(ctx);
+    this.hubContext = {
+      sql: ctx.storage.sql,
+      rateLimit: (key, windowSeconds, max) =>
+        this.rateLimit(key, windowSeconds, max),
+      featureEnabled: (key) => this.readKillSwitches()[key],
+      isApproved: (deviceId) =>
+        ctx.storage.sql
+          .exec("SELECT 1 FROM roster WHERE deviceId = ? AND status = 'approved'", deviceId)
+          .toArray().length > 0,
+      now: () => Date.now(),
+    };
 
     // Nothing is served until the schema is current. A migration that throws
     // resets the object, so a half-migrated hub answers nothing at all.
@@ -315,6 +310,14 @@ export class FamilyHub extends DurableObject<Env> {
    * an approved roster row's own session token. `null` means
    * unauthenticated. Tasks 4 and 5 reuse this rather than re-checking auth
    * their own way.
+   *
+   * The roster read must stay the last thing it does: the digests below are
+   * awaited before it, and nothing is awaited after it. A revoke runs between
+   * two events of the Durable Object; if this yielded to anything that opens
+   * the input gate (a fetch, a timer, a stream) after the read, a revoke could
+   * land between a device being authenticated and its socket being accepted,
+   * and /ws would hand a socket to a device that was just cut off. A revoke
+   * that lands during the digests is harmless: the read then sees it.
    */
   private async authenticate(
     request: Request,
@@ -831,6 +834,16 @@ export class FamilyHub extends DurableObject<Env> {
       "UPDATE roster SET status = 'revoked', sessionTokenHash = NULL, pendingSessionToken = NULL, claimSecretHash = NULL WHERE deviceId = ?",
       deviceId,
     );
+    // The same turn as the update, with nothing awaited in between: no upgrade can
+    // authenticate the device in the gap. Its sockets close at once (4001) and its seats,
+    // and with them its reconnect tokens, go; waiting for a reconnect would be too late.
+    this.sangat.closeDevice(deviceId, CLOSE_DEVICE_REVOKED, "revoked");
+    // Its Parivaar row goes too (the list hides it anyway). Its family playlists stay: they
+    // belong to the family, and only the admin can remove them now.
+    this.ctx.storage.sql.exec(
+      "DELETE FROM parivaar_playlists WHERE deviceId = ?",
+      deviceId,
+    );
 
     return json({ deviceId, status: "revoked" });
   }
@@ -962,6 +975,11 @@ export class FamilyHub extends DurableObject<Env> {
         );
       }
     });
+    // Switching Sangat off ends it now: every socket closes (4003, which the app does
+    // not retry) and every room goes, so a re-enable starts with none.
+    if (changes.some(([key, enabled]) => key === "sangat" && !enabled)) {
+      this.sangat.closeAll(CLOSE_SANGAT_DISABLED, "sangat disabled");
+    }
 
     return json(this.readKillSwitches());
   }
@@ -1035,6 +1053,147 @@ export class FamilyHub extends DurableObject<Env> {
     return json({ devices });
   }
 
+  /**
+   * GET /ws: Sangat's WebSocket. Only an approved device may connect, and the
+   * checks run before the upgrade so a stranger, a pending or revoked phone, or
+   * the owner's admin key never gets a socket. Knowing a room code grants nothing.
+   */
+  private async handleSangatSocket(request: Request): Promise<Response> {
+    if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+      return new Response("expected a WebSocket upgrade", { status: 426 });
+    }
+
+    const auth = await this.authenticate(request, this.env);
+    if (auth?.role !== "device") {
+      return json({ error: "unauthorized" }, 401);
+    }
+
+    if (!this.readKillSwitches().sangat) {
+      return json({ error: "feature disabled" }, 503);
+    }
+
+    if (!this.sangat.hasRoomForSocket(auth.deviceId)) {
+      return json({ error: "too many connections" }, 429);
+    }
+
+    return this.sangat.accept(auth.deviceId);
+  }
+
+  /** GET /sangat/live: the rooms whose host is connected. A device or the admin may ask. */
+  private async handleSangatLive(request: Request): Promise<Response> {
+    const auth = await this.authenticate(request, this.env);
+    if (!auth) {
+      return json({ error: "unauthorized" }, 401);
+    }
+
+    const throttled = this.throttleAdmin(auth);
+    if (throttled) {
+      return throttled;
+    }
+
+    if (!this.readKillSwitches().sangat) {
+      return json({ error: "feature disabled" }, 503);
+    }
+
+    return json({ rooms: this.sangat.liveRooms().map(liveRoomJson) });
+  }
+
+  /**
+   * PUT /sangat/car: the host's phone says it is driving. Car mode is set over
+   * HTTP rather than the WebSocket protocol, which has no message for it.
+   */
+  private async handleSangatCar(request: Request): Promise<Response> {
+    const auth = await this.authenticate(request, this.env);
+    if (auth?.role !== "device") {
+      return json({ error: "unauthorized" }, 401);
+    }
+
+    if (!this.readKillSwitches().sangat) {
+      return json({ error: "feature disabled" }, 503);
+    }
+
+    const bytes = await readBoundedBody(request, MAX_CAR_BODY_BYTES);
+    if (bytes === null) {
+      return tooLarge();
+    }
+    const body = parseJsonObject(bytes);
+    const rawRoomCode = body?.roomCode;
+    if (typeof rawRoomCode === "string" && rawRoomCode.length > MAX_CAR_ROOM_CODE_LENGTH) {
+      return json({ error: `roomCode must be at most ${MAX_CAR_ROOM_CODE_LENGTH} characters` }, 400);
+    }
+    // The code is read as join_room reads it, so what opens a room opens its car switch.
+    const roomCode = typeof rawRoomCode === "string" ? normalizeRoomCode(rawRoomCode) : "";
+    const carMode = body?.carMode;
+    if (roomCode === "" || typeof carMode !== "boolean") {
+      return json({ error: "roomCode and a boolean carMode are required" }, 400);
+    }
+
+    const result = this.sangat.setCarMode(roomCode, auth.deviceId, carMode);
+    if (result === "not_found") {
+      return json({ error: "room not found" }, 404);
+    }
+    if (result === "not_host") {
+      return json({ error: "only the host device can change car mode" }, 403);
+    }
+
+    const room = this.sangat.roomView(roomCode);
+    return room ? json(liveRoomJson(room)) : json({ error: "room not found" }, 404);
+  }
+
+  /**
+   * Runs one of the Parivaar / family-playlist handlers. "device" routes are closed to the
+   * admin bearer, so an admin never reaches them or spends the shared admin budget on them;
+   * "any" routes take a device or the admin, and the admin's call is counted as everywhere
+   * else. The handler does the rest: kill switch, body (size, then JSON), and for a write the
+   * roster re-check after the body is read, then the per-device write limit.
+   */
+  private async runRoute(
+    request: Request,
+    access: "device" | "any",
+    handler: RouteHandler,
+  ): Promise<Response> {
+    const auth = await this.authenticate(request, this.env);
+    if (!auth || (access === "device" && auth.role !== "device")) {
+      return json({ error: "unauthorized" }, 401);
+    }
+
+    const throttled = this.throttleAdmin(auth);
+    if (throttled) {
+      return throttled;
+    }
+
+    return handler(this.hubContext, request, auth);
+  }
+
+  async webSocketMessage(
+    ws: WebSocket,
+    message: string | ArrayBuffer,
+  ): Promise<void> {
+    await this.sangat.onMessage(ws, message);
+  }
+
+  async webSocketClose(
+    ws: WebSocket,
+    code: number,
+    reason: string,
+  ): Promise<void> {
+    // Finish the closing handshake with a code a close frame may carry.
+    try {
+      ws.close(code === 1000 || (code >= 3000 && code <= 4999) ? code : 1000, reason);
+    } catch {
+      // already closed
+    }
+    await this.sangat.onClose(ws);
+  }
+
+  async webSocketError(ws: WebSocket): Promise<void> {
+    await this.sangat.onClose(ws);
+  }
+
+  async alarm(): Promise<void> {
+    await this.sangat.onAlarm();
+  }
+
   async fetch(request: Request): Promise<Response> {
     const route = matchRoute(request.method, new URL(request.url).pathname);
     if (!route) {
@@ -1072,6 +1231,26 @@ export class FamilyHub extends DurableObject<Env> {
         return this.handleKillSwitchesGet(request);
       case "killswitchesPut":
         return this.handleKillSwitchesPut(request);
+      case "sangatSocket":
+        return this.handleSangatSocket(request);
+      case "sangatLive":
+        return this.handleSangatLive(request);
+      case "sangatCar":
+        return this.handleSangatCar(request);
+      case "parivaarPlaylistPut":
+        return this.runRoute(request, "device", putParivaarPlaylist);
+      case "parivaarPlaylistsList":
+        return this.runRoute(request, "any", listParivaarPlaylists);
+      case "familyPlaylistsList":
+        return this.runRoute(request, "any", listFamilyPlaylists);
+      case "familyPlaylistsAdd":
+        return this.runRoute(request, "device", addFamilyPlaylist);
+      case "familyPlaylistsDelete": {
+        const id = route.familyPlaylistId as string;
+        return this.runRoute(request, "any", (ctx, req, auth) =>
+          deleteFamilyPlaylist(ctx, req, auth, id),
+        );
+      }
     }
   }
 }

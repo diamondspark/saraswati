@@ -5,8 +5,9 @@
 
 package com.metrolist.music.listentogether
 
+import com.metrolist.music.BuildConfig
+import com.metrolist.music.saraswati.family.HubClient
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 
 @Serializable
 data class ListenTogetherServer(
@@ -17,21 +18,17 @@ data class ListenTogetherServer(
 )
 
 object ListenTogetherServers {
-    private const val ServersJson = """
-        [
-          {
-            "name": "The Meowery",
-            "url": "wss://metroserverx.meowery.eu/ws",
-            "location": "Poland",
-            "operator": "Nyx"
-          }
-        ]
-    """
-
-    private val json = Json { ignoreUnknownKeys = true }
-
+    // SARASWATI: Phase 4 Task 9 — the one server this fork talks to is the family hub; its address is derived
+    // from the build's hub URL (empty when the build has no hub or it is not https, which means "do not connect").
     val servers: List<ListenTogetherServer> by lazy {
-        json.decodeFromString(ServersJson)
+        listOf(
+            ListenTogetherServer(
+                name = "Saraswati family hub",
+                url = HubClient.sangatWebSocketUrl(BuildConfig.HUB_BASE_URL),
+                location = "Family",
+                operator = "Your family",
+            ),
+        )
     }
 
     val defaultServerUrl: String

@@ -1,0 +1,230 @@
+[
+  {
+    "client": "A",
+    "type": "room_created",
+    "payload": {
+      "room_code": "$ROOM1",
+      "user_id": "$USER1",
+      "session_token": "$TOKEN1"
+    }
+  },
+  {
+    "client": "A",
+    "type": "join_request",
+    "payload": {
+      "user_id": "$USER2",
+      "username": "Bharat"
+    }
+  },
+  {
+    "client": "A",
+    "type": "user_joined",
+    "payload": {
+      "user_id": "$USER2",
+      "username": "Bharat"
+    }
+  },
+  {
+    "client": "B",
+    "type": "join_approved",
+    "payload": {
+      "room_code": "$ROOM1",
+      "user_id": "$USER2",
+      "session_token": "$TOKEN2",
+      "state": {
+        "room_code": "$ROOM1",
+        "host_id": "$USER1",
+        "users": [
+          {
+            "user_id": "$USER1",
+            "username": "Asha",
+            "is_host": true,
+            "is_connected": true
+          },
+          {
+            "user_id": "$USER2",
+            "username": "Bharat",
+            "is_host": false,
+            "is_connected": true
+          }
+        ],
+        "is_playing": false,
+        "position": "0",
+        "last_update": "$TIME",
+        "volume": 1,
+        "queue": [],
+        "revision": "0"
+      }
+    }
+  },
+  {
+    "client": "C",
+    "type": "error",
+    "payload": {
+      "code": "not_in_room",
+      "message": "You are not in a room"
+    }
+  },
+  {
+    "client": "B",
+    "type": "error",
+    "payload": {
+      "code": "missing_track_info",
+      "message": "Track info is required"
+    }
+  },
+  {
+    "client": "B",
+    "type": "error",
+    "payload": {
+      "code": "invalid_track_info",
+      "message": "Track must have ID and title"
+    }
+  },
+  {
+    "client": "A",
+    "type": "suggestion_received",
+    "payload": {
+      "suggestion_id": "$SUGG1",
+      "from_user_id": "$USER2",
+      "from_username": "Bharat",
+      "track_info": {
+        "id": "trk-009",
+        "title": "Pyaar Hua",
+        "artist": "Pt. Ravi Shankar",
+        "album": "Raga Collection",
+        "duration": "180000",
+        "thumbnail": "https://i.ytimg.com/vi/trk-9/hqdefault.jpg",
+        "suggested_by": ""
+      }
+    }
+  },
+  {
+    "client": "A",
+    "type": "sync_playback",
+    "payload": {
+      "action": "queue_add",
+      "track_id": "",
+      "position": "0",
+      "track_info": {
+        "id": "trk-009",
+        "title": "Pyaar Hua",
+        "artist": "Pt. Ravi Shankar",
+        "album": "Raga Collection",
+        "duration": "180000",
+        "thumbnail": "https://i.ytimg.com/vi/trk-9/hqdefault.jpg",
+        "suggested_by": "Bharat"
+      },
+      "insert_next": true,
+      "queue": [
+        {
+          "id": "trk-009",
+          "title": "Pyaar Hua",
+          "artist": "Pt. Ravi Shankar",
+          "album": "Raga Collection",
+          "duration": "180000",
+          "thumbnail": "https://i.ytimg.com/vi/trk-9/hqdefault.jpg",
+          "suggested_by": "Bharat"
+        }
+      ],
+      "queue_title": "",
+      "volume": 0,
+      "server_time": "$TIME",
+      "revision": "1",
+      "captured_at_server_time": "0"
+    }
+  },
+  {
+    "client": "B",
+    "type": "sync_playback",
+    "payload": {
+      "action": "queue_add",
+      "track_id": "",
+      "position": "0",
+      "track_info": {
+        "id": "trk-009",
+        "title": "Pyaar Hua",
+        "artist": "Pt. Ravi Shankar",
+        "album": "Raga Collection",
+        "duration": "180000",
+        "thumbnail": "https://i.ytimg.com/vi/trk-9/hqdefault.jpg",
+        "suggested_by": "Bharat"
+      },
+      "insert_next": true,
+      "queue": [
+        {
+          "id": "trk-009",
+          "title": "Pyaar Hua",
+          "artist": "Pt. Ravi Shankar",
+          "album": "Raga Collection",
+          "duration": "180000",
+          "thumbnail": "https://i.ytimg.com/vi/trk-9/hqdefault.jpg",
+          "suggested_by": "Bharat"
+        }
+      ],
+      "queue_title": "",
+      "volume": 0,
+      "server_time": "$TIME",
+      "revision": "1",
+      "captured_at_server_time": "0"
+    }
+  },
+  {
+    "client": "B",
+    "type": "suggestion_approved",
+    "payload": {
+      "suggestion_id": "$SUGG1",
+      "track_info": {
+        "id": "trk-009",
+        "title": "Pyaar Hua",
+        "artist": "Pt. Ravi Shankar",
+        "album": "Raga Collection",
+        "duration": "180000",
+        "thumbnail": "https://i.ytimg.com/vi/trk-9/hqdefault.jpg",
+        "suggested_by": "Bharat"
+      }
+    }
+  },
+  {
+    "client": "A",
+    "type": "error",
+    "payload": {
+      "code": "suggestion_not_found",
+      "message": "Suggestion not found"
+    }
+  },
+  {
+    "client": "A",
+    "type": "error",
+    "payload": {
+      "code": "missing_suggestion_id",
+      "message": "Suggestion ID is required"
+    }
+  },
+  {
+    "client": "A",
+    "type": "suggestion_received",
+    "payload": {
+      "suggestion_id": "$SUGG2",
+      "from_user_id": "$USER2",
+      "from_username": "Bharat",
+      "track_info": {
+        "id": "trk-009",
+        "title": "Raag Number 9",
+        "artist": "Pt. Ravi Shankar",
+        "album": "Raga Collection",
+        "duration": "240009",
+        "thumbnail": "https://i.ytimg.com/vi/trk-9/hqdefault.jpg",
+        "suggested_by": ""
+      }
+    }
+  },
+  {
+    "client": "A",
+    "type": "error",
+    "payload": {
+      "code": "duplicate_track",
+      "message": "Track is already playing or queued"
+    }
+  }
+]

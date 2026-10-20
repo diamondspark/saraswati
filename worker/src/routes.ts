@@ -17,7 +17,15 @@ export type RouteName =
   | "healthPost"
   | "healthGet"
   | "killswitchesGet"
-  | "killswitchesPut";
+  | "killswitchesPut"
+  | "sangatSocket"
+  | "sangatLive"
+  | "sangatCar"
+  | "parivaarPlaylistPut"
+  | "parivaarPlaylistsList"
+  | "familyPlaylistsList"
+  | "familyPlaylistsAdd"
+  | "familyPlaylistsDelete";
 
 export interface Route {
   name: RouteName;
@@ -29,6 +37,8 @@ export interface Route {
   needsBearer: boolean;
   /** The decoded `{id}` of a /roster/{id}/... route. */
   deviceId?: string;
+  /** The decoded `{id}` of a /family-playlists/{id} route. */
+  familyPlaylistId?: string;
 }
 
 /**
@@ -45,6 +55,7 @@ export function decodeSegment(segment: string): string | null {
 }
 
 const ROSTER_ACTION = /^\/roster\/([^/]+)\/(approve|revoke|role)$/;
+const FAMILY_PLAYLIST = /^\/family-playlists\/([^/]+)$/;
 
 /** The route a request is for, or null when the hub has no such route. */
 export function matchRoute(method: string, pathname: string): Route | null {
@@ -87,6 +98,51 @@ export function matchRoute(method: string, pathname: string): Route | null {
         return { name: "killswitchesPut", needsBearer: true };
       }
       return null;
+    // /ws authenticates at upgrade time, with the device's bearer in the
+    // Authorization header of the upgrade request itself.
+    case "/ws":
+      return method === "GET"
+        ? { name: "sangatSocket", needsBearer: true }
+        : null;
+    case "/sangat/live":
+      return method === "GET"
+        ? { name: "sangatLive", needsBearer: true }
+        : null;
+    case "/sangat/car":
+      return method === "PUT"
+        ? { name: "sangatCar", needsBearer: true }
+        : null;
+    case "/parivaar/playlist":
+      return method === "PUT"
+        ? { name: "parivaarPlaylistPut", needsBearer: true }
+        : null;
+    case "/parivaar/playlists":
+      return method === "GET"
+        ? { name: "parivaarPlaylistsList", needsBearer: true }
+        : null;
+    case "/family-playlists":
+      if (method === "GET") {
+        return { name: "familyPlaylistsList", needsBearer: true };
+      }
+      if (method === "POST") {
+        return { name: "familyPlaylistsAdd", needsBearer: true };
+      }
+      return null;
+  }
+
+  const playlist = FAMILY_PLAYLIST.exec(pathname);
+  if (playlist) {
+    if (method !== "DELETE") {
+      return null;
+    }
+    const familyPlaylistId = decodeSegment(playlist[1]);
+    return familyPlaylistId === null
+      ? null
+      : {
+          name: "familyPlaylistsDelete",
+          needsBearer: true,
+          familyPlaylistId,
+        };
   }
 
   const action = ROSTER_ACTION.exec(pathname);

@@ -77,6 +77,12 @@ interface FamilyStore {
      */
     suspend fun hasStoredSession(): Boolean
 
+    /**
+     * The device id of the stored session, read without opening the sealed token, so asking it often (the Sangat
+     * poll does, every 30 seconds) costs no Keystore operation. Null without a stored session.
+     */
+    suspend fun sessionDeviceId(): String? = session()?.deviceId
+
     suspend fun pendingClaim(): PendingClaim?
 
     /**
@@ -163,6 +169,12 @@ class DataStoreFamilyStore(
             val deviceId = prefs[FamilyDeviceIdKey] ?: return@withContext null
             val token = prefs.sealed(FamilyHubSessionTokenKey) ?: return@withContext null
             FamilySession(deviceId, token)
+        }
+
+    override suspend fun sessionDeviceId(): String? =
+        withContext(io) {
+            val prefs = prefs()
+            prefs[FamilyDeviceIdKey]?.takeIf { prefs[FamilyHubSessionTokenKey] != null }
         }
 
     // SARASWATI: fix wave B2 — the raw slot, never unsealed: it answers even when the Keystore does not.

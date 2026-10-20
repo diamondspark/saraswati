@@ -184,11 +184,13 @@ fun ListenTogetherScreen(
 
     val isInRoom = listenTogetherManager.isInRoom
     val isHost = roomState?.hostId == userId
+    val isCarHost by listenTogetherManager.carModeActive.collectAsStateWithLifecycle() // SARASWATI: final fix wave (I1)
 
     // User action menu dialog
     if (selectedUserForMenu != null && selectedUsername != null) {
         UserActionDialog(
             username = selectedUsername ?: "",
+            canTransferOwnership = !isCarHost,
             onKick = {
                 selectedUserForMenu?.let {
                     listenTogetherManager.kickUser(it, "Removed by host")
@@ -1324,6 +1326,7 @@ private fun SettingsLinkCard(onClick: () -> Unit) {
 @Composable
 private fun UserActionDialog(
     username: String,
+    canTransferOwnership: Boolean,
     onKick: () -> Unit,
     onPermanentKick: () -> Unit,
     onTransferOwnership: () -> Unit,
@@ -1432,7 +1435,8 @@ private fun UserActionDialog(
             }
 
             // Transfer ownership button
-            Surface(
+            // SARASWATI: final fix wave (I1) — the car phone stays the host of a Sangat in the car.
+            if (canTransferOwnership) Surface(
                 modifier =
                     Modifier
                         .fillMaxWidth()

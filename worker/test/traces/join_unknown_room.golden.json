@@ -1,0 +1,50 @@
+[
+  {
+    "client": "B",
+    "type": "error",
+    "payload": {
+      "code": "room_not_found",
+      "message": "Room not found"
+    }
+  },
+  {
+    "client": "B",
+    "type": "error",
+    "payload": {
+      "code": "missing_room_code",
+      "message": "Room code is required"
+    }
+  },
+  {
+    "client": "B",
+    "type": "error",
+    "payload": {
+      "code": "missing_username",
+      "message": "Username is required"
+    }
+  },
+  {
+    "client": "B",
+    "type": "error",
+    "payload": {
+      "code": "invalid_username",
+      "message": "Username is invalid"
+    }
+  },
+  {
+    "client": "B",
+    "type": "error",
+    "payload": {
+      "code": "invalid_room_code",
+      "message": "Room code is invalid"
+    }
+  },
+  {
+    "client": "B",
+    "type": "error",
+    "payload": {
+      "code": "room_not_found",
+      "message": "Room not found"
+    }
+  }
+]

@@ -1,7 +1,8 @@
 import { SELF } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import worker, { type Env } from "../src/index";
 import { TEST_ADMIN_KEY } from "./helpers";
+import { hubStub, resetHub, seedDevice, sql } from "./sangat.helpers";
 
 const BASE = "https://saraswati-sangat.pandey-mohitk.workers.dev";
 
@@ -56,6 +57,14 @@ const AUTHED_ROUTES: Array<[string, string]> = [
   ["POST", "/health"],
   ["GET", "/killswitches"],
   ["PUT", "/killswitches"],
+  ["GET", "/ws"],
+  ["GET", "/sangat/live"],
+  ["PUT", "/sangat/car"],
+  ["PUT", "/parivaar/playlist"],
+  ["GET", "/parivaar/playlists"],
+  ["GET", "/family-playlists"],
+  ["POST", "/family-playlists"],
+  ["DELETE", "/family-playlists/some-playlist"],
 ];
 
 describe("a request that needs a bearer but has none", () => {
@@ -82,6 +91,16 @@ describe("a request that needs a bearer but has none", () => {
     });
 
     expect(response.status).toBe(401);
+  });
+
+  it("is 401 for a WebSocket upgrade with no bearer, before any socket is opened", async () => {
+    const response = await send(TRIPWIRE_ENV, "/ws", {
+      headers: { Upgrade: "websocket" },
+    });
+
+    expect(response.status).toBe(401);
+    expect(response.webSocket).toBeNull();
+    expect(await response.json()).toEqual({ error: "unauthorized" });
   });
 
   it("is 401 before any body check, and does not read the body", async () => {
@@ -147,6 +166,20 @@ describe("an unknown path or method", () => {
     ["GET", "/pairing/create"],
     ["PATCH", "/killswitches"],
     ["GET", "/PING"],
+    ["POST", "/ws"],
+    ["GET", "/ws/"],
+    ["POST", "/sangat/live"],
+    ["GET", "/sangat/car"],
+    ["GET", "/sangat"],
+    ["GET", "/parivaar/playlist"],
+    ["PUT", "/parivaar/playlists"],
+    ["GET", "/parivaar"],
+    ["PUT", "/family-playlists"],
+    ["DELETE", "/family-playlists"],
+    ["DELETE", "/family-playlists/"],
+    ["DELETE", "/family-playlists/a/b"],
+    ["GET", "/family-playlists/some-playlist"],
+    ["POST", "/family-playlists/some-playlist"],
   ])("%s %s answers 404 from the front Worker, with or without a bearer", async (method, path) => {
     for (const headers of [undefined, bearer]) {
       const response = await send(TRIPWIRE_ENV, path, { method, headers });
@@ -154,6 +187,30 @@ describe("an unknown path or method", () => {
       expect(response.status, `${method} ${path}`).toBe(404);
       expect(await response.text()).toBe("not found");
     }
+  });
+
+  it("a malformed percent-escape in a family-playlist id is a 404, not a 500", async () => {
+    const response = await send(
+      TRIPWIRE_ENV,
+      "/family-playlists/%E0%A4%A",
+      { method: "DELETE", headers: bearer },
+    );
+
+    expect(response.status).toBe(404);
+  });
+
+  it("decodes a family-playlist id before the hub sees it", async () => {
+    const { env, calls } = spyEnv();
+
+    const response = await send(env, "/family-playlists/a%20b", {
+      method: "DELETE",
+      headers: bearer,
+    });
+
+    expect(response.status).toBe(299);
+    expect(calls).toEqual([
+      { method: "DELETE", path: "/family-playlists/a%20b" },
+    ]);
   });
 
   it.each(["approve", "revoke", "role"])(
@@ -278,5 +335,75 @@ describe("request body limits", () => {
     });
 
     expect(response.status).toBe(413);
+  });
+});
+
+describe("the family routes through the real front Worker and hub", () => {
+  beforeEach(resetHub);
+
+  const upgrade = (token: string) => ({
+    headers: { Upgrade: "websocket", Authorization: `Bearer ${token}` },
+  });
+
+  it("opens a device's WebSocket, which the hub authenticates by the hash of its token", async () => {
+    const device = await seedDevice(hubStub(), "front-ws");
+
+    const response = await SELF.fetch(`${BASE}/ws`, upgrade(device.token));
+
+    expect(response.status).toBe(101);
+    const socket = response.webSocket as WebSocket;
+    socket.accept();
+    const closed = new Promise<void>((resolve) =>
+      socket.addEventListener("close", () => resolve()),
+    );
+    socket.close(1000, "done");
+    await closed;
+  });
+
+  it("serves a device on /family-playlists, /parivaar/playlists and /sangat/live", async () => {
+    const device = await seedDevice(hubStub(), "front-http");
+    const headers = { Authorization: `Bearer ${device.token}` };
+
+    const playlists = await SELF.fetch(`${BASE}/family-playlists`, { headers });
+    expect(playlists.status).toBe(200);
+    expect(await playlists.json()).toEqual({ playlists: [] });
+
+    const parivaar = await SELF.fetch(`${BASE}/parivaar/playlists`, { headers });
+    expect(parivaar.status).toBe(200);
+    await parivaar.text();
+
+    const live = await SELF.fetch(`${BASE}/sangat/live`, { headers });
+    expect(live.status).toBe(200);
+    expect(await live.json()).toEqual({ rooms: [] });
+  });
+
+  it("refuses a bearer that is the stored hash, a wrong token, a pending phone and the admin key", async () => {
+    const hub = hubStub();
+    const device = await seedDevice(hub, "front-hash");
+    const pending = await seedDevice(hub, "front-pending", "pending");
+    const storedHash = await sql(hub, (db) =>
+      db
+        .exec<{ sessionTokenHash: string }>(
+          "SELECT sessionTokenHash FROM roster WHERE deviceId = ?",
+          device.deviceId,
+        )
+        .one().sessionTokenHash,
+    );
+    expect(storedHash).not.toBe(device.token);
+
+    for (const token of [storedHash, "ab".repeat(32), pending.token, TEST_ADMIN_KEY]) {
+      const socket = await SELF.fetch(`${BASE}/ws`, upgrade(token));
+      expect(socket.status, `ws ${token}`).toBe(401);
+      expect(socket.webSocket).toBeNull();
+      await socket.text();
+
+      // A device-only route: the admin key is refused here too.
+      const put = await SELF.fetch(`${BASE}/parivaar/playlist`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      expect(put.status, `parivaar ${token}`).toBe(401);
+      await put.text();
+    }
   });
 });

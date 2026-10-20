@@ -8,6 +8,7 @@
 // returns, because the fakes never suspend.
 package com.metrolist.music.saraswati.family
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -1014,5 +1015,182 @@ class FamilyViewModelTest {
         assertNull(vm.error.value)
         assertEquals(StationsState.SYNCED, vm.stationsState.value)
         assertEquals(3, vm.stations.value.size)
+    }
+
+    // SARASWATI: Phase 4 Task 8 — the owner's phone pairing itself, so it holds a device-bearer session.
+
+    private val selfPairCalls =
+        listOf(
+            "createPairing($TEST_ADMIN_KEY)",
+            "claimPairing($TEST_TOKEN,Papa's Pixel,null)",
+            "approveDevice($TEST_ADMIN_KEY,device-1)",
+            "pairingStatus(device-1,claim-secret-device-1)",
+        )
+
+    @Test
+    fun `an owner phone without a session token creates, claims and approves itself and stores the token`() {
+        hub.scriptStatus(PairingStatus.Approved("session-for-papa"))
+
+        vm.ensureSelfPaired("Papa's Pixel")
+
+        assertEquals(selfPairCalls, hub.calls.toList())
+        assertEquals(FamilySession("device-1", "session-for-papa"), store.session)
+        assertNull(store.claim)
+        assertEquals(listOf("approved"), hub.devices.map { it.status })
+    }
+
+    @Test
+    fun `an owner phone with a token makes no hub calls`() {
+        store.session = FamilySession("device-9", "already-paired")
+
+        vm.ensureSelfPaired("Papa's Pixel")
+
+        assertTrue(hub.calls.isEmpty())
+        assertEquals(FamilySession("device-9", "already-paired"), store.session)
+    }
+
+    @Test
+    fun `a token the Keystore cannot open right now still counts as a session`() {
+        store.sessionSlotUnreadable = true
+
+        vm.ensureSelfPaired("Papa's Pixel")
+
+        assertTrue(hub.calls.isEmpty())
+    }
+
+    @Test
+    fun `a storage probe that fails makes no hub calls`() {
+        store.failProbe = java.io.IOException("datastore")
+
+        vm.ensureSelfPaired("Papa's Pixel")
+
+        assertTrue(hub.calls.isEmpty())
+    }
+
+    @Test
+    fun `self-pairing twice makes the hub calls once`() {
+        hub.scriptStatus(PairingStatus.Approved("session-for-papa"))
+
+        vm.ensureSelfPaired("Papa's Pixel")
+        vm.ensureSelfPaired("Papa's Pixel")
+
+        assertEquals(selfPairCalls, hub.calls.toList())
+    }
+
+    @Test
+    fun `a non-owner phone never self-pairs`() {
+        store.admin = null
+
+        vm.ensureSelfPaired("Papa's Pixel")
+
+        assertTrue(hub.calls.isEmpty())
+        assertNull(store.session)
+    }
+
+    @Test
+    fun `a failure at any step stores nothing`() {
+        val steps: List<Pair<String, (FakeHub, FakeStore) -> Unit>> =
+            listOf(
+                "createPairing" to { h, _ -> h.failWith("createPairing", OFFLINE) },
+                "claimPairing" to { h, _ -> h.failWith("claimPairing", hubFailure(410)) },
+                "approveDevice" to { h, _ -> h.failWith("approveDevice", hubFailure(429)) },
+                "pairingStatus fails" to { h, _ -> h.failWith("pairingStatus", hubFailure(404)) },
+                "pairingStatus still pending" to { h, _ -> h.scriptStatus(PairingStatus.Pending) },
+                "completeClaim" to { h, s ->
+                    h.scriptStatus(PairingStatus.Approved("session-for-papa"))
+                    s.failWrites = java.io.IOException("disk full")
+                },
+            )
+        for ((name, breakIt) in steps) {
+            val h = FakeHub()
+            val st = FakeStore(admin = TEST_ADMIN_KEY)
+            breakIt(h, st)
+            val model = FamilyViewModel(h, st, HubConfig(TEST_HUB_URL), FakeStationsCache(), scope)
+
+            model.ensureSelfPaired("Papa's Pixel")
+
+            assertNull("$name stored a session", st.session)
+            assertNull("$name stored a claim", st.claim)
+            assertNull("$name raised an error on the Family tab", model.error.value)
+        }
+    }
+
+    @Test
+    fun `a phone claimed on the hub but not completed is revoked again`() {
+        hub.failWith("pairingStatus", OFFLINE)
+
+        vm.ensureSelfPaired("Papa's Pixel")
+
+        assertEquals(listOf("revokeDevice($TEST_ADMIN_KEY,device-1)"), hub.callsTo("revokeDevice").map { it })
+        assertEquals(listOf("revoked"), hub.devices.map { it.status })
+    }
+
+    @Test
+    fun `a failure before the claim has nothing to revoke`() {
+        hub.failWith("claimPairing", OFFLINE)
+
+        vm.ensureSelfPaired("Papa's Pixel")
+
+        assertTrue(hub.callsTo("revokeDevice").isEmpty())
+    }
+
+    @Test
+    fun `a second self-pairing while the first is in flight does nothing`() {
+        val gate = CompletableDeferred<Unit>()
+        hub.claimGate = gate
+        hub.scriptStatus(PairingStatus.Approved("session-for-papa"))
+
+        vm.ensureSelfPaired("Papa's Pixel")
+        vm.ensureSelfPaired("Papa's Pixel")
+        assertEquals("only the first reached the hub", 1, hub.callsTo("createPairing").size)
+
+        gate.complete(Unit)
+        assertEquals(selfPairCalls, hub.calls.toList())
+        assertEquals(1, hub.devices.size)
+    }
+
+    @Test
+    fun `the feature gate is refreshed once the owner phone has its session`() {
+        var refreshes = 0
+        val model = FamilyViewModel(hub, store, HubConfig(TEST_HUB_URL), cache, scope, refreshGate = { refreshes++ })
+        hub.scriptStatus(PairingStatus.Approved("session-for-papa"))
+
+        model.ensureSelfPaired("Papa's Pixel")
+
+        assertEquals(1, refreshes)
+        assertEquals(FamilySession("device-1", "session-for-papa"), store.session)
+    }
+
+    @Test
+    fun `a failed self-pairing does not refresh the gate`() {
+        var refreshes = 0
+        val model = FamilyViewModel(hub, store, HubConfig(TEST_HUB_URL), cache, scope, refreshGate = { refreshes++ })
+        hub.failWith("pairingStatus", OFFLINE)
+
+        model.ensureSelfPaired("Papa's Pixel")
+
+        assertEquals(0, refreshes)
+    }
+
+    @Test
+    fun `a gate refresh that fails does not undo the self-pairing`() {
+        val model = FamilyViewModel(hub, store, HubConfig(TEST_HUB_URL), cache, scope, refreshGate = { throw java.io.IOException("x") })
+        hub.scriptStatus(PairingStatus.Approved("session-for-papa"))
+
+        model.ensureSelfPaired("Papa's Pixel")
+
+        assertEquals(FamilySession("device-1", "session-for-papa"), store.session)
+        assertTrue(hub.callsTo("revokeDevice").isEmpty())
+    }
+
+    @Test
+    fun `the owner's own kill-switch toggle refreshes the owner phone's gate`() {
+        var refreshes = 0
+        val model = FamilyViewModel(hub, store, HubConfig(TEST_HUB_URL), cache, scope, refreshGate = { refreshes++ })
+
+        model.toggleKillSwitch("sangat", false)
+
+        assertEquals(1, refreshes)
+        assertEquals(false, model.killSwitches.value["sangat"])
     }
 }

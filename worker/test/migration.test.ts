@@ -54,6 +54,16 @@ const TABLES = [
   "rate_limits",
 ];
 
+// What v3 added: the family features' own tables.
+const V3_TABLES = [
+  "parivaar_playlists",
+  "family_playlists",
+  "sangat_rooms",
+  "sangat_members",
+  "sangat_pending_joins",
+  "sangat_suggestions",
+];
+
 let hubCounter = 0;
 
 /** A hub instance of its own, so one test's tables never leak into another's. */
@@ -72,7 +82,7 @@ function resetToV1(
 ) {
   return runInDurableObject(stub, (_instance, state) => {
     const sql = state.storage.sql;
-    for (const table of TABLES) {
+    for (const table of [...TABLES, ...V3_TABLES]) {
       sql.exec(`DROP TABLE IF EXISTS ${table}`);
     }
     for (const ddl of V1_SCHEMA) {
@@ -121,6 +131,30 @@ function columns(stub: Stub, table: string) {
       .exec<{ name: string }>(`PRAGMA table_info(${table})`)
       .toArray()
       .map((row) => row.name),
+  );
+}
+
+function tableNames(stub: Stub) {
+  return runInDurableObject(stub, (_instance, state) =>
+    state.storage.sql
+      .exec<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name",
+      )
+      .toArray()
+      .map((row) => row.name),
+  );
+}
+
+function v3Rows(stub: Stub) {
+  return runInDurableObject(stub, (_instance, state) =>
+    Object.fromEntries(
+      V3_TABLES.map((table) => [
+        table,
+        state.storage.sql
+          .exec(`SELECT * FROM ${table} ORDER BY rowid`)
+          .toArray(),
+      ]),
+    ),
   );
 }
 
@@ -174,12 +208,15 @@ function seedLiveData(sql: SqlStorage) {
 }
 
 describe("schema migrations", () => {
-  it("reports version 2 as the latest and lands a brand-new hub on it", async () => {
+  it("reports version 3 as the latest and lands a brand-new hub on it", async () => {
     const stub = freshHub();
 
     // The constructor has already run the migrations on an empty database.
-    expect(LATEST_SCHEMA_VERSION).toBe(2);
-    expect(await schemaVersion(stub)).toBe(2);
+    expect(LATEST_SCHEMA_VERSION).toBe(3);
+    expect(await schemaVersion(stub)).toBe(3);
+    expect(await tableNames(stub)).toEqual(
+      [...TABLES, ...V3_TABLES, "schema_version"].sort(),
+    );
     expect(await columns(stub, "roster")).toEqual([
       "deviceId",
       "deviceName",
@@ -215,7 +252,10 @@ describe("schema migrations", () => {
 
         await runMigrate(stub);
 
-        expect(await schemaVersion(stub)).toBe(2);
+        expect(await schemaVersion(stub)).toBe(3);
+        expect(await tableNames(stub)).toEqual(
+          [...TABLES, ...V3_TABLES, "schema_version"].sort(),
+        );
         const tables = await dump(stub);
         const text = JSON.stringify(tables);
         for (const plaintext of [
@@ -394,7 +434,7 @@ describe("schema migrations", () => {
         await runMigrate(stub);
 
         expect(await dump(stub)).toEqual(afterFirst);
-        expect(await schemaVersion(stub)).toBe(2);
+        expect(await schemaVersion(stub)).toBe(3);
         // Re-hashing would have made the stored value the hash of a hash.
         expect(
           (afterFirst.roster as Array<{ sessionTokenHash: string | null }>)[0]
@@ -403,6 +443,149 @@ describe("schema migrations", () => {
       });
     });
   }
+
+  describe("from the deployed v2 schema", () => {
+    const DEVICE_TOKEN = "77".repeat(32);
+
+    /**
+     * A hub as it is live today: Phase 3's tables and data, the version
+     * recorded as 2, and none of the family features' tables yet.
+     */
+    async function resetToV2(stub: Stub, extra: (sql: SqlStorage) => void = () => {}) {
+      const deviceTokenHash = await sha256Hex(DEVICE_TOKEN);
+      await runInDurableObject(stub, (_instance, state) => {
+        const sql = state.storage.sql;
+        for (const table of V3_TABLES) {
+          sql.exec(`DROP TABLE IF EXISTS ${table}`);
+        }
+        sql.exec(
+          `INSERT INTO roster (deviceId, deviceName, status, sessionTokenHash, pendingSessionToken, approvedAt, claimSecretHash, role, claimedAt) VALUES
+             ('dev-live',    'Live phone',    'approved', ?,    NULL, ?,    NULL, 'grandparent', ?),
+             ('dev-waiting', 'Waiting phone', 'pending',  NULL, NULL, NULL, ?,    'adult',       ?)`,
+          deviceTokenHash,
+          SEEDED_AT,
+          SEEDED_AT,
+          "88".repeat(32),
+          SEEDED_AT + 1,
+        );
+        sql.exec(
+          "INSERT INTO stations (id, title, seedVideoId, iconIndex, position) VALUES ('s1', 'Bhajan', 'abcdefghijk', 2, 0)",
+        );
+        sql.exec("UPDATE killswitches SET enabled = 0 WHERE key = 'sangat'");
+        extra(sql);
+        sql.exec("UPDATE schema_version SET version = 2");
+      });
+    }
+
+    it("creates the family tables empty and records version 3", async () => {
+      const stub = freshHub();
+      await resetToV2(stub);
+      expect(await schemaVersion(stub)).toBe(2);
+      expect(await tableNames(stub)).not.toContain("sangat_rooms");
+
+      await runMigrate(stub);
+
+      expect(await schemaVersion(stub)).toBe(3);
+      expect(await tableNames(stub)).toEqual(
+        [...TABLES, ...V3_TABLES, "schema_version"].sort(),
+      );
+      expect(Object.values(await v3Rows(stub)).flat()).toEqual([]);
+    });
+
+    it("keeps every existing roster row and the other Phase 3 data as it was", async () => {
+      const stub = freshHub();
+      await resetToV2(stub);
+      const before = await dump(stub);
+      expect(before.roster).toHaveLength(2);
+
+      await runMigrate(stub);
+
+      expect(await dump(stub)).toEqual(before);
+      expect(await columns(stub, "roster")).toEqual([
+        "deviceId",
+        "deviceName",
+        "status",
+        "sessionTokenHash",
+        "approvedAt",
+        "claimSecretHash",
+        "role",
+        "pendingSessionToken",
+        "claimedAt",
+      ]);
+    });
+
+    it("leaves the phones paired at v2 working, through the hashed lookup", async () => {
+      const stub = freshHub();
+      await resetToV2(stub);
+      await runMigrate(stub);
+
+      const me = await stub.fetch("https://example.com/me", {
+        headers: { Authorization: `Bearer ${DEVICE_TOKEN}` },
+      });
+      expect(await me.json()).toEqual({
+        deviceId: "dev-live",
+        role: "grandparent",
+      });
+      const playlists = await stub.fetch("https://example.com/family-playlists", {
+        headers: { Authorization: `Bearer ${DEVICE_TOKEN}` },
+      });
+      expect(playlists.status).toBe(200);
+      expect(await playlists.json()).toEqual({ playlists: [] });
+    });
+
+    it("is idempotent: tables that already hold rows keep them, and a second pass changes nothing", async () => {
+      const stub = freshHub();
+      await resetToV2(stub, (sql) => {
+        // A database that got some of the family tables before the ledger knew.
+        sql.exec(`CREATE TABLE parivaar_playlists (
+          deviceId TEXT PRIMARY KEY,
+          memberName TEXT NOT NULL,
+          playlistId TEXT NOT NULL,
+          updatedAt INTEGER NOT NULL
+        )`);
+        sql.exec(
+          "INSERT INTO parivaar_playlists (deviceId, memberName, playlistId, updatedAt) VALUES ('dev-live', 'Dadi', 'PLabcdefghijk', ?)",
+          SEEDED_AT,
+        );
+      });
+
+      await runMigrate(stub);
+      const afterFirst = { roster: await dump(stub), family: await v3Rows(stub) };
+      await runMigrate(stub);
+      await runMigrate(stub);
+
+      expect(afterFirst.family.parivaar_playlists).toEqual([
+        {
+          deviceId: "dev-live",
+          memberName: "Dadi",
+          playlistId: "PLabcdefghijk",
+          updatedAt: SEEDED_AT,
+        },
+      ]);
+      expect({ roster: await dump(stub), family: await v3Rows(stub) }).toEqual(
+        afterFirst,
+      );
+      expect(await schemaVersion(stub)).toBe(3);
+    });
+
+    it("rolls back completely when a table cannot be made, leaving version 2", async () => {
+      const stub = freshHub();
+      await resetToV2(stub, (sql) => {
+        // Not the shape Sangat expects: its index on roomCode cannot be made,
+        // which fails after the Parivaar and family-playlist tables were.
+        sql.exec("CREATE TABLE sangat_members (userId TEXT PRIMARY KEY)");
+      });
+      const before = await dump(stub);
+
+      await expect(runMigrate(stub)).rejects.toThrow();
+
+      expect(await schemaVersion(stub)).toBe(2);
+      expect(await dump(stub)).toEqual(before);
+      const names = await tableNames(stub);
+      expect(names).not.toContain("parivaar_playlists");
+      expect(names).not.toContain("family_playlists");
+    });
+  });
 
   it("leaves a database that is already newer than this code untouched", async () => {
     const stub = freshHub();

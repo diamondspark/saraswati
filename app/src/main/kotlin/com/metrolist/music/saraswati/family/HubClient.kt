@@ -23,6 +23,7 @@
 //    a hostile roster entry cannot rewrite the path ("..", "/", "?").
 package com.metrolist.music.saraswati.family
 
+import com.metrolist.music.saraswati.family.sangat.SangatHubApi
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.MapSerializer
@@ -47,7 +48,8 @@ import kotlin.coroutines.resumeWithException
 class HubClient(
     private val baseUrl: String,
     client: OkHttpClient,
-) : HubApi {
+) : HubApi,
+    SangatHubApi {
     // Shares the caller's connection pool, dispatcher and timeouts; only the
     // redirect policy is pinned here.
     private val http: OkHttpClient =
@@ -195,6 +197,70 @@ class HubClient(
             json.decodeFromString<HealthResponse>(it).devices
         }
 
+    // SARASWATI: Phase 4 Task 8 — the Sangat, Parivaar Mix and family-playlist routes. They are on HubClient
+    // alone, not on HubApi: only the Phase 4 packages call them, and the Phase 3 view models and their
+    // fakes stay as they were. Same contract as above: a Result, never a throw.
+
+    /** Rooms whose host is connected. [sessionToken] is a paired phone's (the Worker also takes the admin key). 503 means Sangat is off. */
+    override suspend fun getLiveSangat(sessionToken: String): Result<List<LiveSangatRoom>> =
+        send("GET", listOf("sangat", "live"), sessionToken, null) {
+            json.decodeFromString<LiveSangatEnvelope>(it).rooms
+        }
+
+    /** The host's phone saying it is driving. 404 is an unknown room, 403 a caller that is not the room's host device. */
+    override suspend fun setSangatCarMode(
+        sessionToken: String,
+        roomCode: String,
+        carMode: Boolean,
+    ): Result<Unit> =
+        send("PUT", listOf("sangat", "car"), sessionToken, json.encodeToString(CarModeRequest(roomCode, carMode))) { }
+
+    /** Sets this phone's own Parivaar Mix row; the Worker takes the device from the bearer, never from the body. */
+    suspend fun putParivaarPlaylist(
+        sessionToken: String,
+        playlistId: String,
+        memberName: String,
+    ): Result<ParivaarPlaylist> =
+        send("PUT", listOf("parivaar", "playlist"), sessionToken, json.encodeToString(ParivaarPlaylistRequest(playlistId, memberName))) {
+            json.decodeFromString<ParivaarPlaylist>(it)
+        }
+
+    /** In the Worker's order (binary collation of the name); the caller sorts for display. */
+    suspend fun getParivaarPlaylists(sessionToken: String): Result<List<ParivaarPlaylist>> =
+        send("GET", listOf("parivaar", "playlists"), sessionToken, null) {
+            json.decodeFromString<ParivaarEnvelope>(it).playlists
+        }
+
+    suspend fun getFamilyPlaylists(sessionToken: String): Result<List<FamilyPlaylist>> =
+        send("GET", listOf("family-playlists"), sessionToken, null) {
+            json.decodeFromString<FamilyPlaylistsEnvelope>(it).playlists
+        }
+
+    /** 409 is a playlist the family already has, or the twentieth being past the limit of 20. */
+    suspend fun addFamilyPlaylist(
+        sessionToken: String,
+        playlistId: String,
+        title: String,
+    ): Result<FamilyPlaylist> =
+        send("POST", listOf("family-playlists"), sessionToken, json.encodeToString(FamilyPlaylistRequest(playlistId, title))) {
+            json.decodeFromString<FamilyPlaylist>(it)
+        }
+
+    /** [auth] is the owner's admin key, or the session token of the phone that added it; any other phone gets a 403. */
+    suspend fun removeFamilyPlaylist(
+        auth: String,
+        id: String,
+    ): Result<Unit> {
+        if (!isSafeSegment(id)) return Result.failure(IllegalArgumentException("invalid playlist id"))
+        return send("DELETE", listOf("family-playlists", id), auth, null) { }
+    }
+
+    /**
+     * Where the Sangat WebSocket lives: the hub's base URL with https:// turned into wss://, plus /ws. A base that
+     * is not https (or not set, as in the foss flavor) gives "", never a ws:// address, so nothing can be sent in the clear.
+     */
+    fun sangatWebSocketUrl(): String = sangatWebSocketUrl(baseUrl)
+
     private suspend fun <T> send(
         method: String,
         path: List<String>,
@@ -302,16 +368,30 @@ class HubClient(
         return peeked.string()
     }
 
-    private companion object {
-        val json = Json { ignoreUnknownKeys = true }
-        val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
-        val KILL_SWITCHES = MapSerializer(String.serializer(), Boolean.serializer())
+    companion object {
+        /** The same address from a base URL alone, for code that has no HubClient (the Sangat server list). */
+        fun sangatWebSocketUrl(baseUrl: String): String {
+            val base = baseUrl.trim().toHttpUrlOrNull()?.takeIf { it.isHttps } ?: return ""
+            val https =
+                base
+                    .newBuilder()
+                    .query(null)
+                    .fragment(null)
+                    .addPathSegment("ws")
+                    .build()
+                    .toString()
+            return "wss://" + https.removePrefix("https://")
+        }
+
+        private val json = Json { ignoreUnknownKeys = true }
+        private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+        private val KILL_SWITCHES = MapSerializer(String.serializer(), Boolean.serializer())
 
         // The Worker mints device ids with crypto.randomUUID(); this admits
         // that and nothing that could change a URL's structure.
-        val SAFE_SEGMENT = Regex("[A-Za-z0-9_-]{1,128}")
+        private val SAFE_SEGMENT = Regex("[A-Za-z0-9_-]{1,128}")
 
         // The biggest legitimate answer is a roster or health list, a few KB.
-        const val MAX_RESPONSE_BYTES = 1L shl 20
+        private const val MAX_RESPONSE_BYTES = 1L shl 20
     }
 }

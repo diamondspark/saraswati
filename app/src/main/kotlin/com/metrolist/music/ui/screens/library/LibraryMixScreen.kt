@@ -29,6 +29,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -60,6 +62,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import com.metrolist.music.LocalPlayerAwareWindowInsets
 import com.metrolist.music.LocalPlayerConnection
 import com.metrolist.music.R
+import com.metrolist.music.ui.screens.Screens
 import com.metrolist.music.constants.CONTENT_TYPE_HEADER
 import com.metrolist.music.constants.CONTENT_TYPE_PLAYLIST
 import com.metrolist.music.constants.GridItemSize
@@ -409,6 +412,32 @@ fun LibraryMixScreen(
                     painter = painterResource(R.drawable.search),
                     contentDescription = stringResource(R.string.search),
                 )
+            }
+
+            // SARASWATI: Phase 4 Task 21 — the Library menu's "Import from Spotify" entry.
+            var showLibraryMenu by remember { mutableStateOf(false) }
+            Box {
+                IconButton(
+                    onClick = { showLibraryMenu = true },
+                    modifier = Modifier.padding(start = 8.dp).size(40.dp),
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.more_vert),
+                        contentDescription = stringResource(R.string.more_options),
+                    )
+                }
+                DropdownMenu(
+                    expanded = showLibraryMenu,
+                    onDismissRequest = { showLibraryMenu = false },
+                ) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.spotify_import_menu)) },
+                        onClick = {
+                            showLibraryMenu = false
+                            navController.navigate(Screens.SpotifyImport.route)
+                        },
+                    )
+                }
             }
 
             IconButton(

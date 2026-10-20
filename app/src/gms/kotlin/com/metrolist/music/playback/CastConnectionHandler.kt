@@ -1,6 +1,10 @@
 package com.metrolist.music.playback
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.Uri
 import androidx.media3.cast.RemoteCastPlayer
 import androidx.media3.cast.SessionAvailabilityListener
@@ -12,7 +16,9 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import com.google.android.gms.cast.framework.CastContext
 import com.metrolist.music.extensions.metadata
+import com.metrolist.music.saraswati.castrelay.CastRelayController
 import com.metrolist.music.ui.utils.resize
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -63,6 +69,13 @@ class CastConnectionHandler(
     private var extensionJob: Job? = null
     private var syncResetJob: Job? = null
 
+    // SARASWATI: Task 17 — the whole-queue LAN relay. Serves only while the build flag, the cast_relay switch and
+    // Wi-Fi all allow it; otherwise every call below falls through to upstream's stream-URL path.
+    private val relay get() = musicService.castRelayController
+
+    @Volatile
+    private var wifiCallback: ConnectivityManager.NetworkCallback? = null
+
     private val playerListener =
         object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) = updatePlayerState()
@@ -90,6 +103,7 @@ class CastConnectionHandler(
     private val sessionListener =
         object : SessionAvailabilityListener {
             override fun onCastSessionAvailable() {
+                startCastRelay()
                 _isCasting.value = true
                 _castDeviceName.value =
                     castContext
@@ -115,6 +129,7 @@ class CastConnectionHandler(
                 if (player != null && player.currentPosition > 0) {
                     musicService.player.seekTo(player.currentPosition)
                 }
+                stopCastRelay()
                 _isCasting.value = false
                 _castDeviceName.value = null
                 _castIsPlaying.value = false
@@ -163,6 +178,24 @@ class CastConnectionHandler(
                 val centerIndex = localPlayer.indexOfMediaId(metadata.id)
                 if (centerIndex == C.INDEX_UNSET) return@launch
 
+                val startPosition =
+                    if (localPlayer.currentMediaItemIndex == centerIndex) {
+                        localPlayer.currentPosition
+                    } else {
+                        0L
+                    }
+
+                val relayed = relayQueue(centerIndex)
+                if (relayed != null) {
+                    castPlayer?.apply {
+                        setMediaItems(relayed.items, relayed.startIndex, startPosition)
+                        prepare()
+                        play()
+                    }
+                    localPlayer.pause()
+                    return@launch
+                }
+
                 val indices = queueIndices(centerIndex)
                 val items = indices.mapNotNull { resolvedMediaItem(it) }
                 val startIndex = indices.takeWhile { it != centerIndex }.size
@@ -171,12 +204,6 @@ class CastConnectionHandler(
                     return@launch
                 }
 
-                val startPosition =
-                    if (localPlayer.currentMediaItemIndex == centerIndex) {
-                        localPlayer.currentPosition
-                    } else {
-                        0L
-                    }
                 castPlayer?.apply {
                     setMediaItems(items, startIndex, startPosition)
                     prepare()
@@ -308,9 +335,21 @@ class CastConnectionHandler(
     }
 
     private suspend fun resolvedMediaItem(index: Int): MediaItem? {
-        val item = musicService.player.getMediaItemAt(index)
+        val item = withCastMetadata(musicService.player.getMediaItemAt(index)) ?: return null
+        if (relay.isActive) {
+            relay.mediaItems(listOf(item))?.singleOrNull()?.let { return it }
+        }
         val metadata = item.metadata ?: return null
         val streamUrl = musicService.getStreamUrl(metadata.id) ?: return null
+        return item
+            .buildUpon()
+            .setUri(streamUrl)
+            .setMimeType(MimeTypes.AUDIO_MP4)
+            .build()
+    }
+
+    private fun withCastMetadata(item: MediaItem): MediaItem? {
+        val metadata = item.metadata ?: return null
         val castMetadata =
             item.mediaMetadata
                 .buildUpon()
@@ -320,12 +359,63 @@ class CastConnectionHandler(
                 .setArtworkUri(metadata.thumbnailUrl?.resize(1080, 1080)?.let(Uri::parse))
                 .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
                 .build()
-        return item
-            .buildUpon()
-            .setUri(streamUrl)
-            .setMimeType(MimeTypes.AUDIO_MP4)
-            .setMediaMetadata(castMetadata)
-            .build()
+        return item.buildUpon().setMediaMetadata(castMetadata).build()
+    }
+
+    /**
+     * The local queue as relay items around [centerIndex], or null when the relay is not serving or the current
+     * song cannot be served. Songs far from the current one with no stored format are left to the queue extension.
+     */
+    private suspend fun relayQueue(centerIndex: Int): CastRelayController.RelayQueue? {
+        if (!relay.isActive) return null
+        val player = musicService.player
+        val queue = ArrayList<MediaItem>(player.mediaItemCount)
+        for (index in 0 until player.mediaItemCount) {
+            queue += withCastMetadata(player.getMediaItemAt(index)) ?: return null
+        }
+        return try {
+            relay.relayQueue(queue, centerIndex)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Timber.w(e, "Cast relay failed; using the upstream Cast path")
+            null
+        }
+    }
+
+    private fun startCastRelay() {
+        if (wifiCallback != null || !relay.start()) return
+        val cm = context.getSystemService(ConnectivityManager::class.java)
+        if (cm == null) {
+            relay.stop()
+            return
+        }
+        val callback =
+            object : ConnectivityManager.NetworkCallback() {
+                override fun onLost(network: Network) {
+                    relay.onWifiLost()
+                    releaseWifiCallback()
+                }
+            }
+        val request = NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build()
+        if (runCatching { cm.registerNetworkCallback(request, callback) }.isSuccess) {
+            wifiCallback = callback
+        } else {
+            relay.stop()
+        }
+    }
+
+    private fun stopCastRelay() {
+        relay.stop()
+        releaseWifiCallback()
+    }
+
+    private fun releaseWifiCallback() {
+        val callback = wifiCallback ?: return
+        wifiCallback = null
+        context.getSystemService(ConnectivityManager::class.java)?.let { cm ->
+            runCatching { cm.unregisterNetworkCallback(callback) }
+        }
     }
 
     private fun Player.indexOfMediaId(mediaId: String): Int {
@@ -371,6 +461,7 @@ class CastConnectionHandler(
     }
 
     fun release() {
+        stopCastRelay()
         loadJob?.cancel()
         extensionJob?.cancel()
         syncResetJob?.cancel()

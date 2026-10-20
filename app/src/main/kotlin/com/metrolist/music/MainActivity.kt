@@ -22,6 +22,7 @@ import android.view.WindowManager
 import android.widget.Toast
 import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
@@ -139,7 +140,13 @@ import com.metrolist.innertube.models.WatchEndpoint
 import com.metrolist.music.saraswati.SaraswatiDeepLinkPolicy
 import com.metrolist.music.saraswati.SaraswatiFeatures
 import com.metrolist.music.saraswati.family.FamilyRoutes
+import com.metrolist.music.saraswati.family.FamilyFeatureGate
+import com.metrolist.music.saraswati.family.FamilyViewModel
 import com.metrolist.music.saraswati.family.HealthReporter
+import com.metrolist.music.saraswati.family.parivaar.ParivaarMemberName
+import com.metrolist.music.saraswati.family.parivaar.ParivaarMixRefresher
+import com.metrolist.music.saraswati.family.parivaar.TopSongsPlaylistSync
+import com.metrolist.music.saraswati.family.sangat.SangatForeground
 import com.metrolist.music.saraswati.family.PairingInbox
 import com.metrolist.music.saraswati.family.StationsCache
 import com.metrolist.music.saraswati.family.StationsRefresher
@@ -166,6 +173,7 @@ import com.metrolist.music.constants.ForceBottomNavBarKey
 import com.metrolist.music.constants.GrandparentRoleKey
 import com.metrolist.music.constants.LastSeenVersionKey
 import com.metrolist.music.constants.ListenTogetherInTopBarKey
+import com.metrolist.music.constants.ListenTogetherUsernameKey
 import com.metrolist.music.constants.LyricsProviderOrderKey
 import com.metrolist.music.constants.MiniPlayerBottomSpacing
 import com.metrolist.music.constants.MiniPlayerHeight
@@ -241,6 +249,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
+import java.time.Instant
 import java.util.Locale
 import javax.inject.Inject
 
@@ -295,9 +304,31 @@ class MainActivity : FragmentActivity() {
     @Inject
     lateinit var stationsRefresher: StationsRefresher
 
+    // SARASWATI: Phase 4 Task 15
+    @Inject
+    lateinit var familyPlaylistsRepository: com.metrolist.music.saraswati.family.playlists.FamilyPlaylistsRepository
+
     // SARASWATI: fix wave B1 (I2) — the paired phone's heartbeat for the owner's health view.
     @Inject
     lateinit var healthReporter: HealthReporter
+
+    // SARASWATI: Phase 4 Task 12
+    @Inject
+    lateinit var topSongsPlaylistSync: TopSongsPlaylistSync
+
+    @Inject
+    lateinit var parivaarMixRefresher: ParivaarMixRefresher
+
+    // SARASWATI: Phase 4 Task 9 — the owner's four kill-switches, and the poll for family members who are
+    // driving with Sangat on. The watcher runs only between onStart and onStop, never in Saral.
+    @Inject
+    lateinit var featureGate: FamilyFeatureGate
+
+    @Inject
+    lateinit var sangatForeground: SangatForeground
+
+    // The owner's own phone pairs itself here (ensureSelfPaired) so it has the device session Sangat needs.
+    private val familyViewModel: FamilyViewModel by viewModels()
 
     private lateinit var navController: NavHostController
     private var pendingIntent: Intent? = null
@@ -356,6 +387,7 @@ class MainActivity : FragmentActivity() {
 
     override fun onStart() {
         super.onStart()
+        sangatForeground.activityStarted() // SARASWATI: Phase 4 Task 9 — counted per process (review fix M13)
         // Request notification permission on Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -399,6 +431,7 @@ class MainActivity : FragmentActivity() {
         // running, so the host must keep reporting playback state to the LT server; detaching
         // the player listener here used to break LT for any host that wasn't staring at the
         // app the whole session. Full teardown happens in onDestroy() via safeUnbindService().
+        sangatForeground.activityStopped() // SARASWATI: Phase 4 Task 9 — counted per process (review fix M13)
         super.onStop()
     }
 
@@ -499,8 +532,25 @@ class MainActivity : FragmentActivity() {
                 launch { grandparentRoleSync.refresh() }
                 // Every paired phone, not only Saral's: it is what fills the car's Stations tab.
                 launch { stationsRefresher.refresh() }
+                // SARASWATI: Phase 4 Task 15 — the family's playlists, for the car's Family folder (Task 14 left this out).
+                launch { familyPlaylistsRepository.refresh() }
                 // SARASWATI: fix wave B1 (I2) — its own job too, so a slow hub holds up neither of the others.
                 launch { healthReporter.report() }
+                // SARASWATI: Phase 4 Task 12 — this phone's weekly top-songs playlist, then the daily Parivaar Mix
+                // built from everyone's. One job, in that order; each is a no-op until it is due and never throws.
+                // SARASWATI: final fix wave (I2, M1) — the switches are refreshed first in this job: nothing is written to
+                // the member's YouTube account until the hub has answered and Parivaar Mix is on. The member's name is the
+                // Sangat display name (the phone model only when there is none).
+                launch {
+                    featureGate.refresh()
+                    val saved = withContext(Dispatchers.IO) { dataStore.get(ListenTogetherUsernameKey, "") }
+                    val memberName = ParivaarMemberName.of(saved, Build.MODEL)
+                    topSongsPlaylistSync.syncIfDue(Instant.now(), memberName)
+                    parivaarMixRefresher.refreshIfDue(Instant.now())
+                }
+                // SARASWATI: Phase 4 Task 9 — (owner phone only, once) a device session; the kill-switches refresh above.
+                // (the self-pair refreshes the gate again itself once it has a session — review fix M7)
+                launch { familyViewModel.ensureSelfPaired(Build.MODEL) }
             }
         }
 
@@ -572,6 +622,9 @@ class MainActivity : FragmentActivity() {
     private fun applyGrandparentRole(value: Boolean) {
         grandparentRole = value
         SaralActive.on = value
+        // SARASWATI: Phase 4 Task 9 — the poll for Sangat rooms runs while the full app is on screen, and never
+        // while this phone is Saral (a grandparent's phone gets no prompts and makes no extra requests).
+        sangatForeground.setSaral(value)
     }
 
     // SARASWATI: Task 9 — empties the launch intent and anything queued so that

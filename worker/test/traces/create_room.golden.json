@@ -1,0 +1,53 @@
+[
+  {
+    "client": "A",
+    "type": "server_capabilities",
+    "payload": {
+      "supports_protobuf": true,
+      "supports_compression": true,
+      "server_version": "1"
+    }
+  },
+  {
+    "client": "A",
+    "type": "room_created",
+    "payload": {
+      "room_code": "$ROOM1",
+      "user_id": "$USER1",
+      "session_token": "$TOKEN1"
+    }
+  },
+  {
+    "client": "A",
+    "type": "error",
+    "payload": {
+      "code": "already_in_room",
+      "message": "Leave the current room before creating another"
+    }
+  },
+  {
+    "client": "B",
+    "type": "error",
+    "payload": {
+      "code": "missing_username",
+      "message": "Username is required"
+    }
+  },
+  {
+    "client": "B",
+    "type": "error",
+    "payload": {
+      "code": "invalid_username",
+      "message": "Username is invalid"
+    }
+  },
+  {
+    "client": "B",
+    "type": "room_created",
+    "payload": {
+      "room_code": "$ROOM2",
+      "user_id": "$USER2",
+      "session_token": "$TOKEN2"
+    }
+  }
+]

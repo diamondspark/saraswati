@@ -18,7 +18,9 @@ export default defineConfig({
     cloudflareTest({
       wrangler: { configPath: "./wrangler.toml" },
       miniflare: {
-        bindings: { ADMIN_KEY: TEST_ADMIN_KEY },
+        // TRACE_QUIET_MS is the quiet window between trace steps, read by
+        // test/traces/replay.ts: TRACE_QUIET_MS=<ms> npx vitest run test/sangat.traces.test.ts
+        bindings: { ADMIN_KEY: TEST_ADMIN_KEY, TRACE_QUIET_MS: process.env.TRACE_QUIET_MS ?? "" },
       },
     }),
   ],

@@ -17,6 +17,9 @@ import com.metrolist.music.db.InternalDatabase
 import com.metrolist.music.db.MusicDatabase
 import com.metrolist.music.listentogether.ListenTogetherClient
 import com.metrolist.music.listentogether.ListenTogetherManager
+import com.metrolist.music.saraswati.family.FamilyFeatureGate
+import com.metrolist.music.saraswati.family.HubIdentity
+import com.metrolist.music.saraswati.family.sangat.SangatCarMode
 import com.metrolist.music.utils.dataStore
 import com.metrolist.music.utils.get
 import dagger.Module
@@ -99,7 +102,11 @@ object AppModule {
     @Provides
     fun provideListenTogetherClient(
         @ApplicationContext context: Context,
-    ): ListenTogetherClient = ListenTogetherClient(context)
+        // SARASWATI: Phase 4 Task 9 — the hub session, the Sangat kill-switch and car mode.
+        identity: HubIdentity,
+        featureGate: FamilyFeatureGate,
+        carMode: SangatCarMode,
+    ): ListenTogetherClient = ListenTogetherClient(context, identity, featureGate, carMode)
 
     @Singleton
     @Provides

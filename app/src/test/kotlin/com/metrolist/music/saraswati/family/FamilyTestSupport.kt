@@ -250,6 +250,9 @@ class FakeStore(
         return session
     }
 
+    // Mirrors DataStoreFamilyStore: the plain device-id slot, never opened through the Keystore.
+    override suspend fun sessionDeviceId(): String? = session?.deviceId
+
     override suspend fun hasStoredSession(): Boolean {
         failProbe?.let { throw it }
         return session != null || sessionSlotUnreadable

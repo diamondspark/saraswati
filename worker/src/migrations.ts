@@ -1,3 +1,4 @@
+import { createSangatTables } from "./sangat/schema";
 import { sha256Hex } from "./secrets";
 
 // The schema version lives in a one-row `schema_version` table, written in the
@@ -13,7 +14,10 @@ import { sha256Hex } from "./secrets";
 //   v2  credentials stored as SHA-256 hashes (see FamilyHub.ts), the one
 //       plaintext session token kept only in `pendingSessionToken` until the
 //       phone collects it, and `claimedAt` so stale pending requests expire.
-export const LATEST_SCHEMA_VERSION = 2;
+//   v3  the family features' own tables: Parivaar playlists, the shared family
+//       playlists and the Sangat rooms. Nothing else changes, so a v2 hub with
+//       its roster keeps every row.
+export const LATEST_SCHEMA_VERSION = 3;
 
 type Row = Record<string, SqlStorageValue>;
 
@@ -174,6 +178,41 @@ async function applyV2(storage: DurableObjectStorage): Promise<void> {
 }
 
 /**
+ * Idempotent, like v1: every statement is CREATE ... IF NOT EXISTS, so a hub
+ * that already has some of these tables (a database from before the migration
+ * ledger existed, or one the Sangat code created first) is left as it is.
+ *
+ * Times are epoch milliseconds; the routes show them as ISO strings.
+ */
+function applyV3(storage: DurableObjectStorage): void {
+  const sql = storage.sql;
+  storage.transactionSync(() => {
+    // Checked again inside the transaction that does the work.
+    if (readVersion(sql) !== 2) {
+      return;
+    }
+
+    // Parivaar Mix: each phone's own playlist.
+    sql.exec(`CREATE TABLE IF NOT EXISTS parivaar_playlists (
+      deviceId TEXT PRIMARY KEY,
+      memberName TEXT NOT NULL,
+      playlistId TEXT NOT NULL,
+      updatedAt INTEGER NOT NULL
+    )`);
+    // The playlists the whole family shares.
+    sql.exec(`CREATE TABLE IF NOT EXISTS family_playlists (
+      id TEXT PRIMARY KEY,
+      playlistId TEXT NOT NULL UNIQUE,
+      title TEXT NOT NULL,
+      addedByDeviceId TEXT NOT NULL,
+      addedAt INTEGER NOT NULL
+    )`);
+    createSangatTables(sql);
+    writeVersion(sql, 3);
+  });
+}
+
+/**
  * Brings the database up to LATEST_SCHEMA_VERSION. Safe to call on every
  * start: a database already at (or beyond) the latest version is not touched.
  */
@@ -184,5 +223,8 @@ export async function migrate(storage: DurableObjectStorage): Promise<void> {
   }
   if (version < 2) {
     await applyV2(storage);
+  }
+  if (version < 3) {
+    applyV3(storage);
   }
 }
