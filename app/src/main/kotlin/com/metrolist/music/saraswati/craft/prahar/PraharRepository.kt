@@ -13,6 +13,8 @@ import com.metrolist.music.saraswati.family.parivaar.MixTrack
 import com.metrolist.music.saraswati.family.parivaar.YouTubePlaylistPort
 import java.time.LocalDate
 import java.time.LocalDateTime
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlin.coroutines.cancellation.CancellationException
 
 /** What the repository needs from the database, as an interface so it runs against a fake in plain JUnit. */
@@ -29,16 +31,22 @@ class PraharRepository(
     private val snoozed: suspend () -> Set<String> = { emptySet() },
     private val nowMillis: () -> Long = { System.currentTimeMillis() },
 ) {
+    // SARASWATI: Phase 6 fix (AB-I5) — two browses at once must not both pay for a radio call.
+    private val refreshes = Mutex()
+
     /** Builds and saves the mix for [now]'s window and day unless one is already held for them. */
     suspend fun refreshIfDue(now: LocalDateTime): Result<Unit> =
         try {
-            val prahar = Prahar.of(now.toLocalTime())
-            val day = now.toLocalDate()
-            val held = store.cached()
-            if (held != null && held.prahar == prahar && held.day == day) {
-                Result.success(Unit)
-            } else {
-                build(now, prahar, day)
+            refreshes.withLock {
+                val prahar = Prahar.of(now.toLocalTime())
+                val day = now.toLocalDate()
+                store.awaitHydrated()
+                val held = store.cached()
+                if (held != null && held.prahar == prahar && held.day == day) {
+                    Result.success(Unit)
+                } else {
+                    build(now, prahar, day)
+                }
             }
         } catch (e: CancellationException) {
             throw e

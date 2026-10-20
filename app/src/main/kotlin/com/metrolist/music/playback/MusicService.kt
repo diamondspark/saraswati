@@ -1336,6 +1336,19 @@ class MusicService :
         scope.launch {
             dataStore.data.map { it[AutoLoadMoreKey] ?: true }.distinctUntilChanged().collect { cachedAutoLoadMore = it }
         }
+        // SARASWATI: Phase 6 fix (AB-I2) — every snooze, including one restored at startup, is purged as it lands.
+        scope.launch {
+            snoozeStore.snoozed.map { list -> list.mapTo(HashSet()) { it.videoId } }
+                .distinctUntilChanged()
+                .collect { purgeSnoozed(it) }
+        }
+        // SARASWATI: Phase 6 fix (M7) — a playing collection saves its place every 10 s, so a kill mid-track keeps it.
+        scope.launch {
+            while (isActive) {
+                delay(10_000)
+                if (::player.isInitialized && player.isPlaying) recordResume(force = false)
+            }
+        }
         if (startupPrefs!![PersistentQueueKey] ?: true) {
             val queueFile = filesDir.resolve(PERSISTENT_QUEUE_FILE)
             if (queueFile.exists()) {
@@ -1387,6 +1400,8 @@ class MusicService :
                     Timber.tag(TAG).w(error, "Failed to read automix queue, clearing data")
                     clearPersistedQueueFiles()
                 }
+                // SARASWATI: Phase 6 fix (AB-I2) — a restored automix list never carries a song snoozed since it was saved.
+                scope.launch { purgeSnoozed(snoozeStore.awaitActiveIds()) }
             }
 
             val playerStateFile = filesDir.resolve(PERSISTENT_PLAYER_STATE_FILE)
@@ -1939,6 +1954,16 @@ class MusicService :
         database.query {
             update(song.song.copy(dateDownload = java.time.LocalDateTime.now()))
         }
+    }
+
+    // SARASWATI: Phase 6 fix (AB-I2) — a snoozed song is taken out of what is still to play and the automix list.
+    // The song playing now is never removed, so snoozing it only skips (SnoozeActions).
+    private fun purgeSnoozed(snoozed: Set<String>) {
+        if (snoozed.isEmpty() || !::player.isInitialized) return
+        for (index in player.mediaItemCount - 1 downTo player.currentMediaItemIndex + 1) {
+            if (player.getMediaItemAt(index).mediaId in snoozed) player.removeMediaItem(index)
+        }
+        automixItems.value = SnoozeFilter.items(automixItems.value, snoozed)
     }
 
     private fun dropLocalSongsFromQueue() {
@@ -2880,6 +2905,7 @@ class MusicService :
             positionMs = player.currentPosition,
             durationMs = player.duration,
             force = force,
+            hasMore = currentQueue?.hasNextPage() == true,
         )
     }
 

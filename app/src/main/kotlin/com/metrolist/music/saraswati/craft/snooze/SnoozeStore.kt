@@ -26,6 +26,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import java.io.IOException
 import kotlin.coroutines.cancellation.CancellationException
 
 @Serializable
@@ -43,7 +44,7 @@ class SnoozeStore(
 ) {
     /** Snoozes still in force, soonest wake-up first. */
     val snoozed: Flow<List<SnoozedSong>> =
-        dataStore.data.map { active(decode(it[SnoozeKey]), clock()).sortedBy { song -> song.until } }
+        dataStore.data.map { active(decode(it[Key]), clock()).sortedBy { song -> song.until } }
 
     private val lock = Any()
     private val writes = Mutex()
@@ -55,7 +56,7 @@ class SnoozeStore(
         scope.launch {
             val stored =
                 try {
-                    decode(dataStore.data.first()[SnoozeKey])
+                    decode(dataStore.data.first()[Key])
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -105,7 +106,12 @@ class SnoozeStore(
                 change(active(held, now))
                     .sortedBy { it.until }
                     .let { list -> if (list.size > SNOOZE_MAX) list.drop(list.size - SNOOZE_MAX) else list }
-            dataStore.edit { it[SnoozeKey] = json.encodeToString(LIST, kept) }
+            try {
+                dataStore.edit { it[Key] = json.encodeToString(LIST, kept) }
+            } catch (e: IOException) {
+                // A failed write is dropped: memory keeps what storage still has, and nothing crashes.
+                return@withLock
+            }
             // After the write, so a failed write leaves the memory copy where storage is.
             synchronized(lock) {
                 settled = true
@@ -119,7 +125,8 @@ class SnoozeStore(
         const val SNOOZE_MAX = 500
         private const val DAY_MS = 24L * 60 * 60 * 1000
 
-        private val SnoozeKey = stringPreferencesKey("sarCraftSnoozes")
+        /** Stored snoozes. Public so BackupPolicy can keep listening history out of backups. */
+        val Key = stringPreferencesKey("sarCraftSnoozes")
         private val LIST = ListSerializer(SnoozedSong.serializer())
         private val json = Json { ignoreUnknownKeys = true }
 

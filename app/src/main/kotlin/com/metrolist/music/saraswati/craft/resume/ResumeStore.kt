@@ -22,6 +22,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import java.io.IOException
 import kotlin.coroutines.cancellation.CancellationException
 
 class ResumeStore(
@@ -31,7 +32,7 @@ class ResumeStore(
 ) {
     /** Every stored point, keyed by collection id. */
     val points: Flow<Map<String, ResumePoint>> =
-        dataStore.data.map { decode(it[PointsKey]).associateBy { point -> point.sourceId } }
+        dataStore.data.map { decode(it[Key]).associateBy { point -> point.sourceId } }
 
     private val lock = Any()
     private val writes = Mutex()
@@ -43,7 +44,7 @@ class ResumeStore(
         scope.launch {
             val stored =
                 try {
-                    decode(dataStore.data.first()[PointsKey]).associateBy { it.sourceId }
+                    decode(dataStore.data.first()[Key]).associateBy { it.sourceId }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -82,7 +83,12 @@ class ResumeStore(
                 changed.values
                     .sortedBy { it.savedAt }
                     .let { list -> if (list.size > RESUME_MAX) list.drop(list.size - RESUME_MAX) else list }
-            dataStore.edit { it[PointsKey] = json.encodeToString(LIST, kept) }
+            try {
+                dataStore.edit { it[Key] = json.encodeToString(LIST, kept) }
+            } catch (e: IOException) {
+                // A failed write is dropped: memory keeps what storage still has, and nothing crashes.
+                return@withLock
+            }
             // After the write, so a failed write leaves the memory copy where storage is.
             synchronized(lock) {
                 settled = true
@@ -96,7 +102,8 @@ class ResumeStore(
         const val RESUME_MAX = 27
         const val RESUME_TTL_DAYS = 30
 
-        private val PointsKey = stringPreferencesKey("sarCraftResumePoints")
+        /** Stored resume points. Public so BackupPolicy can keep listening history out of backups. */
+        val Key = stringPreferencesKey("sarCraftResumePoints")
         private val LIST = ListSerializer(ResumePoint.serializer())
         private val json = Json { ignoreUnknownKeys = true }
 

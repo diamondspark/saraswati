@@ -47,7 +47,7 @@ class PraharStore(
     private val lock = Any()
     private var settled = false
 
-    init {
+    private val hydration: Job =
         scope.launch {
             val stored =
                 try {
@@ -64,7 +64,9 @@ class PraharStore(
                 }
             }
         }
-    }
+
+    /** Returns once the stored mix has been read, so a mix saved before a restart is seen. */
+    suspend fun awaitHydrated() = hydration.join()
 
     suspend fun save(mix: PraharMix) {
         val kept = mix.copy(tracks = mix.tracks.take(PraharMixBuilder.MIX_MAX))

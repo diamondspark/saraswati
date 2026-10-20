@@ -89,6 +89,8 @@ import com.metrolist.music.saraswati.craft.prahar.CarPraharRow
 import com.metrolist.music.saraswati.craft.prahar.PraharQueue
 import com.metrolist.music.saraswati.craft.prahar.PraharRepository
 import com.metrolist.music.saraswati.craft.prahar.PraharStore
+// SARASWATI: Phase 6 fix (AB-I1) — the car Prahar row leaves out songs snoozed since the mix was built.
+import com.metrolist.music.saraswati.craft.snooze.SnoozeStore
 import java.time.LocalDateTime
 import com.metrolist.music.saraswati.family.playlists.FamilyPlaylistsRepository
 import com.metrolist.music.saraswati.family.sangat.CarSangatController
@@ -126,6 +128,8 @@ constructor(
     // SARASWATI: Phase 6 Task 7 — the Prahar mix the car's Home leads with, and its refresh on browse.
     private val praharStore: PraharStore,
     private val praharRepository: PraharRepository,
+    // SARASWATI: Phase 6 fix (AB-I1) — snoozes are checked when the car plays the Prahar mix.
+    private val snoozeStore: SnoozeStore,
     // SARASWATI: Phase 5 Task 6 — the car's On this phone rows; the repository honours the Local files switch.
     private val localSongs: com.metrolist.music.saraswati.localmedia.LocalSongsRepository,
 ) : MediaLibrarySession.Callback {
@@ -993,7 +997,10 @@ constructor(
                 // phone's own copy. A mix that is no longer the current window's is not played.
                 CarPraharRow.MEDIA_ID -> {
                     if (path.size != 1) return@future defaultResult
-                    val mix = praharStore.cached()?.takeIf { CarPraharRow.isCurrent(it, LocalDateTime.now()) } ?: return@future defaultResult
+                    val held = praharStore.cached()?.takeIf { CarPraharRow.isCurrent(it, LocalDateTime.now()) } ?: return@future defaultResult
+                    val snoozed = snoozeStore.awaitActiveIds()
+                    val mix = held.copy(tracks = held.tracks.filterNot { it.videoId in snoozed })
+                    if (!CarPraharRow.isCurrent(mix, LocalDateTime.now())) return@future defaultResult
                     val queue = PraharQueue(mix)
                     val status = queue.getInitialStatus()
                     withContext(Dispatchers.Main) { service.adoptQueue(queue, status.title, status.items.size) }

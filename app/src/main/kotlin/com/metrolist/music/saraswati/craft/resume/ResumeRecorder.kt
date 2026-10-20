@@ -27,10 +27,12 @@ class ResumeRecorder(
         positionMs: Long,
         durationMs: Long,
         force: Boolean,
+        hasMore: Boolean = false,
     ) {
         if (queue !is ResumableQueue || mediaId == null) return
         if (ResumePolicy.finished(index, count, positionMs, durationMs)) {
-            scope.launch { store.clear(queue.sourceId) }
+            // The last song of a loaded page is not the end of a collection that still has pages to load.
+            if (!hasMore) scope.launch { store.clear(queue.sourceId) }
             return
         }
         val now = clock()

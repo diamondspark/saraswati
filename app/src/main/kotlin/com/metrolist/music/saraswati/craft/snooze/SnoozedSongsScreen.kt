@@ -46,8 +46,10 @@ fun SnoozedSongsScreen(
     navController: NavController,
     viewModel: SnoozeViewModel = hiltViewModel(),
 ) {
-    val snoozed by viewModel.snoozed.collectAsStateWithLifecycle()
+    val snoozedNow by viewModel.snoozed.collectAsStateWithLifecycle()
     val now = System.currentTimeMillis()
+    // SARASWATI: Phase 6 fix (M10) — a snooze that has run out is not listed, even before the next storage emission.
+    val snoozed = snoozedNow.filter { it.until > now }
 
     Column(Modifier.fillMaxSize()) {
         TopAppBar(
@@ -121,5 +123,5 @@ private fun daysLeft(
     now: Long,
 ): Int {
     val dayMs = 24L * 60 * 60 * 1000
-    return ((until - now + dayMs - 1) / dayMs).toInt().coerceAtLeast(1)
+    return ((until - now + dayMs - 1) / dayMs).toInt()
 }
