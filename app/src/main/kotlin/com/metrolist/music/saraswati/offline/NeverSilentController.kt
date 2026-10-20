@@ -25,8 +25,8 @@ interface QueuePort {
 
     fun currentId(): String?
 
-    /** Seeks to [index], prepares and plays. */
-    fun jumpTo(index: Int)
+    /** Seeks to [index] and prepares it. Plays only when [play] is true and the player is still meant to play. */
+    fun jumpTo(index: Int, play: Boolean)
 
     /** Puts the songs [ids] right after the current item and returns the queue index of the first, or null if none were added. */
     suspend fun insertAfterCurrent(ids: List<String>): Int?
@@ -45,16 +45,20 @@ class NeverSilentController(
     private val busy = Mutex()
     private var lastBridge: Set<String> = emptySet()
 
-    /** The network is gone and the current song failed. True when this took over. */
-    suspend fun onOffline(): Boolean = act()
+    /**
+     * The network is gone and the current song failed. [wasPlaying] is read when the event arrives, so a pause
+     * pressed during the scan is kept. True when this took over.
+     */
+    suspend fun onOffline(wasPlaying: Boolean): Boolean = act(wasPlaying)
 
     /** The current song gave up for good. True when this took over. */
     suspend fun onFinalFailure(
         mediaId: String,
         online: Boolean,
+        wasPlaying: Boolean,
     ): Boolean {
         state.onFinalFailure(mediaId)
-        return if (state.preferOffline(online)) act() else false
+        return if (state.preferOffline(online)) act(wasPlaying) else false
     }
 
     /** [mediaId] just became the current song. Acts only if it would have to be streamed and streaming is not wanted. */
@@ -65,10 +69,10 @@ class NeverSilentController(
         if (isCasting() || isSangatGuest()) return false
         if (!state.preferOffline(online)) return false
         if (playability.isPlayableOffline(mediaId)) return false
-        return act()
+        return act(wasPlaying = true)
     }
 
-    private suspend fun act(): Boolean {
+    private suspend fun act(wasPlaying: Boolean): Boolean {
         if (isCasting() || isSangatGuest()) return false
         if (!busy.tryLock()) return true
         try {
@@ -78,7 +82,7 @@ class NeverSilentController(
             val next = SkipToPlayable.nextPlayable(ahead, port::idAt, playability::isPlayableOffline)
             if (port.currentId() != startedOn) return true // the listener moved on while the scan ran
             if (next != null) {
-                port.jumpTo(next)
+                port.jumpTo(next, play = wasPlaying)
                 return true
             }
             if (inRoom()) return false
@@ -87,7 +91,7 @@ class NeverSilentController(
             if (port.currentId() != startedOn) return true
             val first = port.insertAfterCurrent(picks) ?: return false
             lastBridge = picks.toSet()
-            port.jumpTo(first)
+            port.jumpTo(first, play = wasPlaying)
             return true
         } finally {
             busy.unlock()

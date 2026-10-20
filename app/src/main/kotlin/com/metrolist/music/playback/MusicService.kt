@@ -661,10 +661,11 @@ class MusicService :
 
             override fun currentId(): String? = player.currentMediaItem?.mediaId
 
-            override fun jumpTo(index: Int) {
+            override fun jumpTo(index: Int, play: Boolean) {
                 player.seekTo(index, C.TIME_UNSET)
                 player.prepare()
-                player.play()
+                // A restored paused queue, or a pause pressed during the scan, must stay paused.
+                if (play && player.playWhenReady) player.play()
             }
 
             override suspend fun insertAfterCurrent(ids: List<String>): Int? {
@@ -3340,7 +3341,8 @@ class MusicService :
             !isNetworkConnected.value -> {
                 Timber.tag(TAG).d("No internet connection, waiting for connection")
                 // SARASWATI: Phase 5 Task 7 — a song that plays offline is better than a wait; upstream's wait runs if there is none.
-                launchNeverSilent(decide = { neverSilent.onOffline() }, otherwise = ::waitOnNetworkError)
+                val wasPlaying = player.playWhenReady
+                launchNeverSilent(decide = { neverSilent.onOffline(wasPlaying) }, otherwise = ::waitOnNetworkError)
                 return
             }
 
@@ -3704,8 +3706,9 @@ class MusicService :
             handleFinalFailureUpstream()
             return
         }
+        val wasPlaying = player.playWhenReady
         launchNeverSilent(
-            decide = { neverSilent.onFinalFailure(failedId, neverSilentOnline()) },
+            decide = { neverSilent.onFinalFailure(failedId, neverSilentOnline(), wasPlaying) },
             otherwise = ::handleFinalFailureUpstream,
         )
     }
