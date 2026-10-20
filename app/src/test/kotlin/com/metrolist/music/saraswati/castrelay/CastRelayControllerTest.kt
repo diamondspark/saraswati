@@ -9,6 +9,9 @@ package com.metrolist.music.saraswati.castrelay
 
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
+import com.metrolist.music.saraswati.localmedia.LocalFile
+import com.metrolist.music.saraswati.localmedia.LocalFileOpener
+import com.metrolist.music.saraswati.localmedia.LocalSongIds
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -230,6 +233,80 @@ class CastRelayControllerTest {
             assertNull(controller.relayQueue(queue(3), centerIndex = 0))
             controller.stop()
         }
+
+    @Test
+    fun `mediaItems uses the local mime type`() =
+        runBlocking {
+            val localOpener = LocalFileOpener { LocalFile("audio/mp4", 1L, ByteArrayInputStream(ByteArray(1))) }
+            val controller =
+                CastRelayController(
+                    random = SecureRandom(),
+                    source = RoutingRelayAudioSource(LocalRelayAudioSource(localOpener), FakeSource("audio/ogg")),
+                    storedMimeType = { if (LocalSongIds.isLocal(it)) "audio/mp4" else null },
+                    featureEnabled = { true },
+                    localAddress = { loopback },
+                    buildEnabled = true,
+                    newServer = { a, s, src -> RelayHttpServer(a, s, src).also { servers += it } },
+                )
+            controller.start()
+            val item = controller.mediaItems(listOf(MediaItem.Builder().setMediaId("local:4815162342").build()))!!.single()
+            assertEquals("audio/mp4", item.localConfiguration!!.mimeType)
+            controller.stop()
+        }
+
+    @Test
+    fun `with the Local files switch off no local song is put in the queue`() =
+        runBlocking {
+            val localOpener = LocalFileOpener { LocalFile("audio/mp4", 1L, ByteArrayInputStream(ByteArray(1))) }
+            val controller =
+                CastRelayController(
+                    random = SecureRandom(),
+                    source =
+                        RoutingRelayAudioSource(
+                            LocalRelayAudioSource(localOpener, allowed = { false }),
+                            FakeSource("audio/ogg"),
+                        ),
+                    // Production's local MIME lookup is gated by the same switch, so it knows nothing either.
+                    storedMimeType = { null },
+                    featureEnabled = { true },
+                    localAddress = { loopback },
+                    buildEnabled = true,
+                    newServer = { a, s, src -> RelayHttpServer(a, s, src).also { servers += it } },
+                )
+            controller.start()
+            assertNull(controller.mediaItems(listOf(MediaItem.Builder().setMediaId("local:4815162342").build())))
+            controller.stop()
+        }
+
+    @Test
+    fun `a relay URL for a local song contains neither its id nor a path`() =
+        runBlocking {
+            val localOpener = LocalFileOpener { LocalFile("audio/mp4", 1L, ByteArrayInputStream(ByteArray(1))) }
+            val controller =
+                CastRelayController(
+                    random = SecureRandom(),
+                    source = RoutingRelayAudioSource(LocalRelayAudioSource(localOpener), FakeSource("audio/ogg")),
+                    storedMimeType = { if (LocalSongIds.isLocal(it)) "audio/mp4" else null },
+                    featureEnabled = { true },
+                    localAddress = { loopback },
+                    buildEnabled = true,
+                    newServer = { a, s, src -> RelayHttpServer(a, s, src).also { servers += it } },
+                )
+            controller.start()
+            val uri = controller.mediaItems(listOf(MediaItem.Builder().setMediaId("local:4815162342").build()))!!.single().localConfiguration!!.uri.toString()
+            assertTrue(relayUrl.matches(uri))
+            assertFalse(uri.contains("4815162342"))
+            assertFalse(uri.contains("local"))
+            assertFalse(uri.contains("content"))
+            controller.stop()
+        }
+
+    @Test
+    fun `without the relay, local items are left out of the Cast window and the rest still cast`() {
+        val items =
+            listOf("v0", "local:12", "v2").map { MediaItem.Builder().setMediaId(it).setUri("https://music.invalid/$it").build() }
+        assertEquals(listOf("v0", "v2"), castableWithoutRelay(items).map { it.mediaId })
+    }
 
     private fun assertClosed(port: Int) {
         try {

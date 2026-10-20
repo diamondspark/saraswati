@@ -8,6 +8,7 @@
     "android.permission.FOREGROUND_SERVICE",
     "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
     "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+    "android.permission.READ_MEDIA_AUDIO",
     "dev.diamondspark.saraswati.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
   ],
   "exported_components": [
@@ -44,7 +45,11 @@
     "android.permission.CAMERA",
     "android.permission.BIND_ACCESSIBILITY_SERVICE",
     "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE",
-    "android.permission.SYSTEM_ALERT_WINDOW"
+    "android.permission.SYSTEM_ALERT_WINDOW",
+    "android.permission.READ_EXTERNAL_STORAGE",
+    "android.permission.MANAGE_EXTERNAL_STORAGE",
+    "android.permission.READ_MEDIA_IMAGES",
+    "android.permission.READ_MEDIA_VIDEO"
   ],
   "intent_filters": {
     "activity-alias:com.metrolist.music.MainActivityAlias": [

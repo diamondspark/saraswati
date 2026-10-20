@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SARASWATI: gms-flavor manifest overlay. Removes the microphone/alarm/boot
-     permissions, the music-recognition and Discord-OAuth entry points, the
+     permissions, the music-recognition entry points, the
      three home-screen widget receivers (dropped feature, see Phase 1 audit
      finding NEW-1: exported with no permission, any app could skip tracks
      or start playlists) and the unused org.apache.http.legacy stack
@@ -23,6 +23,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" tools:node="remove" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" tools:node="remove" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" tools:node="remove" />
+
+    <!-- SARASWATI: Phase 5 Task 3 — the one permission added for songs on this phone (owner-approved). It exists
+         only on Android 13+ (older phones are told so, and READ_EXTERNAL_STORAGE, which also reads photos, stays
+         forbidden). It is asked for at runtime only, after an in-app explanation, and the Local files switch in
+         settings turns every read off again. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
 
     <uses-feature android:name="android.hardware.microphone" tools:node="remove" />
 
@@ -69,11 +75,6 @@
                 <data android:path="/pair" />
             </intent-filter>
         </activity>
-
-        <!-- Discord Rich Presence OAuth callback: Discord integration dropped -->
-        <activity
-            android:name="com.metrolist.music.discord.DiscordOAuthActivity"
-            tools:node="remove" />
 
         <!-- Music recognition feature dropped -->
         <activity

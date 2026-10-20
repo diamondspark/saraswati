@@ -188,24 +188,26 @@ interface DatabaseDao {
         SongSortType.PLAY_TIME -> songsByPlayTimeAsc()
     }.map { it.reversed(descending) }
 
+    // SARASWATI: fix wave P5a C1 — songs on this phone stay out of the liked, most played, quick picks, forgotten,
+    // history and search queries below (isLocal = 1 rows); they are listed only through the Local files surfaces.
     @Transaction
-    @Query("SELECT * FROM song WHERE liked ORDER BY rowId")
+    @Query("SELECT * FROM song WHERE liked AND isLocal = 0 ORDER BY rowId")
     fun likedSongsByRowIdAsc(): Flow<List<Song>>
 
     @Transaction
-    @Query("SELECT * FROM song WHERE liked ORDER BY likedDate")
+    @Query("SELECT * FROM song WHERE liked AND isLocal = 0 ORDER BY likedDate")
     fun likedSongsByCreateDateAsc(): Flow<List<Song>>
 
     @Transaction
-    @Query("SELECT * FROM song WHERE liked ORDER BY likedDate DESC, rowId DESC LIMIT :limit OFFSET :offset")
+    @Query("SELECT * FROM song WHERE liked AND isLocal = 0 ORDER BY likedDate DESC, rowId DESC LIMIT :limit OFFSET :offset")
     suspend fun likedSongsByCreateDateDesc(limit: Int, offset: Int): List<Song>
 
     @Transaction
-    @Query("SELECT * FROM song WHERE liked ORDER BY title")
+    @Query("SELECT * FROM song WHERE liked AND isLocal = 0 ORDER BY title")
     fun likedSongsByNameAsc(): Flow<List<Song>>
 
     @Transaction
-    @Query("SELECT * FROM song WHERE liked ORDER BY totalPlayTime")
+    @Query("SELECT * FROM song WHERE liked AND isLocal = 0 ORDER BY totalPlayTime")
     fun likedSongsByPlayTimeAsc(): Flow<List<Song>>
 
     fun likedSongs(
@@ -243,7 +245,7 @@ interface DatabaseDao {
     }.map { it.reversed(descending) }
 
     @Transaction
-    @Query("SELECT COUNT(1) FROM song WHERE liked")
+    @Query("SELECT COUNT(1) FROM song WHERE liked AND isLocal = 0")
     fun likedSongsCount(): Flow<Int>
 
     @Transaction
@@ -350,6 +352,7 @@ interface DatabaseDao {
             FROM event e
             JOIN song_artist_map sam ON e.songId = sam.songId
             WHERE sam.artistId = :artistId AND e.timestamp >= :fromTimeStamp AND e.timestamp <= :toTimeStamp
+              AND e.songId NOT IN (SELECT id FROM song WHERE isLocal = 1)
             GROUP BY e.songId
         ) AS play_times ON s.id = play_times.songId
         ORDER BY play_times.totalPlayTime DESC
@@ -393,6 +396,7 @@ interface DatabaseDao {
                                FROM song
                                ORDER BY totalPlayTime DESC
                                LIMIT 10))
+          AND song.isLocal = 0
         ORDER BY referredCount DESC
         LIMIT 100
     """,
@@ -418,6 +422,7 @@ interface DatabaseDao {
               FROM event
               WHERE timestamp > :fromTimeStamp
                 AND timestamp <= :toTimeStamp
+                AND songId NOT IN (SELECT id FROM song WHERE isLocal = 1)
               GROUP BY songId
               ORDER BY SUM(playTime) DESC
               LIMIT :limit OFFSET :offset) AS top_songs ON s.id = top_songs.songId
@@ -510,6 +515,7 @@ interface DatabaseDao {
                      FROM event
                      WHERE timestamp > :fromTimeStamp
                      AND timestamp <= :toTimeStamp
+                     AND songId NOT IN (SELECT id FROM song WHERE isLocal = 1)
                      GROUP BY songId
                      ORDER BY SUM(playTime) DESC
                      LIMIT :limit OFFSET :offset)
@@ -545,6 +551,7 @@ interface DatabaseDao {
                                      FROM event
                                      WHERE timestamp > :fromTimeStamp
                                      AND timestamp <= :toTimeStamp
+                                     AND songId NOT IN (SELECT id FROM song WHERE isLocal = 1)
                                      GROUP BY songId) AS e
                                     ON song_artist_map.songId = e.songId
                       GROUP BY artistId
@@ -587,6 +594,7 @@ interface DatabaseDao {
                  JOIN song_album_map sam ON event.songId = sam.songId
         WHERE event.timestamp > :fromTimeStamp
           AND event.timestamp <= :toTimeStamp
+          AND event.songId NOT IN (SELECT id FROM song WHERE isLocal = 1)
         GROUP BY sam.albumId
         HAVING sam.albumId IS NOT NULL
     )
@@ -672,6 +680,7 @@ interface DatabaseDao {
               ORDER BY oldPlayTime) AS t
                  JOIN song on song.id = t.eid
         WHERE 0.2 * t.oldPlayTime > t.newPlayTime
+          AND song.isLocal = 0
         LIMIT 100
     """
     )
@@ -1412,7 +1421,7 @@ interface DatabaseDao {
     @Query(
         """
     SELECT * FROM song 
-    WHERE (
+    WHERE isLocal = 0 AND (
         title LIKE '%' || :query || '%' 
         OR EXISTS (
             SELECT 1 FROM song_artist_map 
@@ -1489,6 +1498,7 @@ interface DatabaseDao {
                     ELSE strftime('%Y-%m', timestamp / 1000, 'unixepoch')
                 END
         ) AS latest_event ON latest_event.id = event.id
+        WHERE event.songId NOT IN (SELECT id FROM song WHERE isLocal = 1)
         ORDER BY event.id DESC
         """,
     )
@@ -1501,11 +1511,11 @@ interface DatabaseDao {
     ): Flow<List<EventWithSong>>
 
     @Transaction
-    @Query("SELECT * FROM event ORDER BY rowId ASC LIMIT 1")
+    @Query("SELECT * FROM event WHERE songId NOT IN (SELECT id FROM song WHERE isLocal = 1) ORDER BY rowId ASC LIMIT 1")
     fun firstEvent(): Flow<EventWithSong?>
 
     @Transaction
-    @Query("SELECT * FROM event ORDER BY rowId DESC LIMIT 1")
+    @Query("SELECT * FROM event WHERE songId NOT IN (SELECT id FROM song WHERE isLocal = 1) ORDER BY rowId DESC LIMIT 1")
     fun latestEvent(): Flow<EventWithSong?>
 
     @Query("SELECT COUNT(*) FROM event")
@@ -2043,4 +2053,26 @@ interface DatabaseDao {
 
     @Delete
     fun delete(podcast: PodcastEntity)
+
+    // SARASWATI: Phase 5 Task 3 — songs on this phone (id `local:<MediaStore id>`, isLocal = 1). They have no
+    // inLibrary stamp, so upstream's library, sync and "forgotten favourites" queries never list them.
+    @Transaction
+    @Query("SELECT * FROM song WHERE isLocal = 1 ORDER BY title COLLATE NOCASE, rowId")
+    fun localSongsByTitle(): Flow<List<Song>>
+
+    @Transaction
+    @Query("SELECT * FROM song WHERE isLocal = 1 ORDER BY title COLLATE NOCASE, rowId LIMIT :limit OFFSET :offset")
+    suspend fun localSongsPage(limit: Int, offset: Int): List<Song>
+
+    @Query("SELECT COUNT(1) FROM song WHERE isLocal = 1")
+    fun localSongCount(): Flow<Int>
+
+    @Query("SELECT id FROM song WHERE isLocal = 1")
+    suspend fun localSongIds(): List<String>
+
+    @Query("SELECT id, dateModified FROM song WHERE isLocal = 1")
+    suspend fun localSongStamps(): List<com.metrolist.music.saraswati.localmedia.LocalSongStamp>
+
+    @Query("DELETE FROM song WHERE id IN (:ids) AND isLocal = 1")
+    suspend fun deleteLocalSongs(ids: List<String>)
 }

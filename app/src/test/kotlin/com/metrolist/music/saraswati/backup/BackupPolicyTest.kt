@@ -152,12 +152,8 @@ class BackupPolicyTest {
         assertNull(sanitized[DeeplApiKey])
         assertNull(sanitized[LastFMSessionKey])
         assertNull(sanitized[DiscordAvatarKey])
-        // SARASWATI (fix round 1): these two are NOT dead config — DiscordRpcManager
-        // reconnects automatically from a Keystore-persisted token on every
-        // MusicService creation, with no SaraswatiFeatures.DISCORD check, and
-        // publishes whatever is in DataStore as the Rich Presence buttons on the
-        // next song play. A restored value here really does reach a live Discord
-        // presence with no fresh login required.
+        // SARASWATI: Discord was removed, so nothing reads these any more; an old backup's values are still
+        // dropped rather than copied onto the phone.
         assertNull(sanitized[DiscordButton1UrlKey])
         assertNull(sanitized[DiscordButton2UrlKey])
     }

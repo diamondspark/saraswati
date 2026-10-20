@@ -11,6 +11,7 @@ package com.metrolist.music.saraswati.castrelay
 import androidx.media3.common.MediaItem
 import kotlinx.coroutines.CancellationException
 import com.metrolist.music.saraswati.SaraswatiFeatures
+import com.metrolist.music.saraswati.localmedia.LocalSongIds
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.security.SecureRandom
@@ -154,3 +155,7 @@ class CastRelayController(
         const val RESOLVE_AHEAD = 10
     }
 }
+
+// SARASWATI: Phase 5 Task 5 — without the relay, Cast can only use the stream-URL path, which never serves a song on
+// this phone. Those songs are left out of the window and the rest still cast.
+fun castableWithoutRelay(items: List<MediaItem>): List<MediaItem> = items.filterNot { LocalSongIds.isLocal(it.mediaId) }

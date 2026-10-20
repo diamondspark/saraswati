@@ -4,22 +4,20 @@
  */
 
 // SARASWATI: feature flags for the family build. Phase 1 drops network-facing
-// integrations this fork cannot vet or maintain (Discord presence, Last.fm
-// scrobbling, AI lyrics translation, music recognition, alarms, widgets),
+// integrations this fork cannot vet or maintain (AI lyrics translation, music recognition, alarms, widgets),
 // switches off InnerTubeX's remote-cipher-code channel (audit A12-b, High:
 // it downloads and runs an unsigned JS program per player from a third-party
 // repo) and hides the legacy proxy settings (audit A15.2). Each flag is a
 // single source of truth: entry points check it instead of duplicating the
 // "is this feature allowed" decision at every call site. Re-enable a flag
 // only after adding the feature's hosts to the egress allowlist (Task 12)
-// and reviewing what it needs. See docs/strip-checklist.md.
+// and reviewing what it needs. See docs/strip-checklist.md. Discord presence and Last.fm scrobbling are not
+// flags any more: their code was removed outright (owner decision, Phase 5a fix wave).
 package com.metrolist.music.saraswati
 
 import com.metrolist.music.BuildConfig
 
 object SaraswatiFeatures {
-    const val DISCORD = false
-    const val LASTFM = false
     const val AI_LYRICS = false
     const val RECOGNITION = false
     const val ALARMS = false

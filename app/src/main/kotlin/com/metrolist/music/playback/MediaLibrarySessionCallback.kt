@@ -69,8 +69,10 @@ import javax.inject.Inject
 import com.metrolist.music.constants.AndroidAutoSectionsOrderKey
 import com.metrolist.music.constants.AutoRadioQueueKey
 import com.metrolist.music.playback.queues.ListQueue
+import com.metrolist.music.playback.queues.Queue
 import com.metrolist.music.playback.queues.YouTubeQueue
 import com.metrolist.music.saraswati.car.CarBrowseTree
+import com.metrolist.music.saraswati.car.CarLocalTree
 import com.metrolist.music.saraswati.car.CarHomeHolder
 import com.metrolist.music.saraswati.car.CarHomeSnapshot
 import com.metrolist.music.saraswati.car.FileCarHomeStore
@@ -115,6 +117,8 @@ constructor(
     private val familyPlaylists: FamilyPlaylistsRepository,
     private val featureGate: FamilyFeatureGate,
     private val carSangat: CarSangatController,
+    // SARASWATI: Phase 5 Task 6 — the car's On this phone rows; the repository honours the Local files switch.
+    private val localSongs: com.metrolist.music.saraswati.localmedia.LocalSongsRepository,
 ) : MediaLibrarySession.Callback {
     private val scope = CoroutineScope(Dispatchers.Main) + Job()
 
@@ -139,6 +143,26 @@ constructor(
             carSangat.state.value,
             carResources,
         )
+
+    // SARASWATI: Phase 5 Task 6 — access folds in the Local files switch: switched off, the car sees an unsupported phone.
+    private suspend fun carLocalAccess(): com.metrolist.music.saraswati.localmedia.LocalAccess =
+        com.metrolist.music.saraswati.localmedia.LocalFiles.visibleAccess(
+            com.metrolist.music.saraswati.localmedia.localAccess(context),
+            localSongs.storedSwitch.first(),
+        )
+
+    private suspend fun carLibraryLocalRows(): List<MediaItem> {
+        val access = carLocalAccess()
+        val localCount = if (access == com.metrolist.music.saraswati.localmedia.LocalAccess.GRANTED) localSongs.count.first() else 0
+        val downloadedCount = downloadUtil.downloads.value.values.count { it.state == Download.STATE_COMPLETED }
+        return CarLocalTree.libraryRows(carResources, access, localCount, downloadedCount)
+    }
+
+    private suspend fun carLocalChildren(): List<MediaItem> {
+        val access = carLocalAccess()
+        val songs = if (access == com.metrolist.music.saraswati.localmedia.LocalAccess.GRANTED) localSongs.songs.first() else emptyList()
+        return CarLocalTree.children(carResources, access, songs, includeShuffle = songs.isNotEmpty())
+    }
 
     /** How many rows the car's Family folder now has, each time something it shows may have changed. */
     val familyChanges: Flow<Int> =
@@ -344,8 +368,13 @@ constructor(
             try {
                 // SARASWATI: Task 11 — the root and the four tabs. Checked first: Stations and Family are
                 // answered from the cache at once and must not wait behind a database or network lookup.
+                // SARASWATI: Phase 5 Task 6 — On this phone's folder, and the Library tab's two local rows at its tail.
+                if (parentId == MusicService.CAR_LOCAL) {
+                    return@future LibraryResult.ofItemList(carLocalChildren().paginate(page, pageSize), params)
+                }
                 carTree.childrenOf(parentId)?.let { children ->
-                    return@future LibraryResult.ofItemList(children.paginate(page, pageSize), params)
+                    val rows = if (parentId == MusicService.CAR_LIBRARY) children + carLibraryLocalRows() else children
+                    return@future LibraryResult.ofItemList(rows.paginate(page, pageSize), params)
                 }
 
                 loadLocalChildren(parentId, page, pageSize)?.let { children ->
@@ -527,7 +556,7 @@ constructor(
         val builtInItems =
             if (request.offset < 2 && request.limit > 0) {
                 val likedSongCount = database.likedSongsCount().first()
-                val downloadedSongCount = downloadUtil.downloads.value.size
+                val downloadedSongCount = downloadUtil.downloads.value.values.count { it.state == Download.STATE_COMPLETED }
                 listOf(
                     browsableMediaItem(
                         "${MusicService.PLAYLIST}/${PlaylistEntity.LIKED_PLAYLIST_ID}",
@@ -633,7 +662,12 @@ constructor(
     ): ListenableFuture<LibraryResult<MediaItem>> =
         scope.future(Dispatchers.IO) {
             try {
-                database.song(mediaId).first()?.toMediaItem()?.let {
+                // SARASWATI: fix wave P5a C1 — a song on this phone is answered only while the Local files switch allows it.
+                com.metrolist.music.saraswati.localmedia.LocalServingPolicy.lookup(
+                    mediaId = mediaId,
+                    canServe = localSongs::canServe,
+                    find = { id -> database.song(id).first()?.toMediaItem() },
+                )?.let {
                     LibraryResult.ofItem(it, null)
                 } ?: LibraryResult.ofError(SessionError.ERROR_UNKNOWN)
             } catch (e: Exception) {
@@ -877,6 +911,35 @@ constructor(
                 // SARASWATI: Task 11 — a station chosen in the car's Stations tab: the radio of the seed video the
                 // row's id carries (CarStations.seedFrom checks the id before it is believed). Built the way a Saral
                 // tile builds it. A station is a radio whatever the "auto radio" setting says.
+                // SARASWATI: Phase 5 Task 6 — a song in On this phone: every local song in title order from that one, or
+                // all of them shuffled. The repository gives only the songs the Local files switch allows.
+                MusicService.CAR_LOCAL -> {
+                    val selected = path.getOrNull(1) ?: return@future defaultResult
+                    val songs = localSongs.songs.first()
+                    val (items, startAt, startMs) =
+                        if (selected == MusicService.SHUFFLE_ACTION) {
+                            Triple(CarLocalTree.shuffleQueue(songs).map { it.toMediaItem() }, 0, C.TIME_UNSET)
+                        } else {
+                            val queue = CarLocalTree.queueFrom(songs, selected) ?: return@future defaultResult
+                            Triple(queue.songs.map { it.toMediaItem() }, queue.startIndex, startPositionMs)
+                        }
+                    // SARASWATI: fix wave P5a I1 — this branch bypasses MusicService.playQueue, so the Sangat rule is
+                    // applied here: in a room no song on this phone starts, and the car is told why.
+                    val inRoom = service.listenTogetherManager.isInRoom
+                    val allowed =
+                        com.metrolist.music.saraswati.localmedia.LocalSangatPolicy.filterForRoom(
+                            Queue.Status(title = null, items = items, mediaItemIndex = startAt, position = startMs),
+                            inRoom,
+                        )
+                    if (inRoom) {
+                        withContext(Dispatchers.Main) {
+                            android.widget.Toast.makeText(context, R.string.local_songs_cant_join_sangat, android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    if (allowed == null) return@future defaultResult
+                    MediaItemsWithStartPosition(allowed.items, allowed.mediaItemIndex, allowed.position)
+                }
+
                 MusicService.CAR_STATIONS -> {
                     val seed = CarStations.seedFrom(mediaItems.first().mediaId) ?: return@future defaultResult
                     val radioQueue = YouTubeQueue(radioEndpointFor(seed))
@@ -1091,6 +1154,7 @@ internal fun isBrowsableMediaId(mediaId: String): Boolean =
         mediaId == MusicService.CAR_LIBRARY ||
         mediaId == MusicService.CAR_STATIONS ||
         mediaId == MusicService.CAR_FAMILY ||
+        mediaId == MusicService.CAR_LOCAL ||
         mediaId.startsWith("${MusicService.ARTIST}/") ||
         mediaId.startsWith("${MusicService.ALBUM}/") ||
         mediaId.startsWith("${MusicService.PLAYLIST}/") ||

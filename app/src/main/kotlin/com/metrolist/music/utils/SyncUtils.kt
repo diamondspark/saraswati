@@ -16,9 +16,7 @@ import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.pages.PlaylistPage
 import com.metrolist.innertube.utils.completed
 import com.metrolist.innertube.utils.parseCookieString
-import com.metrolist.lastfm.LastFM
 import com.metrolist.music.constants.InnerTubeCookieKey
-import com.metrolist.music.constants.LastFMUseSendLikes
 import com.metrolist.music.constants.LastFullSyncKey
 import com.metrolist.music.constants.SYNC_COOLDOWN
 import com.metrolist.music.db.MusicDatabase
@@ -235,7 +233,6 @@ class SyncUtils @Inject constructor(
     private val syncExecutionMutex = Mutex()
     private val queuedOperationKeys = ConcurrentHashMap.newKeySet<String>()
 
-    private var lastfmSendLikes = false
     @Volatile private var cachedLastSyncEpoch: Long = 0L
     private val playlistsBeingModified = ConcurrentHashMap<String, AtomicInteger>()
     private val playlistEditMutex = Mutex()
@@ -296,13 +293,6 @@ class SyncUtils @Inject constructor(
     }
 
     init {
-        context.dataStore.data
-            .map { it[LastFMUseSendLikes] ?: false }
-            .distinctUntilChanged()
-            .collectLatest(syncScope) {
-                lastfmSendLikes = it
-            }
-
         syncScope.launch {
             val loaded = context.dataStore.get(LastFullSyncKey, 0L)
             cachedLastSyncEpoch = maxOf(cachedLastSyncEpoch, loaded)
@@ -717,6 +707,8 @@ class SyncUtils @Inject constructor(
     }
 
     private suspend fun executeLikeSong(s: SongEntity) = withContext(Dispatchers.IO) {
+        // SARASWATI: Phase 5 Task 2 — a song on this phone is never sent to YouTube.
+        if (com.metrolist.music.saraswati.localmedia.LocalSongIds.isLocal(s.id)) return@withContext
         if (!isLoggedIn()) {
             Timber.w("Skipping likeSong - user not logged in")
             return@withContext
@@ -726,19 +718,6 @@ class SyncUtils @Inject constructor(
             YouTube.likeVideo(s.id, s.liked)
         }.onFailure { e ->
             Timber.e(e, "Failed to like song on YouTube: ${s.id}")
-        }
-
-        if (lastfmSendLikes) {
-            try {
-                val dbSong = database.song(s.id).firstOrNull()
-                LastFM.setLoveStatus(
-                    artist = dbSong?.artists?.joinToString { a -> a.name } ?: "",
-                    track = s.title,
-                    love = s.liked
-                )
-            } catch (e: Exception) {
-                Timber.e(e, "Failed to update LastFM love status")
-            }
         }
     }
 
@@ -1744,6 +1723,8 @@ class SyncUtils @Inject constructor(
             try {
                 val confirmed = mutableListOf<String>()
                 songIds.forEach { songId ->
+                    // SARASWATI: Phase 5 Task 2 — a song on this phone is never added to a YouTube playlist.
+                    if (com.metrolist.music.saraswati.localmedia.LocalSongIds.isLocal(songId)) return@forEach
                     try {
                         runQueuedPlaylistEdit {
                             YouTube.addToPlaylist(browseId, songId).getOrThrow()

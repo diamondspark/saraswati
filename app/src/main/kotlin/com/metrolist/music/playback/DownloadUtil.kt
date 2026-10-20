@@ -37,6 +37,7 @@ import com.metrolist.music.di.DownloadCache
 import com.metrolist.music.di.PlayerCache
 import com.metrolist.music.models.MediaMetadata
 import com.metrolist.music.models.toMediaMetadata
+import com.metrolist.music.saraswati.localmedia.LocalSongIds
 import com.metrolist.music.utils.InnerTubeXPlayer
 import com.metrolist.music.utils.enumPreference
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -318,11 +319,21 @@ constructor(
 
     fun getDownload(songId: String): Flow<Download?> = downloads.map { it[songId] }
 
-    fun download(song: Song) = download(song.toMediaMetadata())
+    // SARASWATI: Phase 5 Task 2 — both overloads end in download(MediaMetadata), whose local-id guard runs first;
+    // the explicit checks here keep a local song from even being converted.
+    fun download(song: Song) {
+        if (LocalSongIds.isLocal(song.id)) return
+        download(song.toMediaMetadata())
+    }
 
-    fun download(song: SongItem) = download(song.toMediaMetadata())
+    fun download(song: SongItem) {
+        if (LocalSongIds.isLocal(song.id)) return
+        download(song.toMediaMetadata())
+    }
 
     fun download(mediaMetadata: MediaMetadata) {
+        // SARASWATI: Phase 5 Task 2 — a song on this phone is already on this phone; nothing to enqueue or resolve.
+        if (LocalSongIds.isLocal(mediaMetadata.id)) return
         scope.launch {
             downloadPreparations.withPermit {
                 if (!shouldPrepareDownload(downloads.value[mediaMetadata.id]?.state)) return@withPermit
@@ -389,6 +400,8 @@ constructor(
     }
 
     fun download(songId: String) {
+        // SARASWATI: Phase 5 Task 2 — see download(MediaMetadata).
+        if (LocalSongIds.isLocal(songId)) return
         scope.launch {
             database.getSongByIdBlocking(songId)?.let { song ->
                 download(song)

@@ -33,6 +33,7 @@ import com.metrolist.music.constants.ListenTogetherServerUrlKey
 import com.metrolist.music.saraswati.family.FamilyFeature
 import com.metrolist.music.saraswati.family.FamilyFeatureGate
 import com.metrolist.music.saraswati.family.HubIdentity
+import com.metrolist.music.saraswati.localmedia.LocalSangatPolicy
 import com.metrolist.music.saraswati.family.sangat.SangatApprovalPolicy
 import com.metrolist.music.saraswati.family.sangat.SangatCarMode
 import com.metrolist.music.saraswati.family.sangat.SangatConnect
@@ -1897,6 +1898,9 @@ class ListenTogetherClient
                 log(LogLevel.ERROR, "Cannot control playback", "Not host")
                 return
             }
+            // SARASWATI: fix wave P5a I1 — the id of a song on this phone never reaches the hub, whatever started it
+            // (the car's On this phone, a player event, a drift correction). The queue is trimmed the same way.
+            val outbound = outboundPlaybackOrNull(trackId, trackInfo, queue) ?: return
             sendMessage(
                 MessageTypes.PLAYBACK_ACTION,
                 PlaybackActionPayload(
@@ -1905,7 +1909,7 @@ class ListenTogetherClient
                     position,
                     trackInfo,
                     insertNext,
-                    queue,
+                    outbound.queue,
                     queueTitle,
                     volume,
                     capturedAtServerTime =
@@ -1922,6 +1926,7 @@ class ListenTogetherClient
          */
         fun sendBufferReady(trackId: String) {
             val sanitizedTrackId = trackId.trim()
+            if (!LocalSangatPolicy.mayShare(sanitizedTrackId)) return
             if (sanitizedTrackId.isEmpty()) {
                 log(LogLevel.WARNING, "Skipping buffer ready", "Track ID is blank")
                 return
@@ -1941,6 +1946,7 @@ class ListenTogetherClient
                 log(LogLevel.WARNING, "Host should not suggest tracks")
                 return
             }
+            if (shareableTrackOrNull(trackInfo) == null) return
             sendMessage(MessageTypes.SUGGEST_TRACK, SuggestTrackPayload(trackInfo))
             scope.launch(Dispatchers.Main) {
                 Toast.makeText(context, context.getString(R.string.listen_together_suggestion_sent), Toast.LENGTH_SHORT).show()
