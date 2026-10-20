@@ -80,12 +80,16 @@ class LocalEgressTest {
     fun `getLyrics returns not-found for a local id without calling a provider`() =
         runBlocking {
             val helper = LyricsHelper(context, NetworkConnectivityObserver(context))
-            val started = System.nanoTime()
+            var probes = 0
+            helper.connectivityProbe = { probes++; false }
             val result = helper.getLyrics(metadata("local:42"))
             assertEquals(LYRICS_NOT_FOUND, result.lyrics)
             assertEquals("", result.provider)
-            // A provider lookup waits on timeouts of seconds; the guard answers at once.
-            assertTrue((System.nanoTime() - started) < 2_000_000_000L)
+            // Every provider lookup begins with the connectivity probe; the guard must answer before it.
+            assertEquals(0, probes)
+            // Control: an ordinary id does reach the probe, so zero above is the guard's doing.
+            helper.getLyrics(metadata("dQw4w9WgXcQ"))
+            assertEquals(1, probes)
         }
 
     @Test

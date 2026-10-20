@@ -72,7 +72,7 @@ data class PlaybackStatsPlan(
             historyDurationMs: Long,
             historyPaused: Boolean,
             counts: Boolean,
-            mediaId: String? = null,
+            mediaId: String,
         ): PlaybackStatsPlan {
             val longEnough = counts && totalPlayTimeMs >= historyDurationMs
             return PlaybackStatsPlan(

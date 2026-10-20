@@ -112,6 +112,35 @@ class CarLocalTreeTest {
             assertEquals(listOf("car_local/__shuffle__", "car_local/local:3", "car_local/local:1", "car_local/local:2"), children.map { it.mediaId })
         }
 
+    // SARASWATI: fix wave P5a I7 — with the Local files switch off, the folder and the Library row show nothing, driven
+    // through the real repository and the same visibleAccess the car callback uses.
+    @Test
+    fun `switch off hides the car's On this phone folder and row`() =
+        runBlocking {
+            val prefs =
+                PreferenceDataStoreFactory.create(
+                    produceFile = { File.createTempFile("car-off", ".preferences_pb", ApplicationProvider.getApplicationContext<android.app.Application>().cacheDir).also { it.delete() } },
+                )
+            val repository =
+                LocalSongsRepository(
+                    allSongs = flowOf(songs),
+                    allCount = flowOf(songs.size),
+                    access = { LocalAccess.GRANTED },
+                    reader = MediaStoreAudioReader { error("must not read") },
+                    sync = LocalLibrarySync(NoStore),
+                    dataStore = prefs,
+                )
+            repository.setEnabled(false)
+            val access = com.metrolist.music.saraswati.localmedia.LocalFiles.visibleAccess(LocalAccess.GRANTED, repository.storedSwitch.first())
+            val shown = if (access == LocalAccess.GRANTED) repository.songs.first() else emptyList()
+            assertTrue(shown.isEmpty())
+            assertTrue(repository.songs.first().isEmpty())
+            val folder = CarLocalTree.children(resources, access, shown, includeShuffle = shown.isNotEmpty())
+            assertTrue(folder.none { it.mediaId.startsWith("car_local/local:") })
+            val rows = CarLocalTree.libraryRows(resources, access, repository.count.first(), downloadedCount = 0)
+            assertFalse(rows.any { it.mediaId == com.metrolist.music.playback.MusicService.CAR_LOCAL })
+        }
+
     @Test
     fun `selecting a local song queues all local songs from it`() {
         val queue = CarLocalTree.queueFrom(songs, "local:2")!!

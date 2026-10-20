@@ -113,25 +113,25 @@ class TastePolicyTest {
     private val thirty = 30_000L
 
     @Test fun `a non-counting play writes no Event row`() {
-        val plan = PlaybackStatsPlan.of(60_000, thirty, historyPaused = false, counts = false)
+        val plan = PlaybackStatsPlan.of(60_000, thirty, historyPaused = false, counts = false, mediaId = "dQw4w9WgXcQ")
         assertFalse(plan.writeLocalEvent)
         assertFalse(plan.registerWithYouTube)
     }
 
     @Test fun `a counting play past the threshold writes the row and registers`() {
-        val plan = PlaybackStatsPlan.of(30_000, thirty, historyPaused = false, counts = true)
+        val plan = PlaybackStatsPlan.of(30_000, thirty, historyPaused = false, counts = true, mediaId = "dQw4w9WgXcQ")
         assertTrue(plan.writeLocalEvent)
         assertTrue(plan.registerWithYouTube)
     }
 
     @Test fun `a short play does nothing`() {
-        val plan = PlaybackStatsPlan.of(29_999, thirty, historyPaused = false, counts = true)
+        val plan = PlaybackStatsPlan.of(29_999, thirty, historyPaused = false, counts = true, mediaId = "dQw4w9WgXcQ")
         assertFalse(plan.writeLocalEvent)
         assertFalse(plan.registerWithYouTube)
     }
 
     @Test fun `paused history stops the local row but still registers as upstream did`() {
-        val plan = PlaybackStatsPlan.of(60_000, thirty, historyPaused = true, counts = true)
+        val plan = PlaybackStatsPlan.of(60_000, thirty, historyPaused = true, counts = true, mediaId = "dQw4w9WgXcQ")
         assertFalse(plan.writeLocalEvent)
         assertTrue(plan.registerWithYouTube)
     }

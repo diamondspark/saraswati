@@ -43,6 +43,10 @@ constructor(
                 resolveLyricsProviders(preferences)
             }.distinctUntilChanged()
 
+    // SARASWATI: fix wave P5a I7 — the first thing every provider lookup does is ask this; a test replaces it to
+    // prove a song on this phone never gets that far.
+    internal var connectivityProbe: () -> Boolean = { networkConnectivity.isCurrentlyConnected() }
+
     private val cache = LruCache<String, List<LyricsResult>>(MAX_CACHE_SIZE)
     private var currentLyricsJob: Job? = null
 
@@ -62,7 +66,7 @@ constructor(
             .first()
 
         val isNetworkAvailable = try {
-            networkConnectivity.isCurrentlyConnected()
+            connectivityProbe()
         } catch (e: Exception) {
             true
         }
