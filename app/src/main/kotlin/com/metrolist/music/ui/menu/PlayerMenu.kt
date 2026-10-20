@@ -85,6 +85,7 @@ import com.metrolist.music.R
 import com.metrolist.music.constants.ListItemHeight
 import com.metrolist.music.constants.VarispeedKey
 import com.metrolist.music.listentogether.ConnectionState
+import com.metrolist.music.ui.screens.Screens
 import com.metrolist.music.listentogether.ListenTogetherEvent
 import com.metrolist.music.models.MediaMetadata
 import com.metrolist.music.playback.ExoDownloadService
@@ -153,10 +154,6 @@ fun PlayerMenu(
         mutableStateOf(false)
     }
 
-    var showListenTogetherDialog by rememberSaveable {
-        mutableStateOf(false)
-    }
-
     val listenTogetherManager = LocalListenTogetherManager.current
     val listenTogetherRoleState = listenTogetherManager?.role?.collectAsStateWithLifecycle(initialValue = com.metrolist.music.listentogether.RoomRole.NONE)
     val isListenTogetherGuest = listenTogetherRoleState?.value == com.metrolist.music.listentogether.RoomRole.GUEST
@@ -179,12 +176,6 @@ fun PlayerMenu(
         onDismiss = {
             showChoosePlaylistDialog = false
         },
-    )
-
-    ListenTogetherDialog(
-        visible = showListenTogetherDialog,
-        mediaMetadata = mediaMetadata,
-        onDismiss = { showListenTogetherDialog = false },
     )
 
     var showSelectArtistDialog by rememberSaveable {
@@ -624,7 +615,12 @@ fun PlayerMenu(
                                         }
                                     }
                                 },
-                                onClick = { showListenTogetherDialog = true },
+                                // SARASWATI: Phase 4 Task 19 — the Sangat icon opens the Sangat section on Family.
+                                onClick = {
+                                    playerBottomSheetState.collapseSoft()
+                                    onDismiss()
+                                    navController.navigate(Screens.Family.route)
+                                },
                             ),
                         )
                         if (isListenTogetherGuest) {

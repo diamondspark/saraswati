@@ -40,6 +40,12 @@ import com.metrolist.music.saraswati.family.playlists.FamilyPlaylistsRepository
 import com.metrolist.music.saraswati.family.playlists.HubClientFamilyPlaylistsHub
 import com.metrolist.music.saraswati.family.playlists.UnconfirmedCollaborationApi
 import com.metrolist.music.saraswati.family.sangat.CarSangatController
+import com.metrolist.music.saraswati.family.sangat.DataStoreSangatNames
+import com.metrolist.music.saraswati.family.sangat.ListenTogetherSangatPort
+import com.metrolist.music.saraswati.family.sangat.SangatFeed
+import com.metrolist.music.saraswati.family.sangat.SangatNames
+import com.metrolist.music.saraswati.family.sangat.SangatRoomPort
+import com.metrolist.music.saraswati.family.sangat.WatcherSangatFeed
 import com.metrolist.music.saraswati.family.sangat.ListenTogetherCarRoom
 import com.metrolist.music.saraswati.family.sangat.SangatCarMode
 import com.metrolist.music.saraswati.family.sangat.SangatForeground
@@ -136,6 +142,24 @@ object FamilyModule {
         identity: HubIdentity,
         gate: FamilyFeatureGate,
     ): SangatLiveWatcher = SangatLiveWatcher(hub, identity, gate)
+
+    // SARASWATI: Phase 4 Task 19 — the Sangat section's ports, over the manager, the watcher and the username.
+    @Provides
+    @Singleton
+    fun provideSangatRoomPort(manager: ListenTogetherManager): SangatRoomPort = ListenTogetherSangatPort(manager)
+
+    @Provides
+    @Singleton
+    fun provideSangatFeed(
+        watcher: SangatLiveWatcher,
+        gate: FamilyFeatureGate,
+    ): SangatFeed = WatcherSangatFeed(watcher, gate)
+
+    @Provides
+    @Singleton
+    fun provideSangatNames(
+        @ApplicationContext context: Context,
+    ): SangatNames = DataStoreSangatNames(context)
 
     // SARASWATI: Phase 4 review fix (M13) — one process-wide foreground count, polling on a scope of its own.
     @Provides

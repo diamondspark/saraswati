@@ -40,6 +40,7 @@ import com.metrolist.music.LocalPlayerAwareWindowInsets
 import com.metrolist.music.R
 import com.metrolist.music.constants.IsFamilyOwnerKey
 import com.metrolist.music.ui.component.Material3SettingsGroup
+import com.metrolist.music.saraswati.family.sangat.SangatSection
 import com.metrolist.music.ui.component.Material3SettingsItem
 import com.metrolist.music.utils.rememberPreference
 
@@ -146,6 +147,12 @@ fun FamilyScreen(
                     }
                 }
             }
+        }
+
+        // SARASWATI: Phase 4 Task 19 — the Sangat section, for family phones only.
+        if (isOwner || isMember) {
+            Spacer(Modifier.height(24.dp))
+            SangatSection(navController)
         }
     }
 }

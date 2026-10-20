@@ -78,14 +78,11 @@ import com.metrolist.music.LocalPlayerAwareWindowInsets
 import com.metrolist.music.R
 import com.metrolist.music.constants.ListenTogetherAutoApprovalKey
 import com.metrolist.music.constants.ListenTogetherAutoApproveSuggestionsKey
-import com.metrolist.music.constants.ListenTogetherServerUrlKey
 import com.metrolist.music.constants.ListenTogetherSyncVolumeKey
 import com.metrolist.music.constants.ListenTogetherUsernameKey
 import com.metrolist.music.LocalListenTogetherManager
 import com.metrolist.music.listentogether.ConnectionState
 import com.metrolist.music.listentogether.ListenTogetherEvent
-import com.metrolist.music.listentogether.ListenTogetherServer
-import com.metrolist.music.listentogether.ListenTogetherServers
 import com.metrolist.music.listentogether.LogEntry
 import com.metrolist.music.listentogether.LogLevel
 import com.metrolist.music.listentogether.RoomRole
@@ -112,14 +109,11 @@ fun ListenTogetherSettings(navController: NavController) {
     val logs by manager.logs.collectAsStateWithLifecycle()
     val blockedUsernames by manager.blockedUsernames.collectAsStateWithLifecycle()
 
-    val servers = remember { ListenTogetherServers.servers }
-    var serverUrl by rememberPreference(ListenTogetherServerUrlKey, ListenTogetherServers.defaultServerUrl)
     var username by rememberPreference(ListenTogetherUsernameKey, "")
     var autoApprovalJoins by rememberPreference(ListenTogetherAutoApprovalKey, false)
     var autoApproveSuggestions by rememberPreference(ListenTogetherAutoApproveSuggestionsKey, false)
     var syncHostVolume by rememberPreference(ListenTogetherSyncVolumeKey, true)
 
-    var showServerUrlDialog by rememberSaveable { mutableStateOf(false) }
     var showUsernameDialog by rememberSaveable { mutableStateOf(false) }
     var showCreateRoomDialog by rememberSaveable { mutableStateOf(false) }
     var showJoinRoomDialog by rememberSaveable { mutableStateOf(false) }
@@ -165,22 +159,6 @@ fun ListenTogetherSettings(navController: NavController) {
     }
 
     // Dialogs
-    if (showServerUrlDialog) {
-        ServerChooserDialog(
-            servers = servers,
-            currentUrl = serverUrl,
-            onSelect = { server ->
-                serverUrl = server.url
-                showServerUrlDialog = false
-            },
-            onUseCustom = { customUrl ->
-                serverUrl = customUrl
-                showServerUrlDialog = false
-            },
-            onDismiss = { showServerUrlDialog = false },
-        )
-    }
-
     if (showUsernameDialog) {
         var tempUsername by rememberSaveable(showUsernameDialog) { mutableStateOf(username) }
 
@@ -360,8 +338,6 @@ fun ListenTogetherSettings(navController: NavController) {
         )
 
         // Settings section using IntegrationCard
-        val selectedServer = remember(serverUrl) { ListenTogetherServers.findByUrl(serverUrl) }
-
         Column(modifier = Modifier.padding(horizontal = 16.dp)) {
             IntegrationCard(
                 title = stringResource(R.string.settings),
@@ -385,20 +361,6 @@ fun ListenTogetherSettings(navController: NavController) {
                                 } else {
                                     null
                                 },
-                        ),
-                        IntegrationCardItem(
-                            icon = painterResource(R.drawable.cloud),
-                            title = { Text(stringResource(R.string.listen_together_server_url)) },
-                            description = {
-                                Text(
-                                    selectedServer?.let { server ->
-                                        "${server.name} - ${server.location}"
-                                    } ?: serverUrl,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            },
-                            onClick = { showServerUrlDialog = true },
                         ),
                         IntegrationCardItem(
                             icon = painterResource(R.drawable.person),
@@ -606,118 +568,6 @@ fun LogsDialog(
                         LogEntryItem(log)
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ServerChooserDialog(
-    servers: List<ListenTogetherServer>,
-    currentUrl: String,
-    onSelect: (ListenTogetherServer) -> Unit,
-    onUseCustom: (String) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var customUrl by rememberSaveable(currentUrl) { mutableStateOf(currentUrl) }
-    val trimmedCustomUrl = customUrl.trim()
-
-    DefaultDialog(
-        onDismiss = onDismiss,
-        icon = { Icon(painterResource(R.drawable.cloud), contentDescription = null) },
-        title = { Text(stringResource(R.string.listen_together_choose_server)) },
-        buttons = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(android.R.string.cancel))
-            }
-        },
-    ) {
-        Column(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            servers.forEach { server ->
-                val isSelected = server.url == currentUrl
-                Card(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable { onSelect(server) },
-                    shape = RoundedCornerShape(16.dp),
-                    colors =
-                        CardDefaults.cardColors(
-                            containerColor =
-                                if (isSelected) {
-                                    MaterialTheme.colorScheme.primaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.surfaceVariant
-                                },
-                        ),
-                ) {
-                    Row(
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = server.name,
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            Text(
-                                text = "${server.location} - ${server.operator}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Text(
-                                text = server.url,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        if (isSelected) {
-                            Icon(
-                                painter = painterResource(R.drawable.done),
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                    }
-                }
-            }
-
-            HorizontalDivider()
-
-            Text(
-                text = stringResource(R.string.listen_together_custom_server),
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
-            OutlinedTextField(
-                value = customUrl,
-                onValueChange = { customUrl = it },
-                label = { Text(stringResource(R.string.listen_together_server_url)) },
-                leadingIcon = {
-                    Icon(painterResource(R.drawable.link), contentDescription = null)
-                },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Button(
-                onClick = { onUseCustom(trimmedCustomUrl) },
-                enabled = trimmedCustomUrl.isNotBlank(),
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-            ) {
-                Text(stringResource(R.string.listen_together_use_custom_server))
             }
         }
     }

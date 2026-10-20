@@ -121,6 +121,10 @@ import com.metrolist.music.LocalPlayerConnection
 import com.metrolist.music.R
 import com.metrolist.music.saraswati.SaraswatiFeatures
 import com.metrolist.music.saraswati.culture.FestivalBanner
+import com.metrolist.music.saraswati.family.sangat.CarSangatPrompt
+import com.metrolist.music.saraswati.family.sangat.SangatLiveBanner
+import com.metrolist.music.saraswati.family.sangat.SangatNameDialog
+import com.metrolist.music.saraswati.family.sangat.SangatViewModel
 import com.metrolist.music.saraswati.culture.FestivalRadio
 import com.metrolist.music.saraswati.culture.FestivalSeed
 import com.metrolist.music.saraswati.culture.radioEndpointFor
@@ -671,6 +675,16 @@ fun HomeScreen(
 ) {
     val navController = LocalNavController.current
     val menuState = LocalMenuState.current
+
+    // SARASWATI: Phase 4 Task 19 — the Sangat live banner, the car prompt and the one-time name ask.
+    val sangatViewModel: SangatViewModel = hiltViewModel()
+    val sangatLive by sangatViewModel.live.collectAsStateWithLifecycle()
+    val sangatHere by sangatViewModel.currentRoomCode.collectAsStateWithLifecycle()
+    val sangatPrompt by sangatViewModel.prompt.collectAsStateWithLifecycle()
+    val sangatAskName by sangatViewModel.askName.collectAsStateWithLifecycle()
+    LaunchedEffect(sangatViewModel) {
+        sangatViewModel.enteredCarRoom.collect { navController.navigate(Screens.SangatRemote.route) }
+    }
     val bottomSheetPageState = LocalBottomSheetPageState.current
     val database = LocalDatabase.current
     val playerConnection = LocalPlayerConnection.current ?: return
@@ -1247,12 +1261,35 @@ fun HomeScreen(
                     )
                 }
 
+            sangatPrompt?.let { room ->
+                CarSangatPrompt(
+                    room = room,
+                    onJoin = { sangatViewModel.join(room) },
+                    onNotNow = { sangatViewModel.dismissPrompt(room.roomCode) },
+                )
+            }
+            if (sangatAskName) {
+                SangatNameDialog(
+                    onSubmit = sangatViewModel::submitName,
+                    onDismiss = sangatViewModel::cancelNameRequest,
+                )
+            }
+
             LazyColumn(
                 state = lazylistState,
                 contentPadding = LocalPlayerAwareWindowInsets.current.asPaddingValues(),
             ) {
-                // SARASWATI: Task 10 — banner order on Home is: Sangat live (Phase 4,
-                // not built yet), then the festival banner, then the Sudhaar banner.
+                // SARASWATI: Task 10 — banner order on Home is: Sangat live (Phase 4 Task 19),
+                // then the festival banner, then the Sudhaar banner.
+                sangatLive.firstOrNull()?.takeIf { sangatHere == null }?.let { room ->
+                    item(key = "sangat_live_banner") {
+                        SangatLiveBanner(
+                            room = room,
+                            onClick = { navController.navigate(Screens.Family.route) },
+                        )
+                    }
+                }
+
                 festival?.let { today ->
                     item(key = "festival_banner") {
                         // SARASWATI: fix wave B2 — a Listen Together guest follows the host's queue, so the
