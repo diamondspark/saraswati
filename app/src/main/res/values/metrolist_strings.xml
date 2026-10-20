@@ -1332,4 +1332,9 @@
     <string name="spotify_import_error_unsupported">This is not a Spotify export. Choose the zip or JSON file from your Spotify data.</string>
     <string name="spotify_import_error_too_large">This file is too large to import.</string>
     <string name="spotify_import_error_failed">The import stopped before it finished. Songs matched so far were kept.</string>
+    <!-- SARASWATI: Task 13 — Chatur shuffle button labels and the smart pick mark. -->
+    <string name="saraswati_chatur_off">Shuffle off</string>
+    <string name="saraswati_chatur_shuffle">Shuffle</string>
+    <string name="saraswati_chatur_smart">Smart</string>
+    <string name="saraswati_chatur_smart_pick">Smart pick</string>
 </resources>

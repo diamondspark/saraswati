@@ -323,7 +323,8 @@ class MusicService :
     lateinit var familyFeatureGate: com.metrolist.music.saraswati.family.FamilyFeatureGate
 
     // SARASWATI: Task 12 — Chatur shuffle. Reads the current player on each call, so an audio-offload swap is seen.
-    private val smartShuffle: SmartShuffleController by lazy {
+    // SARASWATI: Task 13 — public so PlayerConnection can read the mode the Chatur button shows.
+    val smartShuffle: SmartShuffleController by lazy {
         SmartShuffleController(
             player = Media3ShufflePlayer { player },
             picks = ::fetchSmartPicks,
