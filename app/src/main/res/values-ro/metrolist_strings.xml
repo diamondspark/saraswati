@@ -156,7 +156,6 @@
     <string name="integrations">Integrări</string>
     <string name="username">Nume de utilizator</string>
     <string name="password">Parolă</string>
-    <string name="lastfm_integration">Integrare Last.fm</string>
     <string name="lastfm_now_playing">Trimite statusul Se redă acum</string>
     <string name="enable_scrobbling">Activează scrobblingul</string>
     <string name="scrobbling_configuration">Configurare scrobbling</string>
@@ -873,6 +872,5 @@
     <string name="enable_zemer_desc">Versuri pentru muzica evreiască</string>
     <string name="update_available_message">Metrolist %s este gata de descărcare.</string>
     <string name="update_action">Actualizează</string>
-    <string name="discord_integration">Integrare Discord</string>
     <string name="enable_discord_rpc">Activează Rich Presence</string>
 </resources>

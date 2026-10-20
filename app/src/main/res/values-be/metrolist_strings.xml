@@ -355,7 +355,6 @@
     <string name="integrations">Інтэграцыі</string>
     <string name="username">Імя карыстальніка</string>
     <string name="password">Пароль</string>
-    <string name="lastfm_integration">Інтэграцыя з Last.fm</string>
     <string name="enable_scrobbling">Уключыць скробблінг</string>
     <string name="lastfm_now_playing">Адпраўляць статус \"Зараз іграе\"</string>
     <string name="last_fm_send_likes">Сінхранізаваць адзнакі «Падабаецца»</string>

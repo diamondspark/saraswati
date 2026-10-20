@@ -152,7 +152,6 @@
     <string name="integrations">集成</string>
     <string name="username">用户名</string>
     <string name="password">密码</string>
-    <string name="lastfm_integration">Last.fm 集成</string>
     <string name="enable_scrobbling">启用记录</string>
     <string name="lastfm_now_playing">发送“正在播放”状态</string>
     <string name="scrobbling_configuration">音乐记录配置</string>

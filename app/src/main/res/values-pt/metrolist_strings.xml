@@ -210,7 +210,6 @@
     <string name="integrations">Integrações</string>
     <string name="username">None de utilizador</string>
     <string name="password">Palavra-passe</string>
-    <string name="lastfm_integration">Integração com Last.fm</string>
     <string name="enable_scrobbling">Habilitar \"scrobbling\"</string>
     <string name="lastfm_now_playing">Enviar informação sobre a música atual</string>
     <string name="last_fm_send_likes">Sincronizar Gostos/Não Gostos</string>
@@ -709,7 +708,6 @@
     <string name="discord_error_invalid_scope">O Discord rejeitou a conexão. Por favor reconecte para recolher a permissão nessesaria.</string>
     <string name="discord_error_banner_title">Erro do Discord</string>
     <string name="discord_rpc_preview">Pré-visualização de \"Rich Presence\"</string>
-    <string name="discord_integration">Integração do Discord</string>
     <string name="enable_discord_rpc">Habilitar \"Rich Presence\"</string>
     <string name="discord_advanced_mode">Modo Avançado</string>
     <string name="discord_advanced_mode_description">Personalize todos os campos da tua \"Rich Presence\"</string>

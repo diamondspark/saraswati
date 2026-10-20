@@ -188,7 +188,6 @@
     <string name="integrations">Hopflettingar</string>
     <string name="username">Nøytarnamn</string>
     <string name="password">Passord</string>
-    <string name="lastfm_integration">Hopfletting med Last.fm</string>
     <string name="enable_scrobbling">Slå på scrobbling</string>
     <string name="lastfm_now_playing">Send «Spelar no»</string>
     <string name="last_fm_send_likes">Send likar/mislikar</string>

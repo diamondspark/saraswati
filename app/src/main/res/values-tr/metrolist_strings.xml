@@ -154,7 +154,6 @@
     <string name="integrations">Entegrasyonlar</string>
     <string name="username">Kullanıcı adı</string>
     <string name="password">Şifre</string>
-    <string name="lastfm_integration">Last.fm Entegrasyonu</string>
     <string name="enable_scrobbling">Scrobbling\'i etkinleştir</string>
     <string name="lastfm_now_playing">Şimdi Çalıyor durumunu gönder</string>
     <string name="scrobbling_configuration">Scrobble yapılandırması</string>
@@ -867,6 +866,5 @@
     <string name="enable_zemer_desc">Yahudi müzikleri için şarkı sözleri</string>
     <string name="update_available_message">Metrolist %s indirmeye hazır.</string>
     <string name="update_action">Güncelle</string>
-    <string name="discord_integration">Discord entegrasyonu</string>
     <string name="enable_discord_rpc">Rich Presence\'i etkinleştir</string>
 </resources>

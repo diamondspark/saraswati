@@ -387,7 +387,6 @@
     <string name="integrations">Integrasies</string>
     <string name="username">Gebruikersnaam</string>
     <string name="password">Wagwoord</string>
-    <string name="lastfm_integration">Last.fm-integrasie</string>
     <string name="enable_scrobbling">Aktiveer skrobbeling</string>
     <string name="lastfm_now_playing">Stuur Speel nou-status</string>
     <string name="last_fm_send_likes">Sinkroniseer Gunstelinge en Nie-gunstelinge</string>
@@ -565,7 +564,6 @@
     <string name="discord_error_invalid_scope">Discord het die verbinding verwerp. Maak asseblief weer verbinding en verleen die vereiste toestemming.</string>
     <string name="discord_error_banner_title">Discord-fout</string>
     <string name="discord_rpc_preview">Rich Presence-voorbeeld</string>
-    <string name="discord_integration">Discord-integrasie</string>
     <string name="enable_discord_rpc">Aktiveer Rich Presence</string>
     <string name="discord_advanced_mode">Gevorderde modus</string>
     <string name="discord_advanced_mode_description">Pas elke veld van jou Rich Presence aan met plekhouers</string>

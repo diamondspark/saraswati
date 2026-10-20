@@ -189,7 +189,6 @@
     <string name="speed">Velocidade de reprodución</string>
     <string name="varispeed">Activar control de velocidade</string>
     <string name="password">Contrasinal</string>
-    <string name="lastfm_integration">Integración con Last.fm</string>
     <string name="enable_scrobbling">Activar rexistro de reproducións</string>
     <string name="lastfm_now_playing">Enviar a reprodución actual</string>
     <string name="last_fm_send_likes">Sincronizar o que me gusta e non me gusta</string>

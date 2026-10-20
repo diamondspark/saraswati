@@ -162,7 +162,6 @@
     <string name="integrations">التكاملات</string>
     <string name="username">اسم المستخدم</string>
     <string name="password">كلمة المرور</string>
-    <string name="lastfm_integration">Last.fm</string>
     <string name="enable_scrobbling">تمكين سكروبلينج</string>
     <string name="lastfm_now_playing">إرسال حالة التشغيل الحالي</string>
     <string name="scrobbling_configuration">تكوين سكروبلينج</string>

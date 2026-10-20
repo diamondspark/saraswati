@@ -171,7 +171,6 @@
     <string name="integrations">Tích hợp tiện ích</string>
     <string name="username">Tên người dùng</string>
     <string name="password">Mật khẩu</string>
-    <string name="lastfm_integration">Tích hợp Last.fm</string>
     <string name="about_artist">Giới thiệu nghệ sĩ</string>
     <string name="show_more">Hiển thị thêm</string>
     <string name="show_less">Hiện ít hơn</string>
@@ -861,7 +860,6 @@
     <string name="enable_zemer_desc">Lời bài hát cho âm nhạc Do Thái</string>
     <string name="update_available_message">Metrolist %s đã sẵn sàng để tải xuống.</string>
     <string name="update_action">Cập nhật</string>
-    <string name="discord_integration">Tích hợp Discord</string>
     <string name="enable_discord_rpc">Kích hoạt Rich Presence</string>
     <string name="force_bottom_navbar">Buộc thanh điều hướng phía dưới</string>
 </resources>

@@ -172,7 +172,6 @@
     <string name="integrations">Integracions</string>
     <string name="username">Nom d\'usuari</string>
     <string name="password">Contrasenya</string>
-    <string name="lastfm_integration">Integració amb Last.fm</string>
     <string name="enable_scrobbling">Habilitar scrobbling</string>
     <string name="lastfm_now_playing">Enviar Reproducció Actual</string>
     <string name="last_fm_send_likes">Enviar Agrada/No m\'agrada</string>

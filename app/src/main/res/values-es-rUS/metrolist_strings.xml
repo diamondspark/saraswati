@@ -175,7 +175,6 @@
     <string name="integrations">Integraciones</string>
     <string name="username">Nombre de usuario</string>
     <string name="password">Contraseña</string>
-    <string name="lastfm_integration">Sincronización con Last.fm</string>
     <string name="enable_scrobbling">Habilitar scrobbling</string>
     <string name="lastfm_now_playing">Enviar estado de \'Reproduciendo ahora</string>
     <string name="last_fm_send_likes">Sincronizar Me gusta/No me gusta</string>

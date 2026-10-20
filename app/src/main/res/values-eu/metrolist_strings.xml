@@ -349,7 +349,6 @@
     <string name="integrations">Integrazioak</string>
     <string name="username">Erabiltzailea</string>
     <string name="password">Pasahitza</string>
-    <string name="lastfm_integration">Last.fm</string>
     <string name="enable_scrobbling">Scrobbling-a gaitu</string>
     <string name="lastfm_now_playing">Bidali Orain Entzuten estatusa</string>
     <string name="last_fm_send_likes">Gustokoak eta Ez Gustokoak sinkronizatu</string>

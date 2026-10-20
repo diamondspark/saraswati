@@ -154,7 +154,6 @@
     <string name="integrations">Ενσωματώσεις</string>
     <string name="username">Όνομα χρήστη</string>
     <string name="password">Κωδικός πρόσβασης</string>
-    <string name="lastfm_integration">Ενσωμάτωση Last.fm</string>
     <string name="enable_scrobbling">Ενεργοποίηση scrobbling</string>
     <string name="lastfm_now_playing">Αποστολή Τρέχοντος τραγουδιού</string>
     <string name="scrobbling_configuration">Ρύθμιση Scrobbling</string>

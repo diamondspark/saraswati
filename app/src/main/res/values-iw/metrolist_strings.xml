@@ -301,7 +301,6 @@
     <string name="integrations">אינטגרציות</string>
     <string name="username">שם משתמש</string>
     <string name="password">סיסמה</string>
-    <string name="lastfm_integration">שילוב Last.fm</string>
     <string name="lastfm_now_playing">שלח \"מתנגן עכשיו\"</string>
     <string name="last_fm_send_likes">שלח לייקים/סילוק לייקים</string>
     <string name="last_fm_send_likes_description">שירי אהבתי/לא אהבתי ב-Last.fm כשהם מקבלים לייק/לא לייק ב-Metrolist</string>

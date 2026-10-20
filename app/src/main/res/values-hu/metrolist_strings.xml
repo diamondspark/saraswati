@@ -173,7 +173,6 @@
     <string name="integrations">Integrációk</string>
     <string name="username">Felhasználónév</string>
     <string name="password">Jelszó</string>
-    <string name="lastfm_integration">Last.fm integráció</string>
     <string name="enable_scrobbling">Scrobbling engedélyezése</string>
     <string name="lastfm_now_playing">Jelenleg játszott státusz megosztása</string>
     <string name="last_fm_send_likes">Kedveltek és nem kedveltek szinkronizálása</string>
