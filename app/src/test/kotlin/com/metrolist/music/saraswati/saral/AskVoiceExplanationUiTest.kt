@@ -108,7 +108,9 @@ class AskVoiceExplanationUiTest {
     fun `tapping elsewhere on the card does not dismiss the explanation`() {
         val callbacks = renderRealExplanation()
 
-        compose.onNodeWithTag(ASK_VOICE_EXPLANATION_CARD_TAG).performTouchInput { click(Offset(4f, 4f)) }
+        // SARASWATI: third-round audit fix 3 — pointerInput (unlike the clickable it replaced) adds no merge
+        // boundary of its own, so the card's tag is only addressable in the unmerged tree now.
+        compose.onNodeWithTag(ASK_VOICE_EXPLANATION_CARD_TAG, useUnmergedTree = true).performTouchInput { click(Offset(4f, 4f)) }
 
         assertFalse(callbacks.declined)
         assertFalse(callbacks.continued)

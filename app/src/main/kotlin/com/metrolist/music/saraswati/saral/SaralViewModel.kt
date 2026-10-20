@@ -415,10 +415,15 @@ class SaralViewModel
         /** The person tapped the overlay. It only counts once the recogniser has answered and the search is running. */
         fun onOverlayDismissed() {
             if (_askExplanation.value) {
-                _askExplanation.value = false
+                val pending = pendingAsk
                 pendingAsk = null
+                _askExplanation.value = false
                 voiceJob?.cancel()
-                _voice.value = VoicePhase.IDLE
+                // SARASWATI: security-ask-explanation (third-round audit fix 5, owner's product ruling) —
+                // declining the explanation means "skip the hub for this", not "drop what I said": search the
+                // spoken words the way voice search always did before Ask Saraswati existed, rather than
+                // silently discarding them.
+                if (pending != null) searchFor(pending.guesses) else _voice.value = VoicePhase.IDLE
                 return
             }
             if (_voice.value != VoicePhase.SEARCHING) return
@@ -513,11 +518,19 @@ class SaralViewModel
             _voice.value = VoicePhase.SEARCHING
             voiceJob =
                 viewModelScope.launch {
+                    // SARASWATI: security-ask-explanation (third-round audit fix 1) — the explanation's claim
+                    // ("sends the words to a computer helper") must be true when it is shown: Ask Saraswati off,
+                    // or no session, means resolve() below will not reach the hub either (AskRepository.ask
+                    // fails the same check), so there is nothing to explain or to decline out of yet.
+                    if (!asker.willReachHub()) {
+                        runAsk(asker, spoken, guesses)
+                        return@launch
+                    }
                     val gate = explanationGate
                     // SARASWATI: security-ask-explanation (review fix 3) — once seen is true, never ask the
                     // gate again for the rest of this ViewModel's life; a DataStore read on every voice search
                     // would be wasted work once the answer can never change back to false.
-                    val seen = explanationSeenCache || gate == null || gate.hasSeen()
+                    val seen = explanationSeenCache || gate == null || gate.hasSeenSafely()
                     if (!seen) {
                         coroutineContext.ensureActive()
                         pendingAsk = PendingAsk(spoken, guesses)
@@ -528,6 +541,19 @@ class SaralViewModel
                     runAsk(asker, spoken, guesses)
                 }
         }
+
+        // SARASWATI: security-ask-explanation (third-round audit fix 6) — a DataStore read failing here must
+        // default to "not seen" (the safer side: showing the explanation an extra time, not skipping a
+        // disclosure it owes), the same defensive shape markSeen() already uses in onAskExplanationAcknowledged.
+        private suspend fun AskVoiceExplanationGate.hasSeenSafely(): Boolean =
+            try {
+                hasSeen()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Timber.tag("Saral").w(e, "failed to read whether the ask-voice explanation has been seen")
+                false
+            }
 
         /** The person tapped Continue on the one-time ask-voice explanation: mark it seen and route as originally asked. */
         fun onAskExplanationAcknowledged() {

@@ -54,6 +54,10 @@ class SaralAsk(
         }
     }
 
+    // SARASWATI: security-ask-explanation (third-round audit fix 1) — SaralViewModel's one-time explanation
+    // must show only when [resolve] would actually reach the hub, not just because this object exists.
+    suspend fun willReachHub(): Boolean = repo.willReachHub()
+
     /** The mix Saral plays for [SaralAction.ParivaarMix]: empty while the feature is off or nothing is cached. */
     suspend fun cachedMixTracks(): List<MixTrack> {
         // SARASWATI: Phase 6 fix (C-M2) — a slow read of the stored mix falls back to a search inside the 3 s budget.

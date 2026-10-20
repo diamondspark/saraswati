@@ -21,6 +21,7 @@ import com.metrolist.music.saraswati.ask.askMixStore
 import com.metrolist.music.saraswati.family.FakeHub
 import com.metrolist.music.saraswati.family.FakeStationsCache
 import com.metrolist.music.saraswati.family.FakeStore
+import com.metrolist.music.saraswati.family.FamilyFeature
 import com.metrolist.music.saraswati.family.FamilyFeatureGate
 import com.metrolist.music.saraswati.family.FamilySession
 import com.metrolist.music.saraswati.family.Station
@@ -48,6 +49,7 @@ import java.time.ZoneOffset
 class FakeAskVoiceExplanationGate(
     seen: Boolean = false,
     private val failMarkSeen: Boolean = false,
+    private val failHasSeen: Boolean = false,
 ) : AskVoiceExplanationGate {
     @Volatile var seen: Boolean = seen
         private set
@@ -58,6 +60,7 @@ class FakeAskVoiceExplanationGate(
 
     override suspend fun hasSeen(): Boolean {
         hasSeenCalls++
+        if (failHasSeen) throw RuntimeException("DataStore read failed")
         return seen
     }
 
@@ -102,8 +105,12 @@ class SaralAskVoiceExplanationTest {
         scope.cancel()
     }
 
-    private fun newVm(explanationGate: AskVoiceExplanationGate?): SaralViewModel {
-        val repo = AskRepository(askHub, FixedIdentity(), gate, Clock.fixed(Instant.parse("2026-10-19T10:00:00Z"), ZoneOffset.UTC))
+    private fun newVm(
+        explanationGate: AskVoiceExplanationGate?,
+        repoSessionToken: String? = "sess",
+    ): SaralViewModel {
+        val repo =
+            AskRepository(askHub, FixedIdentity(repoSessionToken), gate, Clock.fixed(Instant.parse("2026-10-19T10:00:00Z"), ZoneOffset.UTC))
         val ask = SaralAsk(repo, cache, mixStore, gate)
         return SaralViewModel(
             cache,
@@ -170,8 +177,11 @@ class SaralAskVoiceExplanationTest {
         assertEquals(listOf("radio(seedBhajan01)"), playback.calls.toList())
     }
 
+    // SARASWATI: security-ask-explanation (third-round audit fix 5, owner's product ruling) — declining used
+    // to drop the pending ask with nothing happening. The owner ruled that should behave like voice search did
+    // before Ask Saraswati existed: search the words normally, skip the hub.
     @Test
-    fun `dismissing the overlay while the explanation is showing drops the pending ask`() {
+    fun `declining the explanation falls back to a plain search, not dropping the request`() {
         answer(AskIntent.PlayStation(bhajan.id))
         val explanationGate = FakeAskVoiceExplanationGate(seen = false)
         val vm = newVm(explanationGate)
@@ -182,11 +192,14 @@ class SaralAskVoiceExplanationTest {
         vm.onOverlayDismissed()
 
         assertFalse(vm.askExplanation.value)
-        assertEquals(emptyList<String>(), playback.calls.toList())
+        assertEquals("the hub's PlayStation reply must not be acted on", emptyList<String>(), playback.calls.toList())
+        assertEquals(listOf("bhajan lagao"), search.queries.toList())
+        assertTrue("declining must never call the hub itself", askHub.calls.isEmpty())
         assertFalse(explanationGate.seen)
 
-        // Acknowledging now (e.g. a stray late callback) must do nothing: the pending ask was dropped.
+        // Acknowledging now (e.g. a stray late callback) must do nothing: the pending ask was already resolved.
         vm.onAskExplanationAcknowledged()
+        assertEquals(listOf("bhajan lagao"), search.queries.toList())
         assertEquals(emptyList<String>(), playback.calls.toList())
     }
 
@@ -224,5 +237,53 @@ class SaralAskVoiceExplanationTest {
         vm.heard("bhajan lagao")
 
         assertEquals("a gate already known to be seen is not read again", 1, explanationGate.hasSeenCalls)
+    }
+
+    // SARASWATI: security-ask-explanation (third-round audit fix 1) — the explanation's claim ("sends the
+    // words to a computer helper") must be true when shown: Ask Saraswati off, or no session, means
+    // AskRepository.ask would never reach the hub either, so there is nothing to explain or decline out of.
+    @Test
+    fun `the explanation does not show, and the ask falls back to a search, when Ask Saraswati is switched off`() {
+        answer(AskIntent.PlayStation(bhajan.id))
+        hub.killSwitches = hub.killSwitches + (FamilyFeature.ASK_SARASWATI.key to false)
+        runBlocking { gate.refresh() }
+        val explanationGate = FakeAskVoiceExplanationGate(seen = false)
+        val vm = newVm(explanationGate)
+
+        vm.heard("bhajan lagao")
+
+        assertFalse("nothing to explain when the hub will not be reached", vm.askExplanation.value)
+        assertEquals(0, explanationGate.hasSeenCalls)
+        assertEquals(listOf("bhajan lagao"), search.queries.toList())
+        assertTrue("the hub itself must never be asked", askHub.calls.isEmpty())
+    }
+
+    @Test
+    fun `the explanation does not show, and the ask falls back to a search, when there is no session`() {
+        answer(AskIntent.PlayStation(bhajan.id))
+        val explanationGate = FakeAskVoiceExplanationGate(seen = false)
+        val vm = newVm(explanationGate, repoSessionToken = null)
+
+        vm.heard("bhajan lagao")
+
+        assertFalse(vm.askExplanation.value)
+        assertEquals(0, explanationGate.hasSeenCalls)
+        assertEquals(listOf("bhajan lagao"), search.queries.toList())
+        assertTrue(askHub.calls.isEmpty())
+    }
+
+    // SARASWATI: security-ask-explanation (third-round audit fix 6) — a failed read must default to the safer
+    // side (show the explanation) rather than crash or silently skip a disclosure it owes, the same way a
+    // failed markSeen() write already does not block the ask.
+    @Test
+    fun `a hasSeen read failure falls back to showing the explanation, not crashing`() {
+        answer(AskIntent.PlayStation(bhajan.id))
+        val explanationGate = FakeAskVoiceExplanationGate(seen = false, failHasSeen = true)
+        val vm = newVm(explanationGate)
+
+        vm.heard("bhajan lagao")
+
+        assertTrue("a failed read must fall back to showing the explanation", vm.askExplanation.value)
+        assertEquals(emptyList<String>(), playback.calls.toList())
     }
 }

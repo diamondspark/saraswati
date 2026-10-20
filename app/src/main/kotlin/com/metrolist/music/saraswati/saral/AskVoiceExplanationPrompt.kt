@@ -31,11 +31,25 @@
 // (real color/clickable/placeholder-guard logic, the exact classes of bug that shipped) without needing
 // Robolectric's unit tests to load real Android resources, which this module's test setup does not do (and
 // enabling it broke ~28 unrelated tests when tried — out of this change's scope to fix).
+//
+// Fix (third-round audit 2) — the Okay/Not now row used to be the last item inside the same scrolling Column
+// as the body text. On a small phone with a large system font plus the incoming Hindi paragraph, that content
+// can run well past the visible height, pushing the buttons out of view with nothing to say there is more
+// below — the scrim (which declines) becomes the only tap target a person can actually see. The text is now
+// the only part that scrolls (weight(1f, fill = false)); the button row sits in a fixed footer below it, so
+// it is always on screen regardless of how long the text gets.
+//
+// Fix (third-round audit 3, accessibility) — the card's own tap-absorbing modifier is pointerInput +
+// detectTapGestures, not clickable: clickable always adds a semantics OnClick action and merges descendants
+// into one TalkBack node ("double-tap to activate"), even with indication = null and an empty lambda — which
+// just moved the old "whole card is one dead tap target" bug instead of fixing it. pointerInput consumes the
+// tap without adding any semantics.
 package com.metrolist.music.saraswati.saral
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -59,6 +73,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -91,6 +106,11 @@ private val ExplanationFontFamily =
 private val ExplanationBodyStyle = TextStyle(fontFamily = ExplanationFontFamily, fontSize = 19.sp, lineHeight = 26.sp)
 private val ExplanationBodyHiStyle =
     TextStyle(fontFamily = ExplanationFontFamily, fontWeight = FontWeight.SemiBold, fontSize = 21.sp, lineHeight = 28.sp)
+
+// SARASWATI: third-round audit fix 4 — Okay/Not now rendered at Material3's default ~14sp, out of step with
+// the rest of this screen's larger-text convention; matches ExplanationBodyStyle's family at a size that
+// still reads as a button, not a paragraph.
+private val ExplanationButtonStyle = TextStyle(fontFamily = ExplanationFontFamily, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
 
 // Mirrors SaralScreen.kt's private Surface2/Border constants (same reason the colours above are duplicated,
 // not imported): a visible edge is the point of this fix, so the card reads as its own tappable area, not
@@ -178,58 +198,63 @@ internal fun AskVoiceExplanationCard(
             Modifier
                 .testTag(ASK_VOICE_EXPLANATION_CARD_TAG)
                 .widthIn(max = 420.dp)
-                // Fix (second-round audit, critical) — a no-op click: its only job is to consume the tap here
-                // so it never reaches AskVoiceExplanationScrim's own clickable behind it. Reading the body text,
-                // or tapping anywhere else on the card, must never count as declining.
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = {},
-                ),
+                // Fix (second-round audit, critical; third-round audit fix 3) — consumes the tap here so it
+                // never reaches AskVoiceExplanationScrim's own clickable behind it: reading the body text, or
+                // tapping anywhere else on the card, must never count as declining. pointerInput + detectTapGestures
+                // on purpose, not clickable: clickable always adds a semantics click action and merges this
+                // whole card into one TalkBack node, even with indication = null and an empty onClick — moving
+                // the "whole card is one dead tap target" bug rather than fixing it.
+                .pointerInput(Unit) { detectTapGestures {} },
         shape = RoundedCornerShape(16.dp),
         color = CardSurfaceColor,
         border = BorderStroke(1.dp, CardBorderColor),
     ) {
-        Column(
-            modifier =
-                Modifier
-                    .verticalScroll(rememberScrollState())
-                    .padding(20.dp),
-        ) {
-            Text(
-                text = body,
-                style = ExplanationBodyStyle,
-                color = textColor,
-                modifier = Modifier.testTag(ASK_VOICE_EXPLANATION_BODY_TAG),
-            )
-            // Fix (second-round audit 5, release safety net) — never render the Hindi placeholder this branch
-            // ships with: a grandparent must never see "TODO: Hindi translation needed…" on screen, whatever
-            // the string resource's current value is. The English line above still explains everything on its
-            // own until the owner supplies the real copy.
-            if (!isAskVoiceExplanationPlaceholder(bodyHi)) {
+        Column {
+            // Fix (third-round audit 2) — only the text scrolls (weight + fill = false means it takes no more
+            // than the space left over for it, but never forces the footer below off screen); the button row
+            // is a separate, fixed-position child of this outer Column, so Okay/Not now are always visible.
+            Column(
+                modifier =
+                    Modifier
+                        .weight(weight = 1f, fill = false)
+                        .verticalScroll(rememberScrollState())
+                        .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 12.dp),
+            ) {
                 Text(
-                    text = bodyHi,
-                    style = ExplanationBodyHiStyle,
+                    text = body,
+                    style = ExplanationBodyStyle,
                     color = textColor,
-                    modifier = Modifier.padding(top = 12.dp).testTag(ASK_VOICE_EXPLANATION_BODY_HI_TAG),
+                    modifier = Modifier.testTag(ASK_VOICE_EXPLANATION_BODY_TAG),
                 )
+                // Fix (second-round audit 5, release safety net) — never render the Hindi placeholder this
+                // branch ships with: a grandparent must never see "TODO: Hindi translation needed…" on screen,
+                // whatever the string resource's current value is. The English line above still explains
+                // everything on its own until the owner supplies the real copy.
+                if (!isAskVoiceExplanationPlaceholder(bodyHi)) {
+                    Text(
+                        text = bodyHi,
+                        style = ExplanationBodyHiStyle,
+                        color = textColor,
+                        modifier = Modifier.padding(top = 12.dp).testTag(ASK_VOICE_EXPLANATION_BODY_HI_TAG),
+                    )
+                }
             }
             Row(
-                modifier = Modifier.padding(top = 20.dp).fillMaxWidth(),
+                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 20.dp).fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
             ) {
                 TextButton(
                     onClick = onDecline,
                     modifier = Modifier.testTag(ASK_VOICE_EXPLANATION_DECLINE_TAG),
                 ) {
-                    Text(text = declineLabel)
+                    Text(text = declineLabel, style = ExplanationButtonStyle)
                 }
                 Spacer(Modifier.width(8.dp))
                 Button(
                     onClick = onContinue,
                     modifier = Modifier.testTag(ASK_VOICE_EXPLANATION_CONTINUE_TAG),
                 ) {
-                    Text(text = continueLabel)
+                    Text(text = continueLabel, style = ExplanationButtonStyle)
                 }
             }
         }
