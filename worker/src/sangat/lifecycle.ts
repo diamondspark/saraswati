@@ -116,7 +116,7 @@ export function sweepRoom(rt: Runtime, code: string, now: number): Out[] {
   return outs;
 }
 
-export const handleReconnect: Handler = (rt, conn, payload) => {
+export const handleReconnect: Handler = (rt, conn, payload, pre) => {
   const { store } = rt;
   const me = conn.att.userId;
   const p = decode(ReconnectPayloadSchema, payload);
@@ -129,8 +129,10 @@ export const handleReconnect: Handler = (rt, conn, payload) => {
     return [fail(me, "already_pending", "Cancel the pending join request before reconnecting")];
   }
 
-  // A token only works from the device it was issued to.
-  const member = store.memberByToken(p.sessionToken);
+  // Sangat.prepareHash hashed the presented token before the transaction
+  // started; hashing awaits, and the transaction cannot. A token only works
+  // from the device it was issued to.
+  const member = pre.presentedTokenHash ? store.memberByTokenHash(pre.presentedTokenHash) : null;
   if (!member || member.deviceId !== conn.att.deviceId) {
     return [fail(me, "session_not_found", "Session not found or expired")];
   }

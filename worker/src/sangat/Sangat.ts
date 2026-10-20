@@ -13,12 +13,22 @@
 // keeps room changes from interleaving, and means only one decode is in flight
 // against the 128 MB limit. A handler itself is synchronous: it reads and
 // writes storage inside one transaction and returns the messages to send.
+//
+// A few handlers need the SHA-256 of a session token (create_room and
+// approve_join mint one, reconnect is handed one), and hashing awaits, so
+// prepareHash computes it in the same promise chain, right after decode and
+// before the socket's attachment is read. Reading it only once, after every
+// await this method makes, means the handler always sees the freshest copy
+// and a later write-back of it can never clobber rate-limit bookkeeping
+// (lastSeen, rateCount, ...) that a message on the same socket recorded while
+// decode or the hash was in flight; it is also how a device revoked while
+// either was computing is caught before the handler runs.
 
 import { create, toBinary } from "@bufbuild/protobuf";
-import { EnvelopeSchema, ErrorPayloadSchema } from "../gen/listentogether_pb";
+import { EnvelopeSchema, ErrorPayloadSchema, ReconnectPayloadSchema } from "../gen/listentogether_pb";
 import { CodecError, decodeEnvelope, encodeEnvelope } from "./codec";
 import { handleClientCapabilities, handlePing } from "./connection";
-import { newUserId } from "./ids";
+import { newSessionToken, newUserId } from "./ids";
 import { disconnectOrphans, disconnectUser, dueRooms, handleReconnect, sweepRoom } from "./lifecycle";
 import {
   ALARM_RETRY_MS,
@@ -36,7 +46,7 @@ import {
 } from "./limits";
 import { floodedTooLong, idleDeadline, recordMessage } from "./liveness";
 import { handleBufferReady, handlePlaybackAction, handleRequestSync } from "./playback";
-import { fail, hostIsConnected, message, removeFromRoom } from "./roomOps";
+import { decode, fail, hostIsConnected, message, removeFromRoom } from "./roomOps";
 import {
   handleApproveJoin,
   handleCreateRoom,
@@ -48,7 +58,8 @@ import {
 } from "./rooms";
 import { Store, type Room } from "./store";
 import { handleApproveSuggestion, handleRejectSuggestion, handleSuggestTrack } from "./suggestions";
-import type { Attachment, Conn, Handler, Out, Runtime } from "./types";
+import type { Attachment, Conn, Handler, Out, PreHashed, Runtime } from "./types";
+import { sha256Hex } from "../secrets";
 
 export type LiveRoom = {
   roomCode: string;
@@ -429,9 +440,18 @@ export class Sangat {
     }
 
     const decoded = await this.decode(bytes);
-    // The decode may have waited a while, and the server may have closed this
-    // socket meanwhile (revoked device, takeover, switched off): then the message
-    // is dead and must not act as the member it came from.
+    // A few message types need the SHA-256 of a session token, and hashing
+    // awaits; for the rest this resolves with {} and no further wait. Done
+    // before the attachment below is read, not after, so that read is always
+    // the freshest one: a write-back of a stale copy at the end of this
+    // method would otherwise clobber rate-limit bookkeeping (lastSeen,
+    // rateCount, ...) that a message on the same socket records while this
+    // await is in flight.
+    const pre = "error" in decoded ? {} : await this.prepareHash(decoded.type, decoded.payload);
+    // The decode (and, for a few message types, the hash) may have waited a
+    // while, and the server may have closed this socket meanwhile (revoked
+    // device, takeover, switched off): then the message is dead and must not
+    // act as the member it came from.
     const attachment = this.attachmentOf(ws);
     if (!attachment) {
       safeClose(ws, CLOSE_INTERNAL_ERROR, "no session");
@@ -454,7 +474,7 @@ export class Sangat {
         outs = [fail(me, "unknown_message_type", `Unknown message type: ${decoded.type}`)];
       } else {
         try {
-          outs = this.store.transaction(() => handler(this.runtime, conn, decoded.payload));
+          outs = this.store.transaction(() => handler(this.runtime, conn, decoded.payload, pre));
           committed = true;
         } catch (error) {
           console.error("sangat: handler failed", decoded.type, errorName(error));
@@ -470,6 +490,25 @@ export class Sangat {
     if (conn.dirty) ws.serializeAttachment(conn.att);
     await this.flush(outs);
     await this.scheduleAlarm();
+  }
+
+  /**
+   * The SHA-256 a handler needs but cannot compute itself (hashing awaits, and
+   * the handler's transaction cannot): a freshly minted token's hash for
+   * create_room and approve_join, or the hash of the token a reconnect
+   * presented. Empty for every other message type.
+   */
+  private async prepareHash(type: string, payload: Uint8Array): Promise<PreHashed> {
+    if (type === "create_room" || type === "approve_join") {
+      const token = newSessionToken();
+      return { newToken: { token, hash: await sha256Hex(token) } };
+    }
+    if (type === "reconnect") {
+      const p = decode(ReconnectPayloadSchema, payload);
+      if (!p || p.sessionToken === "") return {};
+      return { presentedTokenHash: await sha256Hex(p.sessionToken) };
+    }
+    return {};
   }
 
   private async decode(
