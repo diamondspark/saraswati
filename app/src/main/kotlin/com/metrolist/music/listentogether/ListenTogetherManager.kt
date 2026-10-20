@@ -18,6 +18,7 @@ import com.metrolist.music.constants.ListenTogetherUsernameKey
 import com.metrolist.music.extensions.currentMetadata
 import com.metrolist.music.extensions.metadata
 import com.metrolist.music.extensions.toMediaItem
+import com.metrolist.music.saraswati.localmedia.LocalSangatPolicy
 import com.metrolist.music.models.MediaMetadata
 import com.metrolist.music.models.MediaMetadata.Album
 import com.metrolist.music.models.MediaMetadata.Artist
@@ -75,6 +76,26 @@ internal fun <T> upcomingQueueItems(
     queue: List<T>,
     currentIndex: Int,
 ): List<T> = if (currentIndex in queue.indices) queue.drop(currentIndex + 1) else emptyList()
+
+// SARASWATI: Phase 5 Task 4 — the only place a track becomes a TrackInfo for the room. A song on this phone gives
+// null: its title would reach the hub and the other phones could not play it.
+internal fun trackInfoOrNull(
+    metadata: MediaMetadata,
+    artist: String,
+): TrackInfo? {
+    if (!LocalSangatPolicy.mayShare(metadata.id)) return null
+    // Use a default duration of 3 minutes if duration is 0 or negative
+    val durationMs = if (metadata.duration > 0) metadata.duration.toLong() * 1000 else 180000L
+    return TrackInfo(
+        id = metadata.id,
+        title = metadata.title,
+        artist = artist,
+        album = metadata.album?.title,
+        duration = durationMs,
+        thumbnail = metadata.thumbnailUrl,
+        suggestedBy = metadata.suggestedBy,
+    )
+}
 
 private const val ACTIVE_PLAYBACK_SYNC_TOLERANCE_MS = 2_000L
 
@@ -1989,28 +2010,19 @@ class ListenTogetherManager
         private fun sendTrackChangeInternal(metadata: MediaMetadata) {
             if (!isHost) return
 
-            // Use a default duration of 3 minutes if duration is 0 or negative
-            val durationMs = if (metadata.duration > 0) metadata.duration.toLong() * 1000 else 180000L
+            // SARASWATI: Phase 5 Task 4 — a song on this phone is never sent to the room.
+            val trackInfo =
+                trackInfoOrNull(metadata, metadata.artists.joinToArtistString(getArtistSeparator(context)) { it.name })
+                    ?: return
 
-             val trackInfo =
-                 TrackInfo(
-                     id = metadata.id,
-                     title = metadata.title,
-                     artist = metadata.artists.joinToArtistString(getArtistSeparator(context)) { it.name },
-                    album = metadata.album?.title,
-                    duration = durationMs,
-                    thumbnail = metadata.thumbnailUrl,
-                    suggestedBy = metadata.suggestedBy,
-                )
-
-            Timber.tag(TAG).d("Sending track change: ${trackInfo.title}, duration: $durationMs")
+            Timber.tag(TAG).d("Sending track change: ${trackInfo.title}, duration: ${trackInfo.duration}")
 
             // Also grab current queue to send along with track change
             val currentQueue =
                 try {
                     playerConnection?.let { connection ->
                         upcomingQueueItems(connection.queueWindows.value, connection.currentWindowIndex.value)
-                            .map { it.toTrackInfo() }
+                            .mapNotNull { it.toTrackInfo() }
                     }
                 } catch (e: Exception) {
                     Timber.tag(TAG).e(e, "Failed to get current queue")
@@ -2041,7 +2053,7 @@ class ListenTogetherManager
                     playerConnection
                         ?.let { connection ->
                             combine(connection.queueWindows, connection.currentWindowIndex) { windows, currentIndex ->
-                                upcomingQueueItems(windows, currentIndex).map { it.toTrackInfo() }
+                                upcomingQueueItems(windows, currentIndex).mapNotNull { it.toTrackInfo() }
                             }
                         }?.distinctUntilChanged()
                         ?.collectLatest { tracks ->
@@ -2094,18 +2106,10 @@ class ListenTogetherManager
             lastSyncedVolume = null
         }
 
-        private fun androidx.media3.common.Timeline.Window.toTrackInfo(): TrackInfo {
+        // SARASWATI: Phase 5 Task 4 — null for a song on this phone, which never goes to the room.
+        private fun androidx.media3.common.Timeline.Window.toTrackInfo(): TrackInfo? {
             val metadata = mediaItem.metadata ?: return TrackInfo("unknown", "Unknown", "Unknown", "", 0, "")
-            val durationMs = if (metadata.duration > 0) metadata.duration.toLong() * 1000 else 180000L
-            return TrackInfo(
-                id = metadata.id,
-                title = metadata.title,
-                artist = metadata.artists.joinToArtistString(getArtistSeparator(context)) { it.name },
-                album = metadata.album?.title,
-                duration = durationMs,
-                thumbnail = metadata.thumbnailUrl,
-                suggestedBy = metadata.suggestedBy,
-            )
+            return trackInfoOrNull(metadata, metadata.artists.joinToArtistString(getArtistSeparator(context)) { it.name })
         }
 
         private fun stopQueueSyncObservation() {
@@ -2147,7 +2151,11 @@ class ListenTogetherManager
         /**
          * Suggest the given track to the host (guest only)
          */
-        fun suggestTrack(track: TrackInfo) = client.suggestTrack(track)
+        // SARASWATI: Phase 5 Task 4 — a song on this phone cannot be suggested to a room.
+        fun suggestTrack(track: TrackInfo) {
+            if (!LocalSangatPolicy.mayShare(track.id)) return
+            client.suggestTrack(track)
+        }
 
         /**
          * Approve a suggestion (host only)

@@ -29,6 +29,9 @@ import com.metrolist.music.constants.ListenTogetherUsernameKey
 import com.metrolist.music.saraswati.castrelay.CacheRelayAudioSource
 import com.metrolist.music.saraswati.castrelay.CastRelayController
 import com.metrolist.music.saraswati.castrelay.WifiAddress
+import com.metrolist.music.saraswati.localmedia.LocalAwareExtractorsFactory
+import com.metrolist.music.saraswati.localmedia.LocalRoutingDataSource
+import com.metrolist.music.saraswati.localmedia.LocalSangatPolicy
 import com.metrolist.music.saraswati.localmedia.LocalSongIds
 import com.metrolist.music.saraswati.family.FamilyFeature
 import com.metrolist.music.saraswati.family.PlaybackStatsPlan
@@ -1862,6 +1865,12 @@ class MusicService :
             return
         }
 
+        // SARASWATI: Phase 5 Task 4 — a song on this phone that would start the queue cannot join a Sangat.
+        if (listenTogetherManager.isInRoom && queue.preloadItem?.let { LocalSangatPolicy.mayShare(it.id) } == false) {
+            Toast.makeText(this, R.string.local_songs_cant_join_sangat, Toast.LENGTH_SHORT).show()
+            return
+        }
+
         currentQueue = queue
         queueTitle = null
         val persistShuffleAcrossQueues = dataStore.get(PersistentShuffleAcrossQueuesKey, false)
@@ -1875,13 +1884,22 @@ class MusicService :
             player.playWhenReady = playWhenReady
         }
         scope.launch(SilentHandler) {
-            val initialStatus =
+            val unfiltered =
                 withContext(Dispatchers.IO) {
                     queue
                         .getInitialStatus()
                         .filterExplicit(dataStore.get(HideExplicitKey, false))
                         .filterVideoSongs(dataStore.get(HideVideoSongsKey, false))
                 }
+            // SARASWATI: Phase 5 Task 4 — songs on this phone never join a Sangat: dropped here, once, with a toast.
+            val inRoom = listenTogetherManager.isInRoom
+            val initialStatus = LocalSangatPolicy.filterForRoom(unfiltered, inRoom)
+            if (inRoom && (initialStatus == null || initialStatus.items.size < unfiltered.items.size)) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MusicService, R.string.local_songs_cant_join_sangat, Toast.LENGTH_SHORT).show()
+                }
+            }
+            if (initialStatus == null) return@launch
             if (queue.preloadItem != null && player.playbackState == STATE_IDLE) return@launch
             if (initialStatus.title != null) {
                 queueTitle = initialStatus.title
@@ -4057,10 +4075,16 @@ class MusicService :
         playerProvider: () -> ExoPlayer?,
     ) =
         DefaultMediaSourceFactory(
-            createDataSourceFactory(normalizationProcessor, playerProvider),
-            ExtractorsFactory {
-                arrayOf(MatroskaExtractor(), FragmentedMp4Extractor(), Mp4Extractor())
-            },
+            // SARASWATI: Phase 5 Task 4 — `local:` keys play from their content URI; everything else is unchanged.
+            LocalRoutingDataSource.Factory(
+                local = DefaultDataSource.Factory(this),
+                remote = createDataSourceFactory(normalizationProcessor, playerProvider),
+            ),
+            LocalAwareExtractorsFactory(
+                ExtractorsFactory {
+                    arrayOf(MatroskaExtractor(), FragmentedMp4Extractor(), Mp4Extractor())
+                },
+            ),
         )
 
     private fun createRenderersFactory(
