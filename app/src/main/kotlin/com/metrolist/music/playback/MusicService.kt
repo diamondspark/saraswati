@@ -347,6 +347,44 @@ class MusicService :
         )
     }
 
+    // SARASWATI: Phase 6 Task 16 — radio tuning chips. The tuner edits this service's queue, so it is built here.
+    @Inject
+    lateinit var radioTuningApi: com.metrolist.music.saraswati.craft.tuning.RadioTuningApi
+
+    @Inject
+    lateinit var radioTuningState: com.metrolist.music.saraswati.craft.tuning.RadioTuningState
+
+    private val tunablePlayer =
+        object : com.metrolist.music.saraswati.craft.tuning.TunablePlayer {
+            override val currentIndex: Int get() = player.currentMediaItemIndex
+            override val currentMediaId: String? get() = player.currentMetadata?.id
+
+            override fun replaceAfterCurrent(items: List<MediaItem>) {
+                val from = player.currentMediaItemIndex + 1
+                if (player.mediaItemCount > from) player.removeMediaItems(from, player.mediaItemCount)
+                player.addMediaItems(from, items)
+                if (player.shuffleModeEnabled) {
+                    applyShuffleOrder(player.currentMediaItemIndex, player.mediaItemCount, dataStore.get(ShufflePlaylistFirstKey, false))
+                }
+            }
+
+            override fun adoptQueue(queue: Queue) {
+                currentQueue = queue
+            }
+        }
+
+    val radioTuner: com.metrolist.music.saraswati.craft.tuning.RadioTuner by lazy {
+        com.metrolist.music.saraswati.craft.tuning.RadioTuner(
+            state = radioTuningState,
+            next = { YouTube.next(it) },
+            player = tunablePlayer,
+            // SARASWATI: Task 2 (snooze) has not landed on this branch, so no song is snoozed yet.
+            snooze = { emptySet() },
+            clock = System::currentTimeMillis,
+            api = radioTuningApi,
+        )
+    }
+
     private lateinit var audioManager: AudioManager
     private var audioFocusRequest: AudioFocusRequest? = null
     private var lastAudioFocusState = AudioManager.AUDIOFOCUS_NONE
@@ -1904,6 +1942,8 @@ class MusicService :
         recordResume(force = true)
         currentQueue = queue
         queueTitle = null
+        // SARASWATI: Phase 6 Task 16 — tuning chips belong to one radio, so any other queue clears them.
+        if (queue !is YouTubeQueue) radioTuningState.clear()
         val persistShuffleAcrossQueues = dataStore.get(PersistentShuffleAcrossQueuesKey, false)
         if (!persistShuffleAcrossQueues && !restoringQueue) {
             player.shuffleModeEnabled = false

@@ -1401,4 +1401,7 @@
     </plurals>
     <string name="family_recap_new_title">New this week</string>
     <string name="family_recap_manage">Manage Family</string>
+
+    <!-- SARASWATI: Phase 6 Task 17 — radio tuning chip row above the upcoming queue (English only; AGENTS.md). -->
+    <string name="tuning_row_title">Sur · Radio tuning</string>
 </resources>

@@ -117,6 +117,9 @@ import com.metrolist.music.saraswati.craft.shuffle.ChaturLabel
 import com.metrolist.music.saraswati.craft.shuffle.ChaturShuffleUi
 import com.metrolist.music.saraswati.craft.shuffle.ShuffleMode
 import com.metrolist.music.saraswati.craft.shuffle.isSmartPick
+// SARASWATI: Phase 6 Task 17 — radio tuning chip row (phone-only; this sheet is never shown in the car).
+import com.metrolist.music.saraswati.craft.tuning.TuningChipRow
+import com.metrolist.music.saraswati.craft.tuning.TuningChipRowState
 import com.metrolist.music.ui.component.ActionPromptDialog
 import com.metrolist.music.ui.component.BottomSheet
 import com.metrolist.music.ui.component.BottomSheetState
@@ -178,6 +181,15 @@ fun Queue(
     val isListenTogetherGuest = listenTogetherRoleState?.value == RoomRole.GUEST
 
     val playerConnection = LocalPlayerConnection.current ?: return
+    // SARASWATI: Phase 6 Task 17 — radio tuning chips above the upcoming list; the row is hidden until a chip is confirmed.
+    val tuningChipRowState =
+        remember(playerConnection, isListenTogetherGuest) {
+            TuningChipRowState(
+                chips = playerConnection.service.radioTuningState.chips,
+                isListenTogetherGuest = isListenTogetherGuest,
+                select = { playerConnection.service.radioTuner.select(it) },
+            )
+        }
     val isPlaying by playerConnection.isEffectivelyPlaying.collectAsStateWithLifecycle()
     val repeatMode by playerConnection.repeatMode.collectAsStateWithLifecycle()
 
@@ -773,6 +785,11 @@ fun Queue(
                                 .animateContentSize()
                                 .height(if (inSelectMode) 48.dp else 0.dp),
                     )
+                }
+
+                // SARASWATI: Phase 6 Task 17 — the chip row sits above the upcoming list and draws nothing without chips.
+                item(key = "tuning_chip_row") {
+                    TuningChipRow(state = tuningChipRowState)
                 }
 
                 itemsIndexed(
