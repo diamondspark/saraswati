@@ -30,6 +30,7 @@ import re
 import sys
 
 _TOTAL_TIME_RE = re.compile(r"^TotalTime:\s*(\d+)\s*$", re.MULTILINE)
+_WAIT_TIME_RE = re.compile(r"^WaitTime:\s*(\d+)\s*$", re.MULTILINE)
 _JANKY_PERCENT_RE = re.compile(r"Janky frames:\s*\d+\s*\(([\d.]+)%\)")
 
 
@@ -51,7 +52,11 @@ def parse_am_start_total_time(out: str) -> int:
     """
     match = _TOTAL_TIME_RE.search(out)
     if match is None:
-        raise ValueError("no 'TotalTime: <ms>' line found in am start -W output")
+        # Android 17 on the Pixel prints no TotalTime line at all, only WaitTime (the same launch measured from
+        # the am command until the activity reports drawn). Fall back to it rather than fail the whole run.
+        match = _WAIT_TIME_RE.search(out)
+    if match is None:
+        raise ValueError("no 'TotalTime: <ms>' or 'WaitTime: <ms>' line found in am start -W output")
     return int(match.group(1))
 
 
