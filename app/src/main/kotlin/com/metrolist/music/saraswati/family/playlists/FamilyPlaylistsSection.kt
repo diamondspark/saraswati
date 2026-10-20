@@ -49,6 +49,7 @@ fun FamilyPlaylistsSection(
     val visible by viewModel.visible.collectAsStateWithLifecycle()
     if (!visible) return
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
+    val madeHere by viewModel.madeHere.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var showCreate by remember { mutableStateOf(false) }
@@ -74,7 +75,7 @@ fun FamilyPlaylistsSection(
         playlists.forEach { playlist ->
             PlaylistRow(
                 playlist = playlist,
-                madeHere = viewModel.canAdd(playlist),
+                madeHere = playlist.id in madeHere,
                 onClick = { navController.navigate(familyPlaylistRoute(playlist.playlistId)) },
             )
         }

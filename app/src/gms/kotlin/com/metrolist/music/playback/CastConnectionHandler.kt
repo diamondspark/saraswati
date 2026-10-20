@@ -16,7 +16,9 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import com.google.android.gms.cast.framework.CastContext
 import com.metrolist.music.extensions.metadata
+import com.metrolist.music.saraswati.castrelay.CastRelayController
 import com.metrolist.music.ui.utils.resize
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -183,10 +185,10 @@ class CastConnectionHandler(
                         0L
                     }
 
-                val relayed = relayQueue()
-                if (relayed != null && centerIndex < relayed.size) {
+                val relayed = relayQueue(centerIndex)
+                if (relayed != null) {
                     castPlayer?.apply {
-                        setMediaItems(relayed, centerIndex, startPosition)
+                        setMediaItems(relayed.items, relayed.startIndex, startPosition)
                         prepare()
                         play()
                     }
@@ -360,15 +362,25 @@ class CastConnectionHandler(
         return item.buildUpon().setMediaMetadata(castMetadata).build()
     }
 
-    /** The whole local queue as relay items, or null when the relay is not serving or an item cannot be served. */
-    private suspend fun relayQueue(): List<MediaItem>? {
+    /**
+     * The local queue as relay items around [centerIndex], or null when the relay is not serving or the current
+     * song cannot be served. Songs far from the current one with no stored format are left to the queue extension.
+     */
+    private suspend fun relayQueue(centerIndex: Int): CastRelayController.RelayQueue? {
         if (!relay.isActive) return null
         val player = musicService.player
         val queue = ArrayList<MediaItem>(player.mediaItemCount)
         for (index in 0 until player.mediaItemCount) {
             queue += withCastMetadata(player.getMediaItemAt(index)) ?: return null
         }
-        return relay.mediaItems(queue)
+        return try {
+            relay.relayQueue(queue, centerIndex)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Timber.w(e, "Cast relay failed; using the upstream Cast path")
+            null
+        }
     }
 
     private fun startCastRelay() {

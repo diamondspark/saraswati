@@ -14,8 +14,10 @@ import com.metrolist.music.saraswati.family.FamilyError
 import com.metrolist.music.saraswati.family.FamilyFeature
 import com.metrolist.music.saraswati.family.FamilyPlaylist
 import com.metrolist.music.saraswati.family.HubException
+import com.metrolist.music.saraswati.family.HubIdentity
 import com.metrolist.music.saraswati.family.parivaar.FakeIdentity
 import com.metrolist.music.saraswati.family.parivaar.FakePort
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -98,19 +100,41 @@ class FamilyPlaylistsViewModelTest {
     }
 
     @Test
-    fun `canAdd is true only for the creator before collaboration`() =
+    fun `madeHere holds only the creator's playlists before collaboration`() =
         runBlocking {
             hub.rows = listOf(fp("mine", "PLmine0000000", "dev-me"), fp("theirs", "PLtheirs000000", "dev-other"))
             val vm = viewModel()
             withTimeout(5_000) { vm.refresh() }
             val mine = withTimeout(5_000) { vm.playlists.first { it.size == 2 }.first { it.id == "mine" } }
-            val theirs = vm.playlists.value.first { it.id == "theirs" }
 
             withTimeout(5_000) { vm.addable.first { it.isNotEmpty() } }
 
-            assertTrue(vm.canAdd(mine))
-            assertFalse(vm.canAdd(theirs))
+            assertEquals(setOf("mine"), vm.madeHere.value)
             assertEquals(listOf(mine), vm.addable.value)
+        }
+
+    @Test
+    fun `madeHere updates when the device id arrives after the playlists`() =
+        runBlocking {
+            val slow = CompletableDeferred<String?>()
+            val lateIdentity =
+                object : HubIdentity {
+                    override suspend fun sessionToken() = "session-token"
+
+                    override suspend fun deviceId() = slow.await()
+                }
+            hub.rows = listOf(fp("mine", "PLmine0000000", "dev-me"))
+            val cache = FamilyPlaylistsCache(dataStore, scope)
+            val repository =
+                FamilyPlaylistsRepository(hub, port, identity, cache, UnconfirmedCollaborationApi, enabled = { true })
+            val vm = FamilyPlaylistsViewModel(repository, lateIdentity, features, scope)
+            withTimeout(5_000) { vm.refresh() }
+            withTimeout(5_000) { vm.playlists.first { it.isNotEmpty() } }
+
+            assertTrue(vm.madeHere.value.isEmpty())
+            slow.complete("dev-me")
+
+            assertEquals(setOf("mine"), withTimeout(5_000) { vm.madeHere.first { it.isNotEmpty() } })
         }
 
     @Test

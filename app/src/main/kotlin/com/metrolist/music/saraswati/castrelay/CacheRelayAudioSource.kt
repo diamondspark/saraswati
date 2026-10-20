@@ -5,7 +5,8 @@
 
 // SARASWATI: Phase 4 Task 17 — the relay's audio. Reads a downloaded or cached song, or fetches it live through
 // the playback stream path. It uses its own CacheDataSource instance so the relay never shares read state with
-// the player, and FLAG_IGNORE_CACHE_ON_ERROR so a damaged cache entry falls back to the network.
+// the player, FLAG_IGNORE_CACHE_ON_ERROR so a damaged cache entry falls back to the network, and no cache
+// write sink so casting never adds to the downloads store.
 package com.metrolist.music.saraswati.castrelay
 
 import android.net.Uri
@@ -14,9 +15,9 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.cache.Cache
 import androidx.media3.datasource.cache.CacheDataSource
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.IOException
 import java.io.InputStream
 
 class CacheRelayAudioSource(
@@ -33,6 +34,8 @@ class CacheRelayAudioSource(
                 CacheDataSource
                     .Factory()
                     .setCache(cache)
+                    // Read-only: the cache is the downloads store, which is never evicted.
+                    .setCacheWriteDataSinkFactory(null)
                     .setUpstreamDataSourceFactory(upstream)
                     .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
                     .createDataSource()
@@ -57,7 +60,11 @@ class CacheRelayAudioSource(
                     totalLength = if (remaining == C.LENGTH_UNSET.toLong()) null else position + remaining,
                     input = RelayDataSourceStream(dataSource),
                 )
-            } catch (e: IOException) {
+            } catch (e: CancellationException) {
+                runCatching { dataSource.close() }
+                throw e
+            } catch (e: Throwable) {
+                // The playback stream path throws PlaybackException, not IOException, when it cannot resolve.
                 runCatching { dataSource.close() }
                 null
             }

@@ -62,20 +62,23 @@ class FamilyPlaylistsViewModel
         val playlists: StateFlow<List<FamilyPlaylist>> =
             repository.playlists.stateIn(scope, SharingStarted.Eagerly, repository.cached())
 
+        /**
+         * Ids of the playlists this phone made, before Task 23 lets other phones add. A flow so a screen that opens
+         * before the device id is read updates when it arrives, instead of showing the creator "Read-only".
+         */
+        val madeHere: StateFlow<Set<String>> =
+            combine(playlists, ownDevice) { all, own ->
+                if (own == null) emptySet() else all.filter { it.addedByDeviceId == own }.mapTo(HashSet()) { it.id }
+            }.stateIn(scope, SharingStarted.Eagerly, emptySet())
+
         /** The playlists this phone may add songs to, so the song menu offers only those. */
         val addable: StateFlow<List<FamilyPlaylist>> =
-            combine(playlists, ownDevice, visible) { all, own, on ->
-                if (!on || own == null) emptyList() else all.filter { it.addedByDeviceId == own }
+            combine(playlists, madeHere, visible) { all, mine, on ->
+                if (!on) emptyList() else all.filter { it.id in mine }
             }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
         init {
             scope.launch { ownDevice.value = identity.deviceId() }
-        }
-
-        /** True only for the phone that made [p]. Other phones read it and do not add to it before Task 23. */
-        fun canAdd(p: FamilyPlaylist): Boolean {
-            val own = ownDevice.value ?: return false
-            return p.addedByDeviceId == own
         }
 
         /** Asks the hub for the family's list. A failure keeps what is shown. */

@@ -110,6 +110,9 @@ class RelayHttpServer(
             handle(client)
         } catch (e: IOException) {
             // The peer went away or stalled; nothing to answer.
+        } catch (e: Throwable) {
+            // A worker thread must never take the app down: the stream resolver can throw PlaybackException, and
+            // a read can fail mid-song with anything. The connection is closed below.
         } finally {
             openSockets -= client
             slots.release()
@@ -164,9 +167,10 @@ class RelayHttpServer(
         videoId: String,
         isHead: Boolean,
     ) {
-        val stream = openSource(videoId, null)
+        val opened = openSource(videoId, null)
+        val stream = opened.stream
         if (stream == null) {
-            respond(output, 404, "Not Found")
+            respondUnavailable(output, opened)
             return
         }
         stream.input.use {
@@ -183,9 +187,10 @@ class RelayHttpServer(
         range: ByteRange,
         isHead: Boolean,
     ) {
-        val stream = openSource(videoId, LongRange(range.first, range.last ?: Long.MAX_VALUE))
+        val opened = openSource(videoId, LongRange(range.first, range.last ?: Long.MAX_VALUE))
+        val stream = opened.stream
         if (stream == null) {
-            respond(output, 404, "Not Found")
+            respondUnavailable(output, opened)
             return
         }
         stream.input.use {
@@ -206,15 +211,28 @@ class RelayHttpServer(
         }
     }
 
+    /** The source throws PlaybackException (not an IOException) when the stream cannot be resolved; any failure is a 502. */
     private fun openSource(
         videoId: String,
         range: LongRange?,
-    ): RelayStream? =
+    ): Opened =
         try {
-            runBlocking(Dispatchers.IO) { source.open(videoId, range) }
-        } catch (e: IOException) {
-            null
+            Opened(runBlocking(Dispatchers.IO) { source.open(videoId, range) }, failed = false)
+        } catch (e: Throwable) {
+            Opened(null, failed = true)
         }
+
+    private fun respondUnavailable(
+        output: OutputStream,
+        opened: Opened,
+    ) {
+        if (opened.failed) respond(output, 502, "Bad Gateway") else respond(output, 404, "Not Found")
+    }
+
+    private class Opened(
+        val stream: RelayStream?,
+        val failed: Boolean,
+    )
 
     /** Reads one CRLF-terminated line, or null when the line is too long, the peer closed, or time ran out. */
     private fun readLine(

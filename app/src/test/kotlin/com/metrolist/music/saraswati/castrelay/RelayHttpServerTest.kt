@@ -6,6 +6,7 @@
 // SARASWATI: Phase 4 Task 16 — the relay server over real sockets on 127.0.0.1, with a fake audio source.
 package com.metrolist.music.saraswati.castrelay
 
+import androidx.media3.common.PlaybackException
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -15,6 +16,7 @@ import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.io.InputStream
 import java.net.ConnectException
 import java.net.InetAddress
 import java.net.Socket
@@ -165,6 +167,48 @@ class RelayHttpServerTest {
         val reply = get(port, tokenPath())
         assertEquals(403, reply.status)
         assertFalse(reply.body.isNotEmpty())
+    }
+
+    @Test
+    fun `a source that throws a non-IO exception gets 502 and the server keeps serving`() {
+        val throwing =
+            object : RelayAudioSource {
+                override suspend fun open(
+                    videoId: String,
+                    range: LongRange?,
+                ): RelayStream? = throw PlaybackException("no internet", null, PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED)
+            }
+        val (_, port) = startServer(src = throwing)
+        assertEquals(502, get(port, tokenPath()).status)
+        assertEquals(502, get(port, tokenPath(), extraHeaders = "Range: bytes=5-\r\n").status)
+        assertEquals(502, get(port, tokenPath()).status)
+    }
+
+    @Test
+    fun `a stream that fails mid-song closes the connection without crashing`() {
+        val failing =
+            object : RelayAudioSource {
+                override suspend fun open(
+                    videoId: String,
+                    range: LongRange?,
+                ): RelayStream =
+                    RelayStream(
+                        "audio/webm",
+                        100L,
+                        object : InputStream() {
+                            override fun read(): Int = throw IllegalStateException("boom")
+
+                            override fun read(
+                                b: ByteArray,
+                                off: Int,
+                                len: Int,
+                            ): Int = throw IllegalStateException("boom")
+                        },
+                    )
+            }
+        val (_, port) = startServer(src = failing)
+        get(port, tokenPath())
+        assertEquals(404, get(port, "/${session.token}/ffffffffffffffffffffffffffffffff").status)
     }
 
     private class FakeSource(

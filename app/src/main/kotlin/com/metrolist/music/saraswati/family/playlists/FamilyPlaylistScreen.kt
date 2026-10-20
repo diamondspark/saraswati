@@ -37,6 +37,7 @@ fun FamilyPlaylistScreen(
     viewModel: FamilyPlaylistsViewModel = hiltViewModel(),
 ) {
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
+    val madeHereIds by viewModel.madeHere.collectAsStateWithLifecycle()
     val playerConnection = LocalPlayerConnection.current
     val playlist = playlists.firstOrNull { it.playlistId == playlistId }
 
@@ -54,7 +55,7 @@ fun FamilyPlaylistScreen(
             )
             return@Column
         }
-        val madeHere = viewModel.canAdd(playlist)
+        val madeHere = playlist.id in madeHereIds
         Text(stringResource(R.string.family_playlist_label), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(playlist.title, style = MaterialTheme.typography.headlineSmall)
         Text(

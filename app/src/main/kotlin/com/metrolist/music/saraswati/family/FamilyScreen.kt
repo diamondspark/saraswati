@@ -45,6 +45,7 @@ import com.metrolist.music.ui.component.Material3SettingsGroup
 import com.metrolist.music.saraswati.family.sangat.SangatSection
 import com.metrolist.music.ui.component.Material3SettingsItem
 import com.metrolist.music.saraswati.family.parivaar.ParivaarMixCard
+import com.metrolist.music.saraswati.family.parivaar.ParivaarUiState
 import com.metrolist.music.saraswati.family.parivaar.ParivaarViewModel
 import com.metrolist.music.saraswati.family.playlists.FamilyPlaylistsSection
 import com.metrolist.music.saraswati.family.playlists.FamilyPlaylistsViewModel
@@ -172,15 +173,19 @@ private fun FamilySharedSections(navController: NavController) {
     val tasteVisible by parivaarViewModel.tasteVisible.collectAsStateWithLifecycle()
 
     Spacer(Modifier.height(14.dp))
-    Text(stringResource(R.string.parivaar_mix_title), style = MaterialTheme.typography.titleMedium)
-    Spacer(Modifier.height(8.dp))
-    ParivaarMixCard(
-        state = parivaarState,
-        onPlay = { parivaarViewModel.play { playerConnection?.playQueue(it) } },
-    )
+    val mixShown = parivaarState !is ParivaarUiState.Hidden
+    if (mixShown) {
+        Text(stringResource(R.string.parivaar_mix_title), style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(8.dp))
+        ParivaarMixCard(
+            state = parivaarState,
+            onPlay = { parivaarViewModel.play { playerConnection?.playQueue(it) } },
+        )
+    }
     if (tasteVisible) {
+        val changeTaste = stringResource(R.string.parivaar_mix_change_taste)
         Text(
-            stringResource(R.string.parivaar_mix_footnote) + " " + stringResource(R.string.parivaar_mix_change_taste),
+            if (mixShown) stringResource(R.string.parivaar_mix_footnote) + " " + changeTaste else changeTaste,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 8.dp).clickable { navController.navigate(FamilyRoutes.TASTE) },

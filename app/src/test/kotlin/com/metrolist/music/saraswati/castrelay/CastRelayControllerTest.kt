@@ -8,6 +8,7 @@
 package com.metrolist.music.saraswati.castrelay
 
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -44,11 +45,13 @@ class CastRelayControllerTest {
         address: Inet4Address? = loopback,
         stored: Map<String, String> = mapOf("v0" to "audio/webm"),
         sourceMime: String = "audio/ogg",
+        source: RelayAudioSource = FakeSource(sourceMime),
+        storedThrows: Boolean = false,
     ): CastRelayController =
         CastRelayController(
             random = SecureRandom(),
-            source = FakeSource(sourceMime),
-            storedMimeType = { stored[it] },
+            source = source,
+            storedMimeType = { if (storedThrows) throw PlaybackException("db", null, PlaybackException.ERROR_CODE_UNSPECIFIED) else stored[it] },
             featureEnabled = { featureOn },
             localAddress = { address },
             buildEnabled = buildOn,
@@ -147,11 +150,111 @@ class CastRelayControllerTest {
             assertClosed(port)
         }
 
+    @Test
+    fun `a source that throws PlaybackException falls back instead of crashing`() =
+        runBlocking {
+            val controller = controller(stored = emptyMap(), source = ThrowingSource())
+            assertTrue(controller.start())
+            assertNull(controller.mediaItems(queue(2)))
+            controller.stop()
+        }
+
+    @Test
+    fun `a storedMimeType that throws falls back instead of crashing`() =
+        runBlocking {
+            val controller = controller(stored = emptyMap(), storedThrows = true, source = ThrowingSource())
+            assertTrue(controller.start())
+            assertNull(controller.mediaItems(queue(2)))
+            controller.stop()
+        }
+
+    @Test
+    fun `a server that fails to build leaves the relay off`() {
+        val controller =
+            CastRelayController(
+                random = SecureRandom(),
+                source = FakeSource("audio/ogg"),
+                storedMimeType = { null },
+                featureEnabled = { true },
+                localAddress = { loopback },
+                buildEnabled = true,
+                newServer = { _, _, _ -> throw IllegalStateException("no socket") },
+            )
+        assertFalse(controller.start())
+        assertFalse(controller.isActive)
+    }
+
+    @Test
+    fun `live resolves are capped to the current song and the next ten`() =
+        runBlocking {
+            val source = CountingSource()
+            val controller = controller(stored = emptyMap(), source = source)
+            controller.start()
+            val result = controller.relayQueue(queue(60), centerIndex = 0)!!
+            assertEquals(1 + CastRelayController.RESOLVE_AHEAD, source.opened.size)
+            assertEquals(1 + CastRelayController.RESOLVE_AHEAD, result.items.size)
+            assertEquals(0, result.startIndex)
+            controller.stop()
+        }
+
+    @Test
+    fun `songs with a stored format past the window still ride along until the first unknown one`() =
+        runBlocking {
+            val stored = (0 until 40).filter { it != 30 }.associate { "v$it" to "audio/webm" }
+            val source = CountingSource()
+            val controller = controller(stored = stored, source = source)
+            controller.start()
+            val result = controller.relayQueue(queue(60), centerIndex = 0)!!
+            assertEquals(30, result.items.size)
+            assertTrue(source.opened.isEmpty())
+            controller.stop()
+        }
+
+    @Test
+    fun `an unresolved song before the current one is dropped and the start index shifts`() =
+        runBlocking {
+            val stored = (0 until 10).filter { it != 2 }.associate { "v$it" to "audio/webm" }
+            val controller = controller(stored = stored, source = CountingSource())
+            controller.start()
+            val result = controller.relayQueue(queue(10), centerIndex = 5)!!
+            assertEquals(listOf("v3", "v4", "v5", "v6", "v7", "v8", "v9"), result.items.map { it.mediaId })
+            assertEquals(2, result.startIndex)
+            controller.stop()
+        }
+
+    @Test
+    fun `an unresolvable current song falls back to upstream`() =
+        runBlocking {
+            val controller = controller(stored = mapOf("v1" to "audio/webm"), source = ThrowingSource())
+            controller.start()
+            assertNull(controller.relayQueue(queue(3), centerIndex = 0))
+            controller.stop()
+        }
+
     private fun assertClosed(port: Int) {
         try {
             Socket(loopback, port).close()
             fail("relay port should be closed")
         } catch (expected: ConnectException) {
+        }
+    }
+
+    private class ThrowingSource : RelayAudioSource {
+        override suspend fun open(
+            videoId: String,
+            range: LongRange?,
+        ): RelayStream? = throw PlaybackException("unavailable", null, PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED)
+    }
+
+    private class CountingSource : RelayAudioSource {
+        val opened = mutableListOf<String>()
+
+        override suspend fun open(
+            videoId: String,
+            range: LongRange?,
+        ): RelayStream {
+            opened += videoId
+            return RelayStream("audio/ogg", 1L, ByteArrayInputStream(ByteArray(1)))
         }
     }
 
