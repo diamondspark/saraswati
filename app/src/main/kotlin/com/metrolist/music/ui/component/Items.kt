@@ -898,18 +898,20 @@ fun PlaylistListItem(
         val context = LocalContext.current
         // SARASWATI: fix wave P5a C2 — reactive, not one-shot: flipping the Local files switch while this screen
         // is open must retrigger the badge's download-state computation. LocalFiles.enabled() also treats access
-        // not being GRANTED as off, matching every other local-files surface in the app. remember()'d so the
-        // Flow isn't rebuilt (and checkSelfPermission isn't re-run) on every recomposition of this badge, which
-        // already recomposes on every allDownloads change; the initial value is a synchronous read rather than
-        // an assumed "on" so the badge never starts from a wrong count for a frame.
+        // not being GRANTED as off, matching every other local-files surface in the app. Both the Flow and its
+        // initial value are remember()'d so this badge — which already recomposes on every allDownloads change,
+        // across every visible playlist row — doesn't redo a blocking DataStore read and checkSelfPermission
+        // call on every one of those recompositions.
         val localFilesEnabledFlow =
             remember(context) {
                 context.dataStore.data
                     .map { LocalFiles.enabled(it[LocalFilesEnabledKey], localAccess(context)) }
                     .distinctUntilChanged()
             }
+        val initialLocalFilesEnabled =
+            remember(context) { LocalFiles.enabled(context.dataStore[LocalFilesEnabledKey], localAccess(context)) }
         val localFilesEnabled by localFilesEnabledFlow.collectAsStateWithLifecycle(
-            initialValue = LocalFiles.enabled(context.dataStore[LocalFilesEnabledKey], localAccess(context)),
+            initialValue = initialLocalFilesEnabled,
         )
         val songs by produceState<List<Song>>(initialValue = emptyList(), playlist.id, localFilesEnabled) {
             withContext(Dispatchers.IO) {
@@ -995,18 +997,20 @@ fun PlaylistGridItem(
         val context = LocalContext.current
         // SARASWATI: fix wave P5a C2 — reactive, not one-shot: flipping the Local files switch while this screen
         // is open must retrigger the badge's download-state computation. LocalFiles.enabled() also treats access
-        // not being GRANTED as off, matching every other local-files surface in the app. remember()'d so the
-        // Flow isn't rebuilt (and checkSelfPermission isn't re-run) on every recomposition of this badge, which
-        // already recomposes on every allDownloads change; the initial value is a synchronous read rather than
-        // an assumed "on" so the badge never starts from a wrong count for a frame.
+        // not being GRANTED as off, matching every other local-files surface in the app. Both the Flow and its
+        // initial value are remember()'d so this badge — which already recomposes on every allDownloads change,
+        // across every visible playlist row — doesn't redo a blocking DataStore read and checkSelfPermission
+        // call on every one of those recompositions.
         val localFilesEnabledFlow =
             remember(context) {
                 context.dataStore.data
                     .map { LocalFiles.enabled(it[LocalFilesEnabledKey], localAccess(context)) }
                     .distinctUntilChanged()
             }
+        val initialLocalFilesEnabled =
+            remember(context) { LocalFiles.enabled(context.dataStore[LocalFilesEnabledKey], localAccess(context)) }
         val localFilesEnabled by localFilesEnabledFlow.collectAsStateWithLifecycle(
-            initialValue = LocalFiles.enabled(context.dataStore[LocalFilesEnabledKey], localAccess(context)),
+            initialValue = initialLocalFilesEnabled,
         )
         val songs by produceState<List<Song>>(initialValue = emptyList(), playlist.id, localFilesEnabled) {
             withContext(Dispatchers.IO) {
