@@ -103,7 +103,13 @@ class LocalSongsRepository
                 if (current != LocalAccess.GRANTED) return@withLock Result.failure(LocalAccessException(current))
                 if (storedSwitch.first() == false) return@withLock Result.failure(LocalFilesOffException())
                 try {
-                    val report = sync.sync(reader.rows())
+                    val rows = reader.rows()
+                    // SARASWATI: fix wave P5a I3 — access or the switch may have gone while the scan ran; the rows are
+                    // then not applied (a revoked grant gives a short or empty cursor, and applying it would delete).
+                    val after = access()
+                    if (after != LocalAccess.GRANTED) return@withLock Result.failure(LocalAccessException(after))
+                    if (storedSwitch.first() == false) return@withLock Result.failure(LocalFilesOffException())
+                    val report = sync.sync(rows)
                     dataStore.edit { it[LocalLastScanKey] = System.currentTimeMillis() }
                     Result.success(report)
                 } catch (e: CancellationException) {

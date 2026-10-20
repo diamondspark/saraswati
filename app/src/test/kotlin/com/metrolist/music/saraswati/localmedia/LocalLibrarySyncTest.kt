@@ -96,6 +96,26 @@ class LocalLibrarySyncTest {
             assertEquals("Renamed", store.songs.getValue("local:42").title)
         }
 
+    // SARASWATI: fix wave P5a I3.
+    @Test
+    fun `an empty scan while songs are stored is a failed scan and deletes nothing`() =
+        runBlocking {
+            sync.sync(listOf(row(id = 1), row(id = 2)))
+            try {
+                sync.sync(emptyList())
+                org.junit.Assert.fail("expected the empty scan to be refused")
+            } catch (e: LocalScanEmptyException) {
+                // refused
+            }
+            assertEquals(setOf("local:1", "local:2"), store.songs.keys)
+        }
+
+    @Test
+    fun `an empty scan with nothing stored is simply empty`() =
+        runBlocking {
+            assertEquals(LocalSyncReport(0, 0, 0), sync.sync(emptyList()))
+        }
+
     @Test
     fun `a vanished file's row is deleted`() =
         runBlocking {

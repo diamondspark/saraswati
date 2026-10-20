@@ -110,4 +110,37 @@ class LocalServingPolicyTest {
         assertTrue(service.contains("LocalServingPolicy.startableQueue("))
         assertTrue(service.contains("canServe = { runBlocking { localSongsRepository.canServe() } }"))
     }
+
+    // SARASWATI: fix wave P5a I4/I5.
+    @Test
+    fun `a local player error skips or stops and never retries through the network`() {
+        assertEquals(LocalErrorAction.SKIP, LocalServingPolicy.errorAction("local:3", autoSkipOnError = true))
+        assertEquals(LocalErrorAction.STOP, LocalServingPolicy.errorAction("local:3", autoSkipOnError = false))
+        assertEquals(LocalErrorAction.NOT_LOCAL, LocalServingPolicy.errorAction("dQw4w9WgXcQ", autoSkipOnError = true))
+        assertEquals(LocalErrorAction.NOT_LOCAL, LocalServingPolicy.errorAction(null, autoSkipOnError = false))
+    }
+
+    @Test
+    fun `onPlayerError handles a local song before any stream refresh or network wait, with a toast`() {
+        // The service's own listener is the last onPlayerError in the file; an earlier one belongs to a helper object.
+        val service = service
+        val body = bodyOf(service.substring(service.lastIndexOf("override fun onPlayerError(error: PlaybackException)")), "override fun onPlayerError(error: PlaybackException)")
+        val local = body.indexOf("LocalServingPolicy.errorAction(")
+        assertTrue(local >= 0)
+        for (later in listOf("hasExceededRetryLimit(", "performAggressiveCacheClear(", "waitOnNetworkError()", "handleStreamClientError(", "refreshStreamAndRetry")) {
+            val at = body.indexOf(later)
+            assertTrue("$later must come after the local check", at < 0 || at > local)
+        }
+        val localBlock = body.substring(local, body.indexOf("val failedStreamClient"))
+        assertTrue(localBlock.contains("R.string.local_song_cant_play"))
+        assertTrue(localBlock.contains("skipOnError()") && localBlock.contains("stopOnError()"))
+    }
+
+    @Test
+    fun `Cast tells the person when a song on this phone cannot be cast`() {
+        val cast = source("src/gms/kotlin/com/metrolist/music/playback/CastConnectionHandler.kt")
+        val failure = cast.substring(cast.indexOf("Unable to resolve the Cast queue"))
+        assertTrue(failure.indexOf("LocalSongIds.isLocal(metadata.id)") in 0 until failure.indexOf("return@launch"))
+        assertTrue(failure.substring(0, failure.indexOf("return@launch")).contains("R.string.local_song_cant_cast"))
+    }
 }

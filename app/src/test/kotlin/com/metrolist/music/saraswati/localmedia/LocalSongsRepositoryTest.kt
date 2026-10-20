@@ -33,6 +33,7 @@ class LocalSongsRepositoryTest {
     private var access = LocalAccess.GRANTED
     private var reads = 0
     private var failReads = false
+    private var onRead: () -> Unit = {}
     private var rows = listOf(row(1))
 
     private fun row(id: Long) =
@@ -61,6 +62,7 @@ class LocalSongsRepositoryTest {
                 MediaStoreAudioReader {
                     reads++
                     if (failReads) error("MediaStore down")
+                    onRead()
                     rows
                 },
             sync = LocalLibrarySync(store),
@@ -196,5 +198,29 @@ class LocalSongsRepositoryTest {
             access = LocalAccess.NOT_GRANTED
             assertFalse(repo.canServe())
             assertFalse(repo.serving.first())
+        }
+
+    // SARASWATI: fix wave P5a I3 — a grant revoked while the scan runs gives a short cursor; it is never applied.
+    @Test
+    fun `access lost mid-scan applies nothing and deletes nothing`() =
+        runBlocking {
+            LocalLibrarySync(store).sync(listOf(row(1), row(2)))
+            val repo = repository()
+            rows = listOf(row(1))
+            onRead = { access = LocalAccess.NOT_GRANTED }
+            val result = repo.syncNow()
+            assertTrue(result.exceptionOrNull() is LocalAccessException)
+            assertEquals(setOf("local:1", "local:2"), store.songs.keys)
+        }
+
+    @Test
+    fun `an empty MediaStore answer keeps stored songs and reports a failure`() =
+        runBlocking {
+            LocalLibrarySync(store).sync(listOf(row(1), row(2)))
+            val repo = repository()
+            rows = emptyList()
+            val result = repo.syncNow()
+            assertTrue(result.exceptionOrNull() is LocalScanEmptyException)
+            assertEquals(setOf("local:1", "local:2"), store.songs.keys)
         }
 }

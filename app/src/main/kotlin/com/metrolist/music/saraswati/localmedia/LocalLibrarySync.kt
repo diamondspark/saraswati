@@ -8,7 +8,8 @@
 //   isLocal = true and inLibrary = null (so upstream's library and sync flows never list or send them);
 //   artists split on ';' and ','; "<unknown>" artists and albums dropped.
 // Songs whose file vanished, or that now fail LocalLibraryFilter, are deleted; foreign-key cascades remove their
-// artist maps and listen history. A song whose file has not changed is not touched.
+// artist maps and listen history. A song whose file has not changed is not touched. An empty scan while songs are
+// stored is a failed scan (LocalScanEmptyException): nothing is deleted.
 package com.metrolist.music.saraswati.localmedia
 
 import com.metrolist.music.db.entities.SongEntity
@@ -21,12 +22,19 @@ data class LocalSyncReport(
     val removed: Int,
 )
 
+/** The scan returned nothing while songs are stored: more likely a failed or partial read than every file gone. */
+class LocalScanEmptyException : IllegalStateException("MediaStore returned no audio while songs on this phone are stored")
+
 class LocalLibrarySync(
     private val store: LocalSongStore,
 ) {
     suspend fun sync(rows: List<MediaStoreAudioRow>): LocalSyncReport {
         val accepted = rows.filter(LocalLibraryFilter::accept).distinctBy { it.id }
         val existing = store.localSongStamps()
+        // SARASWATI: fix wave P5a I3 — an unmounted SD card, a MediaStore re-index or a just-revoked grant gives an
+        // empty cursor; deleting on that would wipe the person's local songs, playlist entries and history (room
+        // cascades). The YouTube sync guards the same case. Nothing is touched and the scan counts as failed.
+        if (rows.isEmpty() && existing.isNotEmpty()) throw LocalScanEmptyException()
         val kept = HashSet<String>(accepted.size * 2)
         var added = 0
         var updated = 0

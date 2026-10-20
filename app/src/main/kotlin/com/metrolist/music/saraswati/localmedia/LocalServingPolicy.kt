@@ -10,7 +10,23 @@ package com.metrolist.music.saraswati.localmedia
 
 import com.metrolist.music.playback.queues.Queue
 
+/** What a player error on a local song leads to. Never a stream refresh or a wait for the network. */
+enum class LocalErrorAction { NOT_LOCAL, SKIP, STOP }
+
 object LocalServingPolicy {
+    // SARASWATI: fix wave P5a I4 — a local file that cannot be read is not a network problem: retrying through the
+    // stream resolver would throw LocalSongEgressException each time, and with no network the player would wait for
+    // internet for an unreadable file. The song is skipped (or playback stops) with a toast, so it is never silent.
+    fun errorAction(
+        mediaId: String?,
+        autoSkipOnError: Boolean,
+    ): LocalErrorAction =
+        when {
+            !LocalSongIds.isLocal(mediaId) -> LocalErrorAction.NOT_LOCAL
+            autoSkipOnError -> LocalErrorAction.SKIP
+            else -> LocalErrorAction.STOP
+        }
+
     /** Positions of local songs in a queue, last first, so removing them one by one keeps the rest in place. */
     fun localIndicesLastFirst(mediaIds: List<String>): List<Int> =
         mediaIds.indices.reversed().filter { LocalSongIds.isLocal(mediaIds[it]) }

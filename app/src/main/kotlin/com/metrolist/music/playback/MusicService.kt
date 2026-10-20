@@ -35,6 +35,7 @@ import com.metrolist.music.saraswati.localmedia.ContentResolverFileOpener
 import com.metrolist.music.saraswati.localmedia.LocalAwareExtractorsFactory
 import com.metrolist.music.saraswati.localmedia.LocalRoutingDataSource
 import com.metrolist.music.saraswati.localmedia.LocalSangatPolicy
+import com.metrolist.music.saraswati.localmedia.LocalErrorAction
 import com.metrolist.music.saraswati.localmedia.LocalServingPolicy
 import com.metrolist.music.saraswati.localmedia.LocalSongIds
 import com.metrolist.music.saraswati.family.FamilyFeature
@@ -2953,6 +2954,20 @@ class MusicService :
         }
 
         val mediaId = player.currentMediaItem?.mediaId
+        // SARASWATI: fix wave P5a I4 — before anything that retries through the network.
+        when (LocalServingPolicy.errorAction(mediaId, dataStore.get(AutoSkipNextOnErrorKey, false))) {
+            LocalErrorAction.NOT_LOCAL -> Unit
+            LocalErrorAction.SKIP -> {
+                Toast.makeText(this, R.string.local_song_cant_play, Toast.LENGTH_SHORT).show()
+                skipOnError()
+                return
+            }
+            LocalErrorAction.STOP -> {
+                Toast.makeText(this, R.string.local_song_cant_play, Toast.LENGTH_SHORT).show()
+                stopOnError()
+                return
+            }
+        }
         val failedStreamClient = mediaId?.let(songUrlCache::clientName)
         Timber
             .tag(TAG)
