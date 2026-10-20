@@ -26,6 +26,10 @@ import android.media.AudioManager
 import android.media.audiofx.AudioEffect
 import com.metrolist.music.playback.audio.VolumeNormalizationAudioProcessor
 import com.metrolist.music.constants.ListenTogetherUsernameKey
+import com.metrolist.music.saraswati.castrelay.CacheRelayAudioSource
+import com.metrolist.music.saraswati.castrelay.CastRelayController
+import com.metrolist.music.saraswati.castrelay.WifiAddress
+import com.metrolist.music.saraswati.family.FamilyFeature
 import com.metrolist.music.saraswati.family.PlaybackStatsPlan
 import com.metrolist.music.saraswati.family.TastePolicy
 import com.metrolist.music.saraswati.family.parivaar.ParivaarMixQueue
@@ -258,6 +262,7 @@ import okhttp3.OkHttpClient
 import timber.log.Timber
 import java.io.ObjectInputStream
 import java.io.ObjectOutputStream
+import java.security.SecureRandom
 import java.time.LocalDateTime
 import javax.inject.Inject
 import kotlin.random.Random
@@ -572,6 +577,25 @@ class MusicService :
 
     var castConnectionHandler: CastConnectionHandler? = null
         private set
+
+    // SARASWATI: Task 17 — the Cast relay reads through its own CacheDataSource over the playback path, so it
+    // never shares read state with the player. Built on the first Cast session that needs it.
+    internal val castRelayController: CastRelayController by lazy {
+        CastRelayController(
+            random = SecureRandom(),
+            source =
+                CacheRelayAudioSource(
+                    cache = downloadCache,
+                    upstream = createDataSourceFactory(VolumeNormalizationAudioProcessor(), { null }),
+                    storedMimeType = ::castRelayStoredMimeType,
+                ),
+            storedMimeType = ::castRelayStoredMimeType,
+            featureEnabled = { familyFeatureGate.isEnabled(FamilyFeature.CAST_RELAY) },
+            localAddress = { WifiAddress.current(connectivityManager) },
+        )
+    }
+
+    private suspend fun castRelayStoredMimeType(mediaId: String): String? = database.format(mediaId).first()?.mimeType
 
     private val screenStateReceiver =
         object : BroadcastReceiver() {
