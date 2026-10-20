@@ -47,7 +47,7 @@ sar_gradle() {
     echo "sar_gradle: no executable ./gradlew in $PWD; run it from the repo root" >&2
     return 1
   fi
-  nice -n 10 ./gradlew --console=plain "-Dorg.gradle.jvmargs=-Xmx3g -Dkotlin.daemon.jvm.options=-Xmx2g -XX:+UseParallelGC" "$@"
+  nice -n 10 ./gradlew --console=plain "-Dorg.gradle.jvmargs=-Xmx4g -Dkotlin.daemon.jvm.options=-Xmx4g -XX:+UseParallelGC" "$@"
 }
 
 # Upstream hard-wires ~/.android/debug.keystore for debug signing, so a fresh

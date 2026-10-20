@@ -83,7 +83,8 @@ class PraharRepositoryTest {
             }
         }
 
-    private fun repository() = PraharRepository(dao, port, store, nowMillis = { 42L })
+    private fun repository(snoozed: Set<String> = emptySet()) =
+        PraharRepository(dao, port, store, snoozed = { snoozed }, nowMillis = { 42L })
 
     // Plays in the 07:00 window and again in the 10:00 window, so each window has own songs to seed from.
     private val tenOClockPlays = (1..6).map { PraharEventRow("s$it", LocalDateTime.parse("2026-10-18T10:00"), 1_000L) }
@@ -148,5 +149,14 @@ class PraharRepositoryTest {
             repository().refreshIfDue(morning).getOrThrow()
             assertTrue(radioCalls.none { it.startsWith("local:") })
             assertTrue(store.cached()!!.tracks.none { it.videoId.startsWith("local:") })
+        }
+
+    @Test
+    fun `snoozed songs stay out of the mix`() =
+        runBlocking {
+            repository(snoozed = setOf("s1")).refreshIfDue(morning).getOrThrow()
+            val mix = store.cached()
+            assertTrue(mix != null && mix.tracks.isNotEmpty())
+            assertTrue(mix!!.tracks.none { it.videoId == "s1" })
         }
 }

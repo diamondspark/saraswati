@@ -14,6 +14,7 @@ import com.metrolist.music.saraswati.craft.prahar.PraharDao
 import com.metrolist.music.saraswati.craft.prahar.PraharEventRow
 import com.metrolist.music.saraswati.craft.prahar.PraharRepository
 import com.metrolist.music.saraswati.craft.prahar.PraharStore
+import com.metrolist.music.saraswati.craft.snooze.SnoozeStore
 import com.metrolist.music.saraswati.family.parivaar.YouTubePlaylistPort
 import com.metrolist.music.utils.dataStore
 import dagger.Module
@@ -50,5 +51,13 @@ object PraharModule {
         database: MusicDatabase,
         port: YouTubePlaylistPort,
         store: PraharStore,
-    ): PraharRepository = PraharRepository(RoomPraharDao(database), port, store)
+        snoozeStore: SnoozeStore,
+    ): PraharRepository =
+        PraharRepository(
+            RoomPraharDao(database),
+            port,
+            store,
+            // SARASWATI: Phase 6 Task 2 — a snoozed song stays out of the Prahar mix.
+            snoozed = { snoozeStore.awaitActiveIds() },
+        )
 }

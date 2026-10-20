@@ -342,7 +342,7 @@ class MusicService :
         SmartShuffleController(
             player = Media3ShufflePlayer { player },
             picks = ::fetchSmartPicks,
-            snooze = { emptySet() },
+            snooze = { snoozeStore.activeIds() },
             clock = System::currentTimeMillis,
         )
     }
@@ -378,8 +378,8 @@ class MusicService :
             state = radioTuningState,
             next = { YouTube.next(it) },
             player = tunablePlayer,
-            // SARASWATI: Task 2 (snooze) has not landed on this branch, so no song is snoozed yet.
-            snooze = { emptySet() },
+            // SARASWATI: Phase 6 Task 2 — snoozed songs never enter a radio the tuner builds.
+            snooze = { snoozeStore.activeIds() },
             clock = System::currentTimeMillis,
             api = radioTuningApi,
         )
