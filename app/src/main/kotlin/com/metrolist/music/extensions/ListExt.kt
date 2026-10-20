@@ -7,6 +7,7 @@ package com.metrolist.music.extensions
 
 import com.metrolist.music.db.entities.Album
 import com.metrolist.music.db.entities.Playlist
+import com.metrolist.music.db.entities.PlaylistSong
 import com.metrolist.music.db.entities.Song
 
 fun <T> List<T>.reversed(reversed: Boolean) = if (reversed) asReversed() else this
@@ -49,4 +50,25 @@ fun List<Playlist>.filterYoutubeShorts(enabled: Boolean = false) =
         filterNot { it.playlist.browseId?.startsWith("SS") == true }
     } else {
         this
+    }
+
+// SARASWATI: fix wave P5a C2 — a song on this phone must leave the song list itself (a playlist's songs, or the
+// Library > Songs merge) the moment the Local files switch goes off, and come back once it is on. This does not
+// touch playlist.songCount or playlist.thumbnails, which read a separate, unfiltered query — a known, already
+// tracked follow-up, not fixed here.
+fun List<Song>.filterLocalSongs(localFilesEnabled: Boolean) =
+    if (localFilesEnabled) {
+        this
+    } else {
+        filterNot { it.song.isLocal }
+    }
+
+// SARASWATI: fix wave P5a C2 — see filterLocalSongs(List<Song>) above; the PlaylistSong variant for
+// playlist_song_map-backed queries. Named differently: List<Song> and List<PlaylistSong> erase to the same JVM
+// signature, so an overload here would be a platform declaration clash.
+fun List<PlaylistSong>.filterLocalPlaylistSongs(localFilesEnabled: Boolean) =
+    if (localFilesEnabled) {
+        this
+    } else {
+        filterNot { it.song.song.isLocal }
     }
