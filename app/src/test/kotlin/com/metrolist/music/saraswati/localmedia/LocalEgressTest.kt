@@ -35,6 +35,7 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import java.io.File
 import java.time.LocalDateTime
+import com.metrolist.music.saraswati.offline.SmartDownloadLedger
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33])
@@ -97,7 +98,11 @@ class LocalEgressTest {
         val provider = StandaloneDatabaseProvider(context)
         val cacheDir = File(context.cacheDir, "egress-test-cache").apply { mkdirs() }
         val cache = SimpleCache(cacheDir, NoOpCacheEvictor(), provider)
-        val util = DownloadUtil(context, database, provider, cache, cache)
+        val ledgerStore =
+            androidx.datastore.preferences.core.PreferenceDataStoreFactory.create(
+                produceFile = { File(context.cacheDir, "egress-ledger-${System.nanoTime()}.preferences_pb") },
+            )
+        val util = DownloadUtil(context, database, provider, cache, cache, SmartDownloadLedger(ledgerStore))
         try {
             util.download(metadata("local:42"))
             util.download("local:43")
