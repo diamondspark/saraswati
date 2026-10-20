@@ -35,6 +35,7 @@ import com.metrolist.music.saraswati.family.TastePolicy
 import com.metrolist.music.saraswati.offline.DefaultOfflinePlayability // SARASWATI: Phase 5 Task 7
 import com.metrolist.music.saraswati.offline.NeverSilentController
 import com.metrolist.music.saraswati.offline.NeverSilentState
+import com.metrolist.music.saraswati.offline.NextStreamPrefetcher // SARASWATI: Phase 5 Task 8
 import com.metrolist.music.saraswati.offline.QueuePort
 import com.metrolist.music.saraswati.offline.SkipToPlayable
 import com.metrolist.music.saraswati.security.StartActions
@@ -674,6 +675,23 @@ class MusicService :
             isCasting = { castConnectionHandler?.isCasting?.value == true },
             isSangatGuest = { listenTogetherManager.isInRoom && !listenTogetherManager.isHost },
             inRoom = { listenTogetherManager.isInRoom },
+        )
+    }
+
+    // SARASWATI: Phase 5 Task 8 — the next song's stream is looked up 15 s into a track, never for a local, downloaded,
+    // cached or already-resolved song, never while offline, while YouTube is failing or while casting.
+    private val nextStreamPrefetcher by lazy {
+        NextStreamPrefetcher(
+            scope = scope,
+            shouldResolve = { id ->
+                player.playWhenReady &&
+                    castConnectionHandler?.isCasting?.value != true &&
+                    !neverSilentState.preferOffline(neverSilentOnline()) &&
+                    !id.startsWith("local:") &&
+                    songUrlCache[id] == null &&
+                    !offlinePlayability.isPlayableOffline(id)
+            },
+            resolve = ::resolveAndCacheStream,
         )
     }
 
@@ -2721,6 +2739,10 @@ class MusicService :
                 launchNeverSilent(decide = { neverSilent.onTransition(id, neverSilentOnline()) })
             }
         }
+        // SARASWATI: Phase 5 Task 8 — 15 s into this song, look up the next one's stream (at most once per song).
+        nextStreamPrefetcher.onTrackStarted(
+            player.nextMediaItemIndex.takeIf { it != C.INDEX_UNSET }?.let { player.getMediaItemAt(it).mediaId },
+        )
         initialBufferRecoveryJob?.cancel()
         initialBufferRecoveryJob = null
         initialBufferRecoveryAttemptedMediaId = null
@@ -3998,6 +4020,120 @@ class MusicService :
         }
     }
 
+    /**
+     * SARASWATI: Phase 5 Task 8 — fetches the stream for [mediaId], stores its format, and puts the URL in
+     * [songUrlCache]. This is the resolver's own block (see createDataSourceFactory) moved here unchanged apart
+     * from the two things only the song being played may do (apply its loudness gain, report its stream client),
+     * which the resolver still does; the next-song prefetch calls it for a song that is not playing yet.
+     */
+    private suspend fun resolveAndCacheStream(mediaId: String): InnerTubeXPlayer.PlaybackData {
+        val cacheGeneration = songUrlCache.generation(mediaId)
+        val playbackData =
+            withContext(Dispatchers.IO) {
+                val song = database.songEntity(mediaId)
+                InnerTubeXPlayer.playerResponseForPlayback(
+                    mediaId,
+                    audioQuality = audioQuality,
+                    connectivityManager = connectivityManager,
+                    contentHints = ContentHints(
+                        isExplicit = song?.explicit,
+                        isUploaded = song?.isUploaded,
+                    ),
+                )
+            }.getOrElse { throwable ->
+                when (throwable) {
+                    is PlaybackException -> {
+                        throw throwable
+                    }
+
+                    is java.net.ConnectException, is java.net.UnknownHostException -> {
+                        throw PlaybackException(
+                            getString(R.string.error_no_internet),
+                            throwable,
+                            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+                        )
+                    }
+
+                    is java.net.SocketTimeoutException -> {
+                        throw PlaybackException(
+                            getString(R.string.error_timeout),
+                            throwable,
+                            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+                        )
+                    }
+
+                    else -> {
+                        throw PlaybackException(
+                            getString(R.string.error_unknown),
+                            throwable,
+                            PlaybackException.ERROR_CODE_REMOTE_ERROR,
+                        )
+                    }
+                }
+            }
+
+        val nonNullPlayback =
+            requireNotNull(playbackData) {
+                getString(R.string.error_unknown)
+            }
+        val format = nonNullPlayback.format
+        val loudnessDb = nonNullPlayback.audioConfig?.loudnessDb
+        val perceptualLoudnessDb = nonNullPlayback.audioConfig?.perceptualLoudnessDb
+
+        Timber
+            .tag(TAG)
+            .d("Storing format for $mediaId with loudnessDb: $loudnessDb, perceptualLoudnessDb: $perceptualLoudnessDb")
+        if (loudnessDb == null && perceptualLoudnessDb == null) {
+            Timber.tag(TAG).w("No loudness data available from YouTube for video: $mediaId")
+        }
+
+        format.contentLength?.let { contentLength ->
+            database.query {
+                upsert(
+                    FormatEntity(
+                        id = mediaId,
+                        itag = format.itag,
+                        mimeType = format.mimeType.substringBefore(";"),
+                        codecs =
+                            format.mimeType
+                                .substringAfter("codecs=", missingDelimiterValue = "")
+                                .substringBefore(";")
+                                .trim()
+                                .removeSurrounding("\""),
+                        bitrate = format.bitrate,
+                        sampleRate = format.audioSampleRate,
+                        contentLength = contentLength,
+                        loudnessDb = loudnessDb,
+                        perceptualLoudnessDb = perceptualLoudnessDb,
+                        playbackUrl = nonNullPlayback.playbackTracking?.videostatsPlaybackUrl?.baseUrl,
+                    ),
+                )
+            }
+        } ?: Timber.tag(TAG).w("Skipping format persistence without content length for $mediaId")
+        recoverSongDeduped(mediaId, nonNullPlayback)
+
+        if (bypassCacheForQualityChange.remove(mediaId)) {
+            Timber.tag(TAG).d("Cleared bypass cache flag for $mediaId after fresh fetch")
+        }
+
+        songUrlCache.put(
+            mediaId = mediaId,
+            url = nonNullPlayback.streamUrl,
+            requestHeaders = nonNullPlayback.streamHeaders,
+            clientName = nonNullPlayback.streamClient,
+            expiresInSeconds = nonNullPlayback.streamExpiresInSeconds,
+            requireBoundedRange = nonNullPlayback.requireBoundedRange,
+            rangeChunkSizeBytes = nonNullPlayback.rangeChunkSizeBytes,
+            useRangeChunks = nonNullPlayback.useRangeChunks,
+            expectedGeneration = cacheGeneration,
+        )
+
+        nonNullPlayback.playbackTracking?.videostatsPlaybackUrl?.baseUrl?.let {
+            playbackUrlCache[cacheKey(mediaId)] = it
+        }
+        return nonNullPlayback
+    }
+
     private fun createDataSourceFactory(
         normalizationProcessor: VolumeNormalizationAudioProcessor,
         playerProvider: () -> ExoPlayer?,
@@ -4050,122 +4186,19 @@ class MusicService :
                 Timber.tag(TAG).i("BYPASSING CACHE for $mediaId due to quality change")
             }
 
-            val cacheGeneration = songUrlCache.generation(mediaId)
             Timber.tag(TAG).i("FETCHING STREAM: $mediaId | quality=$audioQuality")
-            val playbackData =
-                runBlocking(Dispatchers.IO) {
-                    val song = database.songEntity(mediaId)
-                    InnerTubeXPlayer.playerResponseForPlayback(
-                        mediaId,
-                        audioQuality = audioQuality,
-                        connectivityManager = connectivityManager,
-                        contentHints = ContentHints(
-                            isExplicit = song?.explicit,
-                            isUploaded = song?.isUploaded,
-                        ),
-                    )
-                }.getOrElse { throwable ->
-                    when (throwable) {
-                        is PlaybackException -> {
-                            throw throwable
-                        }
-
-                        is java.net.ConnectException, is java.net.UnknownHostException -> {
-                            throw PlaybackException(
-                                getString(R.string.error_no_internet),
-                                throwable,
-                                PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
-                            )
-                        }
-
-                        is java.net.SocketTimeoutException -> {
-                            throw PlaybackException(
-                                getString(R.string.error_timeout),
-                                throwable,
-                                PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
-                            )
-                        }
-
-                        else -> {
-                            throw PlaybackException(
-                                getString(R.string.error_unknown),
-                                throwable,
-                                PlaybackException.ERROR_CODE_REMOTE_ERROR,
-                            )
-                        }
-                    }
-                }
-
-            val nonNullPlayback =
-                requireNotNull(playbackData) {
-                    getString(R.string.error_unknown)
-                }
+            // SARASWATI: Phase 5 Task 8 — the fetch-and-cache block is resolveAndCacheStream, shared with the next-song prefetch.
+            val nonNullPlayback = runBlocking(Dispatchers.IO) { resolveAndCacheStream(mediaId) }
             run {
-                val format = nonNullPlayback.format
-                val loudnessDb = nonNullPlayback.audioConfig?.loudnessDb
-                val perceptualLoudnessDb = nonNullPlayback.audioConfig?.perceptualLoudnessDb
-
-                Timber
-                    .tag(TAG)
-                    .d("Storing format for $mediaId with loudnessDb: $loudnessDb, perceptualLoudnessDb: $perceptualLoudnessDb")
-                if (loudnessDb == null && perceptualLoudnessDb == null) {
-                    Timber.tag(TAG).w("No loudness data available from YouTube for video: $mediaId")
-                }
                 applyAudioNormalizationBeforePlayback(
                     processor = normalizationProcessor,
                     playerProvider = playerProvider,
                     mediaId = mediaId,
-                    loudnessDb = loudnessDb,
-                    perceptualLoudnessDb = perceptualLoudnessDb,
+                    loudnessDb = nonNullPlayback.audioConfig?.loudnessDb,
+                    perceptualLoudnessDb = nonNullPlayback.audioConfig?.perceptualLoudnessDb,
                 )
-
-                format.contentLength?.let { contentLength ->
-                    database.query {
-                        upsert(
-                            FormatEntity(
-                                id = mediaId,
-                                itag = format.itag,
-                                mimeType = format.mimeType.substringBefore(";"),
-                                codecs =
-                                    format.mimeType
-                                        .substringAfter("codecs=", missingDelimiterValue = "")
-                                        .substringBefore(";")
-                                        .trim()
-                                        .removeSurrounding("\""),
-                                bitrate = format.bitrate,
-                                sampleRate = format.audioSampleRate,
-                                contentLength = contentLength,
-                                loudnessDb = loudnessDb,
-                                perceptualLoudnessDb = perceptualLoudnessDb,
-                                playbackUrl = nonNullPlayback.playbackTracking?.videostatsPlaybackUrl?.baseUrl,
-                            ),
-                        )
-                    }
-                } ?: Timber.tag(TAG).w("Skipping format persistence without content length for $mediaId")
-                recoverSongDeduped(mediaId, nonNullPlayback)
-
-                if (bypassCacheForQualityChange.remove(mediaId)) {
-                    Timber.tag(TAG).d("Cleared bypass cache flag for $mediaId after fresh fetch")
-                }
-
                 val streamUrl = nonNullPlayback.streamUrl
                 currentStreamClient.value = nonNullPlayback.streamClient
-
-                songUrlCache.put(
-                    mediaId = mediaId,
-                    url = streamUrl,
-                    requestHeaders = nonNullPlayback.streamHeaders,
-                    clientName = nonNullPlayback.streamClient,
-                    expiresInSeconds = nonNullPlayback.streamExpiresInSeconds,
-                    requireBoundedRange = nonNullPlayback.requireBoundedRange,
-                    rangeChunkSizeBytes = nonNullPlayback.rangeChunkSizeBytes,
-                    useRangeChunks = nonNullPlayback.useRangeChunks,
-                    expectedGeneration = cacheGeneration,
-                )
-
-                nonNullPlayback.playbackTracking?.videostatsPlaybackUrl?.baseUrl?.let {
-                    playbackUrlCache[cacheKey(mediaId)] = it
-                }
 
                 return@Factory dataSpec.withResolvedStream(
                     CachedStreamUrl(
