@@ -136,6 +136,9 @@ import com.metrolist.music.saraswati.culture.rememberCurrentFestival
 import com.metrolist.music.saraswati.saral.YouTubeSaralSearch
 import com.metrolist.music.saraswati.update.SaraswatiUpdateHttpFetcher
 import com.metrolist.music.saraswati.update.UpdateBanner
+import com.metrolist.music.saraswati.craft.resume.ResumeBadge
+import com.metrolist.music.saraswati.craft.resume.ResumePolicy
+import com.metrolist.music.saraswati.craft.resume.SpeedDialResumeViewModel
 import com.metrolist.music.saraswati.update.UpdateChecker
 import com.metrolist.music.saraswati.update.UpdateStatus
 import com.metrolist.music.constants.AutoRadioQueueKey
@@ -713,6 +716,9 @@ fun HomeScreen(
     val allYtItems by viewModel.allYtItems.collectAsStateWithLifecycle()
     val speedDialItems by viewModel.speedDialItems.collectAsStateWithLifecycle()
     val pinnedSpeedDialItems by viewModel.pinnedSpeedDialItems.collectAsStateWithLifecycle()
+    // SARASWATI: Phase 6 Task 5 — "Wahin se" resume points for the speed-dial badges.
+    val speedDialResume: SpeedDialResumeViewModel = hiltViewModel()
+    val resumePoints by speedDialResume.points.collectAsStateWithLifecycle()
     val selectedChip by viewModel.selectedChip.collectAsStateWithLifecycle()
 
     // Official podcast API data
@@ -1933,6 +1939,20 @@ fun HomeScreen(
                                                                                     },
                                                                                 ),
                                                                     )
+                                                                    // SARASWATI: Phase 6 Task 5 — "Wahin se · Resume" on a tile whose collection was left part way.
+                                                                    if (ResumePolicy.offer(resumePoints[item.id], System.currentTimeMillis())) {
+                                                                        ResumeBadge(
+                                                                            onClick = {
+                                                                                speedDialResume.resume(
+                                                                                    item = item,
+                                                                                    localPlaylist = pinnedSpeedDialItems.any { it.id == item.id && it.type == "LOCAL_PLAYLIST" },
+                                                                                    guest = isListenTogetherGuest,
+                                                                                    playQueue = { playerConnection.playQueue(it) },
+                                                                                )
+                                                                            },
+                                                                            modifier = Modifier.align(Alignment.BottomStart).padding(6.dp),
+                                                                        )
+                                                                    }
                                                                 }
                                                             } else {
                                                                 Spacer(modifier = Modifier.width(itemWidth))

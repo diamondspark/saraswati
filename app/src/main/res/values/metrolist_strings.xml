@@ -1342,4 +1342,8 @@
     <string name="snoozed_back_in_days">Back in %1$d days</string>
     <string name="snoozed_wake">Jagao</string>
     <!-- SARASWATI: end Phase 6 Task 3 snooze strings -->
+
+    <!-- SARASWATI: Phase 6 Task 5 — speed-dial resume badge. -->
+    <string name="resume_badge">Wahin se · Resume</string>
+    <!-- SARASWATI: end Phase 6 Task 5 strings -->
 </resources>
