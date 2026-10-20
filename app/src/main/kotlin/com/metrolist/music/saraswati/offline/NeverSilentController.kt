@@ -41,15 +41,24 @@ class NeverSilentController(
     private val isSangatGuest: () -> Boolean,
     private val inRoom: () -> Boolean,
     private val random: Random = Random.Default,
+    private val now: () -> Long = System::currentTimeMillis,
 ) {
     private val busy = Mutex()
     private var lastBridge: Set<String> = emptySet()
+
+    // Songs that failed lately, and when each jump happened: a scan skips the first and a minute of jumps is
+    // capped, so two songs that both fail offline cannot make the player bounce between them.
+    private val tried = HashMap<String, Long>()
+    private val jumps = ArrayDeque<Long>()
 
     /**
      * The network is gone and the current song failed. [wasPlaying] is read when the event arrives, so a pause
      * pressed during the scan is kept. True when this took over.
      */
-    suspend fun onOffline(wasPlaying: Boolean): Boolean = act(wasPlaying)
+    suspend fun onOffline(wasPlaying: Boolean): Boolean {
+        markTried(port.currentId())
+        return act(wasPlaying)
+    }
 
     /** The current song gave up for good. True when this took over. */
     suspend fun onFinalFailure(
@@ -59,6 +68,7 @@ class NeverSilentController(
         youTubeFailed: Boolean,
     ): Boolean {
         if (youTubeFailed) state.onFinalFailure(mediaId)
+        markTried(mediaId)
         return if (state.preferOffline(online)) act(wasPlaying) else false
     }
 
@@ -73,16 +83,35 @@ class NeverSilentController(
         return act(wasPlaying = true)
     }
 
+    private fun markTried(id: String?) {
+        if (id != null) tried[id] = now()
+    }
+
+    private fun recentlyTried(id: String): Boolean {
+        val at = tried[id] ?: return false
+        return now() - at < TRIED_WINDOW_MS
+    }
+
+    private fun jumpAllowed(): Boolean {
+        val cutoff = now() - TRIED_WINDOW_MS
+        while (jumps.isNotEmpty() && jumps.first() <= cutoff) jumps.removeFirst()
+        return jumps.size < MAX_JUMPS_PER_WINDOW
+    }
+
     private suspend fun act(wasPlaying: Boolean): Boolean {
         if (isCasting() || isSangatGuest()) return false
-        if (!busy.tryLock()) return true
+        // Another decision is running: report not handled so upstream answers this event rather than nothing.
+        if (!busy.tryLock()) return false
         try {
             val startedOn = port.currentId()
             val ahead = port.playOrderAfterCurrent()
             val aheadIds = ahead.map(port::idAt)
-            val next = SkipToPlayable.nextPlayable(ahead, port::idAt, playability::isPlayableOffline)
+            val scannable = ahead.filterNot { recentlyTried(port.idAt(it)) }
+            val next = SkipToPlayable.nextPlayable(scannable, port::idAt, playability::isPlayableOffline)
             if (port.currentId() != startedOn) return true // the listener moved on while the scan ran
             if (next != null) {
+                if (!jumpAllowed()) return false
+                jumps.addLast(now())
                 port.jumpTo(next, play = wasPlaying)
                 return true
             }
@@ -90,12 +119,19 @@ class NeverSilentController(
             val picks = OfflineBridge.pick(bridgePool(), aheadIds.toSet() + setOfNotNull(startedOn) + lastBridge, random)
             if (picks.isEmpty()) return false
             if (port.currentId() != startedOn) return true
+            if (!jumpAllowed()) return false
             val first = port.insertAfterCurrent(picks) ?: return false
             lastBridge = picks.toSet()
+            jumps.addLast(now())
             port.jumpTo(first, play = wasPlaying)
             return true
         } finally {
             busy.unlock()
         }
+    }
+
+    private companion object {
+        const val TRIED_WINDOW_MS = 60_000L
+        const val MAX_JUMPS_PER_WINDOW = 5
     }
 }

@@ -744,7 +744,14 @@ class MusicService :
                     Timber.tag(TAG).w("Never-silent check failed type=${e::class.simpleName}")
                     false
                 }
-            if (!handled) otherwise()
+            if (handled) {
+                // The song that was waiting for the network is no longer the one to retry: drop that wait.
+                waitingForNetworkConnection.value = false
+                retryJob?.cancel()
+                retryJob = null
+            } else {
+                otherwise()
+            }
         }
     }
 

@@ -152,8 +152,18 @@ class SmartDownloadRunnerTest {
             assertEquals(StopCause.BUDGET, result.stop)
             assertEquals(null, result.nextNotBefore)
             assertEquals(listOf("slow"), executor.stopped)
-            assertEquals(5205, SMART_STOP_REASON)
             assertEquals(setOf("slow"), ledger.pendingIds())
+        }
+
+    @Test
+    fun `a stop is applied to the DownloadManager with the smart stop reason`() =
+        runBlocking {
+            val applied = mutableListOf<Pair<String, Int>>()
+            val executor = DownloadManagerExecutor(ledger, { error("DownloadUtil touched") }, { id, reason -> applied += id to reason }, { it() })
+
+            executor.stop(listOf("slow"))
+
+            assertEquals(listOf("slow" to SMART_STOP_REASON), applied)
         }
 
     @Test
@@ -175,20 +185,17 @@ class SmartDownloadRunnerTest {
     fun `stopPending stops leftover smart downloads at process start`() =
         runBlocking {
             // With nothing unfinished in the ledger the real executor must not even build the DownloadUtil.
-            DownloadManagerExecutor(ledger) { error("DownloadUtil touched") }.stopPending()
+            DownloadManagerExecutor(ledger, { error("DownloadUtil touched") }, { _, _ -> error("no stop") }, { it() }).stopPending()
 
             ledger.markPending("left", clock)
             ledger.markPending("finished", clock)
             ledger.markDone("finished", clock, "2026-10-19")
-            // The unfinished ids are exactly what stopPending asks the DownloadManager about.
-            assertEquals(setOf("left"), ledger.pendingIds())
-            var asked = false
-            try {
-                DownloadManagerExecutor(ledger) { asked = true; error("stop here") }.stopPending()
-            } catch (e: IllegalStateException) {
-                // expected: the lambda is the stand-in for the DownloadUtil
-            }
-            assertTrue(asked)
+            val applied = mutableListOf<Pair<String, Int>>()
+            DownloadManagerExecutor(ledger, { error("DownloadUtil touched") }, { id, reason -> applied += id to reason }, { it() })
+                .stopPending()
+
+            // Only the unfinished song is stopped, and with the smart stop reason the DownloadManager is told.
+            assertEquals(listOf("left" to SMART_STOP_REASON), applied)
         }
 
     @Test
@@ -208,13 +215,17 @@ class SmartDownloadRunnerTest {
         runBlocking {
             val user = "userSong"
             val executor = FakeExecutor(outcome = { it != "bad1" && it != "bad2" })
+            // The user's own finished download: in the DownloadManager, not in the ledger, and among the candidates.
+            executor.downloaded += user
             ledger.markPending("mine", clock)
-            // The user's download is in the DownloadManager but not the ledger and not among the candidates.
-            runner(executor, listOf(song("mine"), song("bad1"), song("bad2"))).runOnce()
+
+            runner(executor, listOf(song(user), song("mine"), song("bad1"), song("bad2"))).runOnce()
 
             val touched = executor.stopped + executor.resumed + executor.removed
             assertTrue(user !in touched)
-            assertTrue(touched.all { it in setOf("mine", "bad1", "bad2") })
+            assertEquals(listOf("mine"), executor.resumed)
+            assertEquals(listOf("mine", "bad1", "bad2"), executor.order)
+            assertEquals(listOf("bad1", "bad2"), executor.removed)
         }
 
     @Test

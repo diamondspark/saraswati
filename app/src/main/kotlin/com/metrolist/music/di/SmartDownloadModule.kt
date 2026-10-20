@@ -51,7 +51,7 @@ object SmartDownloadModule {
     fun provideSmartDownloadExecutor(
         ledger: SmartDownloadLedger,
         downloadUtil: Lazy<DownloadUtil>,
-    ): SmartDownloadExecutor = DownloadManagerExecutor(ledger) { downloadUtil.get() }
+    ): SmartDownloadExecutor = DownloadManagerExecutor(ledger, { downloadUtil.get() })
 
     @Provides
     @Singleton

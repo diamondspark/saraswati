@@ -44,6 +44,9 @@ class TapToAudioBenchmark {
     @Test
     fun tapToAudioNetwork() = tapToAudio(NETWORK_SECTION)
 
+    // Known limit: the player cache (files/exoplayer) fills during pass 1 and is not cleared before this pass, so a
+    // tap of a song pass 1 already played is classed offline by the cache, not by a download. Clearing it needs a
+    // debuggable build (run-as), and pm clear would also drop the downloads this pass needs.
     @Test
     fun tapToAudioOffline() = tapToAudio(OFFLINE_SECTION)
 

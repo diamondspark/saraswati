@@ -52,7 +52,6 @@ class SmartDownloadRunner(
                 val night = SmartDownloadPlan.nightKey(now(), zone())
                 ledger.rollTo(night)
                 reconcile(night)
-                executor.resume(ledger.pendingIds())
                 // Gathering (radio fetches, paced SPACING_MS apart) shares the run's budget with the downloads.
                 var gathered: List<Candidate>? = null
                 cause =
@@ -95,6 +94,8 @@ class SmartDownloadRunner(
         val picks = SmartDownloadPlan.pick(gathered, { executor.isDownloaded(it) }, snapshot, night)
         // Unfinished requests of ours that nothing wants any more: drop them, they would never be finished.
         val wanted = picks.mapTo(HashSet()) { it.id }
+        // Only what is still wanted resumes; an unfinished request nothing wants any more is dropped, not resumed.
+        executor.resume(ledger.pendingIds().filterTo(HashSet()) { it in wanted })
         val orphans = ledger.pendingIds().filter { it !in wanted }
         if (orphans.isNotEmpty()) {
             executor.remove(orphans)
@@ -102,6 +103,8 @@ class SmartDownloadRunner(
         }
         picks.forEachIndexed { index, c ->
             if (index > 0) pause(SPACING_MS)
+            // The switch may have been turned off while the last song ran or while waiting.
+            if (!isEnabled()) return StopCause.DISABLED
             ledger.markPending(c.id, now())
             val ok = executor.download(c, SONG_TIMEOUT_MS)
             if (ok) {

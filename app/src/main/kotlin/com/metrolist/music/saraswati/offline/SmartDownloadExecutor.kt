@@ -46,6 +46,9 @@ interface SmartDownloadExecutor {
 class DownloadManagerExecutor(
     private val ledger: SmartDownloadLedger,
     private val downloadUtil: () -> DownloadUtil,
+    // The stop reason the DownloadManager is told, and the hop onto its thread. Tests replace both; the defaults are the real ones.
+    private val setStopReason: (String, Int) -> Unit = { id, reason -> downloadUtil().downloadManager.setStopReason(id, reason) },
+    private val onMain: suspend (() -> Unit) -> Unit = { block -> withContext(Dispatchers.Main.immediate) { block() } },
 ) : SmartDownloadExecutor {
     override suspend fun download(
         c: Candidate,
@@ -76,13 +79,13 @@ class DownloadManagerExecutor(
     override fun isDownloaded(id: String): Boolean =
         downloadUtil().downloads.value[id]?.state == Download.STATE_COMPLETED
 
-    override suspend fun stop(ids: Collection<String>) = setStopReason(ids, SMART_STOP_REASON)
+    override suspend fun stop(ids: Collection<String>) = stopWith(ids, SMART_STOP_REASON)
 
     override suspend fun resume(ids: Collection<String>) {
         if (ids.isEmpty()) return
         val manager = downloadUtil().downloadManager
         onMain {
-            ids.forEach { manager.setStopReason(it, Download.STOP_REASON_NONE) }
+            ids.forEach { setStopReason(it, Download.STOP_REASON_NONE) }
             manager.resumeDownloads()
         }
     }
@@ -99,15 +102,11 @@ class DownloadManagerExecutor(
         stop(pending)
     }
 
-    private suspend fun setStopReason(
+    private suspend fun stopWith(
         ids: Collection<String>,
         reason: Int,
     ) {
         if (ids.isEmpty()) return
-        val manager = downloadUtil().downloadManager
-        onMain { ids.forEach { manager.setStopReason(it, reason) } }
+        onMain { ids.forEach { setStopReason(it, reason) } }
     }
-
-    // The DownloadManager is built for its application thread; its calls just post a message, but stay on it.
-    private suspend fun onMain(block: () -> Unit) = withContext(Dispatchers.Main.immediate) { block() }
 }
