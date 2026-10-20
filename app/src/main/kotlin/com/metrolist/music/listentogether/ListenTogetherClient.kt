@@ -330,9 +330,15 @@ class ListenTogetherClient
             setInstance(this)
             ensureNotificationChannel()
             observeAppLifecycle()
-            // SARASWATI: Phase 4 Task 9 — car mode ends with the hosting.
+            // SARASWATI: Phase 4 Task 9 — car mode ends with the hosting. Final fix wave (I3): only when this process
+            // saw the phone go from host to something else; the NONE a new process starts in must not forget the
+            // car room that the saved host session is about to reconnect to.
             scope.launch {
-                _role.collect { if (it != RoomRole.HOST) carMode.end() }
+                var previous = RoomRole.NONE
+                _role.collect {
+                    if (SangatCarMode.endsWith(previous, it)) carMode.end()
+                    previous = it
+                }
             }
             scope.launch {
                 for (event in eventQueue) {
@@ -479,6 +485,7 @@ class ListenTogetherClient
                     }
                     log(LogLevel.WARNING, "Session expired", "Age: ${System.currentTimeMillis() - timestamp}ms")
                     clearPersistedSession()
+                    scope.launch { carMode.forget() } // SARASWATI: final fix wave (I3)
                 }
             } catch (e: Exception) {
                 log(LogLevel.ERROR, "Failed to load persisted session", e.message)
@@ -1619,9 +1626,11 @@ class ListenTogetherClient
                                         "Room: $storedRoomCode - manual intervention may be needed",
                                     )
                                     clearPersistedSession()
+                                    scope.launch { carMode.forget() } // SARASWATI: final fix wave (I3)
                                     sessionToken = null
                                 } else {
                                     clearPersistedSession()
+                                    scope.launch { carMode.forget() } // SARASWATI: final fix wave (I3)
                                     sessionToken = null
                                 }
                             }
@@ -1668,6 +1677,13 @@ class ListenTogetherClient
                             "Successfully reconnected to room",
                             "Code: ${payload.roomCode}, isHost: ${payload.isHost}, attempt was $reconnectAttempts",
                         )
+                        // SARASWATI: final fix wave (I3) — a host back in the car room it was driving is in car mode again,
+                        // and what waited for an Approve tap the driver cannot make is approved.
+                        if (payload.isHost) {
+                            scope.launch {
+                                if (carMode.resumeOnReconnect(payload.roomCode, payload.isHost)) approveEverythingWaiting()
+                            }
+                        }
                         emitEvent(ListenTogetherEvent.Reconnected(payload.roomCode, payload.userId, payload.state, payload.isHost))
                     }
 
@@ -1818,6 +1834,15 @@ class ListenTogetherClient
             releaseWakeLock()
             evaluateBackgroundDisconnectPolicy("leave_room")
         }
+
+        /** Car mode just came back on: nobody can tap Approve, so everything already waiting is approved. */
+        private fun approveEverythingWaiting() {
+            _pendingJoinRequests.value.toList().forEach { approveJoin(it.userId) }
+            _pendingSuggestions.value.toList().forEach { approveSuggestion(it.suggestionId) }
+        }
+
+        /** True while this phone is the host of a Sangat in the car (the car phone stays host; the Worker refuses a transfer). */
+        val carModeActive: StateFlow<Boolean> get() = carMode.active
 
         /**
          * Approve a join request (host only)

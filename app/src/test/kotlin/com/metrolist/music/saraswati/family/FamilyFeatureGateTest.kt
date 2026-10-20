@@ -181,4 +181,47 @@ class FamilyFeatureGateTest {
 
             assertTrue(gate().enabled.value.values.all { it })
         }
+
+    @Test
+    fun `work that leaves the phone waits for the hub's first answer`() =
+        runBlocking {
+            val gate = gate()
+
+            assertFalse(gate.hasHubAnswer)
+            assertFalse(gate.allows(FamilyFeature.PARIVAAR_MIX))
+
+            hub.failWith("getKillSwitches", OFFLINE)
+            gate.refresh()
+            assertFalse(gate.hasHubAnswer)
+            assertFalse(gate.allows(FamilyFeature.PARIVAAR_MIX))
+
+            hub.heal("getKillSwitches")
+            gate.refresh()
+            assertTrue(gate.hasHubAnswer)
+            assertTrue(gate.allows(FamilyFeature.PARIVAAR_MIX))
+        }
+
+    @Test
+    fun `an answer that switched a feature off blocks it, and the answer is remembered across a restart`() =
+        runBlocking {
+            hub.killSwitches = mapOf("parivaar_mix" to false)
+            gate().refresh()
+
+            val restarted = gate()
+
+            assertTrue(restarted.hasHubAnswer)
+            assertFalse(restarted.allows(FamilyFeature.PARIVAAR_MIX))
+            assertTrue(restarted.allows(FamilyFeature.SANGAT))
+        }
+
+    @Test
+    fun `an answer with everything on is remembered too`() =
+        runBlocking {
+            gate().refresh()
+
+            val restarted = gate()
+
+            assertTrue(restarted.hasHubAnswer)
+            assertTrue(restarted.allows(FamilyFeature.PARIVAAR_MIX))
+        }
 }

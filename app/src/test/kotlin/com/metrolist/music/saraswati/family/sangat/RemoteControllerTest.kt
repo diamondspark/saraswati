@@ -12,6 +12,7 @@ import com.metrolist.music.listentogether.ConnectionState
 import com.metrolist.music.listentogether.ListenTogetherEvent
 import com.metrolist.music.listentogether.PlaybackActionPayload
 import com.metrolist.music.listentogether.PlaybackActions
+import com.metrolist.music.listentogether.RoomRole
 import com.metrolist.music.listentogether.RoomState
 import com.metrolist.music.listentogether.SyncStatePayload
 import com.metrolist.music.listentogether.TrackInfo
@@ -230,7 +231,7 @@ class RemoteControllerTest {
         val manager = source("src/main/kotlin/com/metrolist/music/listentogether/ListenTogetherManager.kt")
         val handleEvent = manager.substringAfter("private fun handleEvent(event: ListenTogetherEvent) {").substringBefore("when (event)")
 
-        assertTrue(handleEvent.indexOf("RemoteHostGuard.mustLeave") in 0 until handleEvent.indexOf("remoteEventRouter.route(event)"))
+        assertTrue(handleEvent.indexOf("RemoteHostGuard.consume") in 0 until handleEvent.indexOf("remoteEventRouter.route(event)"))
     }
 
     // SARASWATI: Phase 4 review fix (1)/(7) — HostChanged for a remote controller.
@@ -253,12 +254,41 @@ class RemoteControllerTest {
         assertTrue(mode.enabled.value)
     }
 
+    // SARASWATI: final fix wave (M9) — what the manager calls, run for real instead of read as source text.
     @Test
-    fun `the manager's host duties and role listener keep a remote controller out`() {
-        val manager = source("src/main/kotlin/com/metrolist/music/listentogether/ListenTogetherManager.kt")
-        val guard = manager.substringAfter("RemoteHostGuard.mustLeave(event").substringBefore("remoteEventRouter.route(event)")
-        assertTrue("the guard leaves and returns", guard.contains("leaveRoom()") && guard.contains("return"))
-        assertTrue("the role listener does not start host services for a remote controller", manager.contains("newRole == RoomRole.HOST && !wasHost && !remoteMode.enabled.value"))
+    fun `a remote controller made host leaves once and the event goes no further`() {
+        var leaves = 0
+        val madeHost = ListenTogetherEvent.HostChanged("me", "Asha")
+        val reconnectedAsHost = ListenTogetherEvent.Reconnected("ABC123", "me", room(), true)
+
+        assertTrue(RemoteHostGuard.consume(madeHost, "me", true) { leaves++ })
+        assertTrue(RemoteHostGuard.consume(reconnectedAsHost, "me", true) { leaves++ })
+        assertEquals(2, leaves)
+    }
+
+    @Test
+    fun `an event that is not about this remote controller is left to the manager`() {
+        var leaves = 0
+        val others =
+            listOf(
+                ListenTogetherEvent.HostChanged("other", "Papa"),
+                ListenTogetherEvent.Reconnected("ABC123", "me", room(), false),
+                ListenTogetherEvent.UserJoined("u2", "Dadi"),
+            )
+
+        others.forEach { assertFalse("$it", RemoteHostGuard.consume(it, "me", true) { leaves++ }) }
+        // A phone that is not a remote controller keeps the host role it is given.
+        assertFalse(RemoteHostGuard.consume(ListenTogetherEvent.HostChanged("me", "Asha"), "me", false) { leaves++ })
+        assertEquals(0, leaves)
+    }
+
+    @Test
+    fun `host services start for a player that became host and never for a remote controller`() {
+        assertTrue(RemoteHostGuard.startsHostServices(RoomRole.GUEST, RoomRole.HOST, remoteController = false))
+        assertTrue(RemoteHostGuard.startsHostServices(RoomRole.NONE, RoomRole.HOST, remoteController = false))
+        assertFalse(RemoteHostGuard.startsHostServices(RoomRole.GUEST, RoomRole.HOST, remoteController = true))
+        assertFalse(RemoteHostGuard.startsHostServices(RoomRole.HOST, RoomRole.HOST, remoteController = false))
+        assertFalse(RemoteHostGuard.startsHostServices(RoomRole.HOST, RoomRole.GUEST, remoteController = false))
     }
 
     // SARASWATI: Phase 4 review fix (2)

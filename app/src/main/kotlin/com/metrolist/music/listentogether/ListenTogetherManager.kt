@@ -45,6 +45,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
@@ -222,6 +223,9 @@ class ListenTogetherManager
 
         val isInRoom: Boolean get() = client.isInRoom
         val isHost: Boolean get() = client.isHost
+
+        // SARASWATI: final fix wave (I1) — in a Sangat in the car the car phone stays the host; the menus hide "Transfer ownership".
+        val carModeActive: StateFlow<Boolean> get() = client.carModeActive
         val hasPersistedSession: Boolean get() = client.hasPersistedSession
 
         private val playerListener =
@@ -524,7 +528,7 @@ class ListenTogetherManager
                         val wasHost = previousRole == RoomRole.HOST
                         // SARASWATI: Phase 4 review fix (1) — a remote controller made host is about to leave (RemoteHostGuard)
                         // and must not start publishing from its own idle player meanwhile
-                        if (newRole == RoomRole.HOST && !wasHost && !remoteMode.enabled.value) {
+                        if (RemoteHostGuard.startsHostServices(previousRole, newRole, remoteMode.enabled.value)) {
                             val connection = playerConnection
                             if (connection != null) {
                                 Timber.tag(TAG).d("Role changed to HOST, starting sync services")
@@ -557,9 +561,11 @@ class ListenTogetherManager
 
         private fun handleEvent(event: ListenTogetherEvent) {
             // SARASWATI: Phase 4 Task 15 — a remote controller is never left as the host (see RemoteHostGuard)
-            if (RemoteHostGuard.mustLeave(event, userId.value, remoteMode.enabled.value)) {
-                Timber.tag(TAG).w("Remote controller was made host; leaving so the room can pick a host that plays")
-                leaveRoom()
+            if (RemoteHostGuard.consume(event, userId.value, remoteMode.enabled.value) {
+                    Timber.tag(TAG).w("Remote controller was made host; leaving so the room can pick a host that plays")
+                    leaveRoom()
+                }
+            ) {
                 return
             }
             // SARASWATI: a remote controller's room events never reach the guest handlers below

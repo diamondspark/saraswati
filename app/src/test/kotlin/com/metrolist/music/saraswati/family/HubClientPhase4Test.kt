@@ -106,6 +106,22 @@ class HubClientPhase4Test {
         }
 
     @Test
+    fun `getLiveSangat reads the song on now, and a null or missing one`() =
+        runBlocking {
+            reply(200, """{"rooms":[${room.dropLast(1)},"nowPlaying":{"title":"Pal Pal Dil Ke Paas","artist":"Kishore Kumar"}}]}""")
+            assertEquals(
+                LiveSangatSong("Pal Pal Dil Ke Paas", "Kishore Kumar"),
+                hub.getLiveSangat("sess").getOrNull()?.single()?.nowPlaying,
+            )
+
+            reply(200, """{"rooms":[${room.dropLast(1)},"nowPlaying":null}]}""")
+            assertEquals(null, hub.getLiveSangat("sess").getOrNull()?.single()?.nowPlaying)
+
+            reply(200, """{"rooms":[$room]}""")
+            assertEquals(null, hub.getLiveSangat("sess").getOrNull()?.single()?.nowPlaying)
+        }
+
+    @Test
     fun `setSangatCarMode puts the room code and flag with a content length`() =
         runBlocking {
             reply(200, room)

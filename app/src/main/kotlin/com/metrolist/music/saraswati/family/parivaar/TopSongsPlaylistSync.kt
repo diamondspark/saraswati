@@ -19,7 +19,8 @@
 // rest carry on, so one dead video cannot keep a phone out of the Mix.
 //
 // Never throws except to pass on a cancellation. A phone with no session, the Parivaar Mix switched off by the
-// owner, or nothing played yet does nothing and succeeds. After a failure this process waits RETRY_GAP_MS before
+// owner (or a hub that has never answered this phone: see FamilyFeatureGate.allows), or nothing played yet does
+// nothing and succeeds. After a failure this process waits RETRY_GAP_MS before
 // trying again (this runs on every resume of the app); a new process always tries.
 package com.metrolist.music.saraswati.family.parivaar
 
@@ -44,7 +45,7 @@ class TopSongsPlaylistSync(
     private val identity: HubIdentity,
     private val songs: TopSongsSource,
     private val dataStore: DataStore<Preferences>,
-    private val enabled: () -> Boolean = { true },
+    private val enabled: suspend () -> Boolean = { true },
     private val pause: suspend (Long) -> Unit = { delay(it) },
 ) {
     private val running = Mutex()

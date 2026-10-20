@@ -13,6 +13,10 @@
 // [isEnabled] never suspends. The stored values are read once, shortly after the process starts; until then
 // (and if storage cannot be read) every feature reads as on. A refresh that finishes first is not undone by
 // that read. Keys the hub sends that this build does not know are dropped, and so are stored ones.
+//
+// Fail open is for what the phone shows. Work that leaves the phone (a playlist written to the member's YouTube
+// account) fails closed instead: [allows] is true only once the hub has answered at least once ([hasHubAnswer],
+// remembered across restarts by the stored key) and its answer for that feature is on.
 package com.metrolist.music.saraswati.family
 
 import androidx.datastore.core.DataStore
@@ -44,12 +48,16 @@ class FamilyFeatureGate(
     // Set by the first of: storage finishing its read, or a refresh being applied.
     private val lock = Any()
     private var settled = false
+
+    @Volatile private var answered = false
     private val refreshLock = Mutex()
 
     internal val hydration: Job =
         scope.launch {
-            val disabled = readStored()
+            val stored = readStored()
+            val disabled = stored.orEmpty()
             synchronized(lock) {
+                if (stored != null) answered = true
                 if (!settled) {
                     settled = true
                     state.value = FamilyFeature.entries.associateWith { it.key !in disabled }
@@ -58,6 +66,19 @@ class FamilyFeatureGate(
         }
 
     fun isEnabled(feature: FamilyFeature): Boolean = state.value[feature] ?: true
+
+    /**
+     * True once the hub has answered this phone at least once, in this run or an earlier one. [refresh] always
+     * stores the set of switched-off keys (possibly empty), so its presence on disk means an answer was received.
+     * Read it after [awaitHydrated].
+     */
+    val hasHubAnswer: Boolean get() = answered
+
+    /** Waits for the stored switches, then says whether [feature] may do work that leaves the phone: the hub has answered and it is on. */
+    suspend fun allows(feature: FamilyFeature): Boolean {
+        awaitHydrated()
+        return hasHubAnswer && isEnabled(feature)
+    }
 
     /** Returns once the stored switches have been read (or a refresh has been applied); a connect at a cold start waits for it. */
     suspend fun awaitHydrated() = hydration.join()
@@ -73,6 +94,7 @@ class FamilyFeatureGate(
             val next = FamilyFeature.entries.associateWith { FamilyFeature.isEnabled(fetched, it) }
             synchronized(lock) {
                 settled = true
+                answered = true
                 state.value = next
             }
             try {
@@ -87,13 +109,14 @@ class FamilyFeatureGate(
         }
     }
 
-    private suspend fun readStored(): Set<String> =
+    /** The stored set of switched-off keys; null when none is stored (the hub never answered) or storage cannot be read. */
+    private suspend fun readStored(): Set<String>? =
         try {
-            dataStore.data.first()[FamilyFeaturesDisabledKey].orEmpty()
+            dataStore.data.first()[FamilyFeaturesDisabledKey]
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            emptySet()
+            null
         }
 
     private companion object {

@@ -85,7 +85,9 @@ class SangatWiringSourceTest {
     @Test
     fun `the gate and the owner's self-pairing run on every resume`() {
         val resumed = bodyOf(mainActivity, "repeatOnLifecycle(Lifecycle.State.RESUMED)")
-        assertTrue(Regex("""launch\s*\{\s*featureGate\.refresh\(\)\s*\}""").containsMatchIn(resumed))
+        // Final fix wave (I2): first in the job that then writes the top-songs playlist, which waits for the hub's answer.
+        assertTrue(Regex("""launch\s*\{\s*featureGate\.refresh\(\)""").containsMatchIn(resumed))
+        assertTrue(resumed.indexOf("featureGate.refresh()") < resumed.indexOf("topSongsPlaylistSync.syncIfDue("))
         assertTrue(Regex("""launch\s*\{\s*familyViewModel\.ensureSelfPaired\(""").containsMatchIn(resumed))
     }
 }

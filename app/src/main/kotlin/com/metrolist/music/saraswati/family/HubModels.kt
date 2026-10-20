@@ -193,6 +193,15 @@ data class LiveSangatRoom(
     val carMode: Boolean,
     val memberCount: Int,
     val startedAt: String,
+    // SARASWATI: final fix wave (M2) — display only: the song on now. Absent from an older hub, null before the first song.
+    val nowPlaying: LiveSangatSong? = null,
+)
+
+/** What the live-room list shows of the song on now: a title and an artist, never an id or a link. */
+@Serializable
+data class LiveSangatSong(
+    val title: String,
+    val artist: String = "",
 )
 
 /** One phone's published Parivaar Mix playlist (PUT /parivaar/playlist, GET /parivaar/playlists). */

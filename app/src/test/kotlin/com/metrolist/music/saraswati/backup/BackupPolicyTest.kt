@@ -26,6 +26,7 @@ import com.metrolist.music.constants.FamilyDeviceIdKey
 import com.metrolist.music.constants.FamilyHubSessionTokenKey
 import com.metrolist.music.constants.FamilyStationsSavedKey
 import com.metrolist.music.constants.FamilyFeaturesDisabledKey
+import com.metrolist.music.constants.SangatCarRoomCodeKey
 import com.metrolist.music.constants.FamilyPlaylistsCacheKey
 import com.metrolist.music.constants.FamilyStationsCacheKey
 import com.metrolist.music.constants.GrandparentRoleKey
@@ -398,5 +399,14 @@ class BackupPolicyTest {
         val sanitized = BackupPolicy.sanitize(planted)
 
         assertNull(sanitized[RemoteControllerStore.Key])
+    }
+
+    // SARASWATI: final fix wave (I3)
+    @Test
+    fun `a backup cannot plant or export the car room code`() {
+        assertTrue(SangatCarRoomCodeKey in BackupPolicy.NEVER_EXPORT_OR_RESTORE)
+        val planted = mutablePreferencesOf(SangatCarRoomCodeKey to "ABCD1234", SongSortTypeKey to "NAME").toPreferences()
+
+        assertNull(BackupPolicy.sanitize(planted)[SangatCarRoomCodeKey])
     }
 }

@@ -1646,8 +1646,11 @@ class MusicService :
         player.pause()
     }
 
+    // SARASWATI: final fix wave (M7) — called when Android Auto connects, so it gets its Sangat button at once.
+    fun refreshCustomLayout() = updateNotification()
+
     private fun updateNotification(isLiked: Boolean? = currentSong.value?.song?.let { if (it.isEpisode) it.inLibrary != null else it.liked }) {
-        mediaSession?.setCustomLayout(
+        val layout =
             listOf(
                 CommandButton
                     .Builder()
@@ -1703,8 +1706,16 @@ class MusicService :
                     .setSessionCommand(CommandAddToTargetPlaylist)
                     .setEnabled(currentSong.value != null)
                     .build(),
-            ) + sangatButton(),
-        )
+            )
+        mediaSession?.setCustomLayout(layout)
+        // SARASWATI: final fix wave (M7) — the Sangat button goes to the Android Auto controller only, not to the
+        // session-wide layout that the notification and the lock screen share.
+        mediaSession?.let { session ->
+            val withSangat = layout + sangatButton()
+            session.connectedControllers
+                .filter { mediaLibrarySessionCallback.isAndroidAutoController(it) }
+                .forEach { session.setCustomLayout(it, withSangat) }
+        }
     }
 
     // SARASWATI: Phase 4 Task 15 — Start Sangat / End Sangat, only while the owner has Sangat switched on.

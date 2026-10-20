@@ -1194,6 +1194,7 @@
     <string name="family_sangat_room_title">%1$s\'s Sangat</string>
     <string name="family_sangat_in_car_tag">In the car</string>
     <string name="family_sangat_listening">%1$d listening</string>
+    <string name="family_sangat_listening_song">%1$d listening · %2$s</string>
     <string name="family_sangat_in_sync_here">Playing in sync on this phone</string>
     <string name="family_sangat_remote_here">Adding songs from this phone</string>
     <string name="family_sangat_leave">Leave Sangat</string>

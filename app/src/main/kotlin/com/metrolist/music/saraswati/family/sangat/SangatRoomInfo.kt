@@ -70,6 +70,15 @@ data class SangatBanner(
 )
 
 object SangatDisplay {
+    private const val SONG_TITLE_MAX = 60
+
+    /** The song on now for a live row or the Home banner, or null: single-line, trimmed and cut short. */
+    fun songTitle(room: LiveSangatRoom): String? {
+        val clean = room.nowPlaying?.title.orEmpty().replace(Regex("[\\p{Cntrl}\\s]+"), " ").trim()
+        if (clean.isEmpty()) return null
+        return if (clean.length <= SONG_TITLE_MAX) clean else clean.take(SONG_TITLE_MAX - 1).trimEnd() + "…"
+    }
+
     /** Who added a song: this phone's owner (shown as "You"), the adder named on it, or the host when none is named. */
     fun addedBy(
         suggestedBy: String,

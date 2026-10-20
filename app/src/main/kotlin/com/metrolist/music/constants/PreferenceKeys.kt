@@ -584,6 +584,10 @@ val FamilyStationsCacheKey = stringPreferencesKey("familyStationsCache")
 // off or back on (BackupPolicy). Absent means every feature is on.
 val FamilyFeaturesDisabledKey = stringSetPreferencesKey("familyFeaturesDisabled")
 
+// SARASWATI: final fix wave (I3) — the code of the Sangat room this phone is hosting in car mode, kept so car mode
+// survives the app process dying mid-drive (SangatCarMode). Live room state, so never restored from a backup.
+val SangatCarRoomCodeKey = stringPreferencesKey("saraswatiSangatCarRoomCode")
+
 // SARASWATI: Phase 4 Task 11 — the last Parivaar Mix this phone built, as JSON (ParivaarMixStore). Derived from
 // the family's listening, so a restored backup must not plant one (BackupPolicy).
 val ParivaarMixKey = stringPreferencesKey("parivaarMix")

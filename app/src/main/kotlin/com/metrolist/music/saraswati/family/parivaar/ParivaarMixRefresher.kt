@@ -29,7 +29,7 @@ class ParivaarMixRefresher(
     private val identity: HubIdentity,
     private val store: ParivaarMixStore,
     private val downloader: MixDownloader,
-    private val enabled: () -> Boolean = { true },
+    private val enabled: suspend () -> Boolean = { true },
 ) {
     private val running = Mutex()
     private val backoff = AttemptBackoff(RETRY_GAP_MS)

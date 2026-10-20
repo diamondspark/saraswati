@@ -12,6 +12,9 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import com.metrolist.music.constants.ParivaarPlaylistIdKey
 import com.metrolist.music.constants.ParivaarTopSongsSyncedAtKey
+import com.metrolist.music.saraswati.family.FamilyFeature
+import com.metrolist.music.saraswati.family.FamilyFeatureGate
+import com.metrolist.music.saraswati.family.FakeHub as FamilyFakeHub
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -275,6 +278,39 @@ class TopSongsPlaylistSyncTest {
 
             assertEquals(emptyList<String>(), port.calls)
             assertEquals(emptyList<Any>(), hub.registered)
+        }
+
+    @Test
+    fun `with Parivaar Mix off at the hub, a first launch creates no YouTube playlist`() =
+        runBlocking {
+            source.songs = songs(5)
+            val familyHub = FamilyFakeHub().apply { killSwitches = mapOf("parivaar_mix" to false) }
+            val gate = FamilyFeatureGate(familyHub, identity, dataStore, scope)
+            val guarded = TopSongsPlaylistSync(port, hub, identity, source, dataStore, enabled = { gate.allows(FamilyFeature.PARIVAAR_MIX) }, pause = { })
+
+            // Before the hub has answered (a cold start, or no network): nothing is written.
+            assertTrue(guarded.syncIfDue(t0, "Mummy").isSuccess)
+            // After it said off: still nothing.
+            gate.refresh()
+            assertTrue(guarded.syncIfDue(t0.plusSeconds(3600), "Mummy").isSuccess)
+
+            assertEquals(emptyList<String>(), port.calls)
+            assertEquals(emptyList<Any>(), hub.registered)
+            assertNull(stored()[ParivaarPlaylistIdKey])
+        }
+
+    @Test
+    fun `once the hub has answered with Parivaar Mix on, the playlist is created`() =
+        runBlocking {
+            source.songs = songs(2)
+            val gate = FamilyFeatureGate(FamilyFakeHub(), identity, dataStore, scope)
+            val guarded = TopSongsPlaylistSync(port, hub, identity, source, dataStore, enabled = { gate.allows(FamilyFeature.PARIVAAR_MIX) }, pause = { })
+
+            gate.refresh()
+            val result = guarded.syncIfDue(t0, "Mummy")
+
+            assertTrue(result.isSuccess)
+            assertEquals(1, port.calls.count { it == "create" })
         }
 
     @Test

@@ -49,6 +49,7 @@ import com.metrolist.music.saraswati.family.sangat.SangatSongSearch
 import com.metrolist.music.saraswati.family.sangat.YouTubeSangatSongSearch
 import com.metrolist.music.saraswati.family.sangat.WatcherSangatFeed
 import com.metrolist.music.saraswati.family.sangat.ListenTogetherCarRoom
+import com.metrolist.music.saraswati.family.sangat.DataStoreCarRoomStore
 import com.metrolist.music.saraswati.family.sangat.SangatCarMode
 import com.metrolist.music.saraswati.family.sangat.SangatForeground
 import com.metrolist.music.saraswati.family.sangat.SangatLiveWatcher
@@ -110,9 +111,10 @@ object FamilyModule {
     @Provides
     @Singleton
     fun provideSangatCarMode(
+        @ApplicationContext context: Context,
         hub: HubClient,
         identity: HubIdentity,
-    ): SangatCarMode = SangatCarMode(hub, identity)
+    ): SangatCarMode = SangatCarMode(hub, identity, DataStoreCarRoomStore(context.dataStore))
 
     // SARASWATI: Phase 4 Task 15 — starting and ending a Sangat from the car.
     @Provides
@@ -205,7 +207,7 @@ object FamilyModule {
             identity,
             DatabaseTopSongsSource(database),
             context.dataStore,
-            enabled = { gate.isEnabled(FamilyFeature.PARIVAAR_MIX) },
+            enabled = { gate.allows(FamilyFeature.PARIVAAR_MIX) },
         )
 
     @Provides
@@ -226,7 +228,7 @@ object FamilyModule {
             identity,
             store,
             MixDownloader.create(context, downloadUtil, database),
-            enabled = { gate.isEnabled(FamilyFeature.PARIVAAR_MIX) },
+            enabled = { gate.allows(FamilyFeature.PARIVAAR_MIX) },
         )
 
     // SARASWATI: Phase 4 Task 14 — the family's shared playlists. Collaboration stays the "unavailable" stand-in

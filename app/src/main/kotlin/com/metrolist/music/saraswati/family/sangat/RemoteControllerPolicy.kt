@@ -10,6 +10,7 @@ package com.metrolist.music.saraswati.family.sangat
 
 import com.metrolist.music.listentogether.ConnectionState
 import com.metrolist.music.listentogether.ListenTogetherEvent
+import com.metrolist.music.listentogether.RoomRole
 import com.metrolist.music.listentogether.RoomState
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -59,6 +60,28 @@ object RemoteHostGuard {
                 is ListenTogetherEvent.Reconnected -> event.isHost
                 else -> false
             }
+
+    /**
+     * The first thing the manager does with an event: a remote controller that was made host leaves ([leave] runs once)
+     * and the event goes no further. Returns true when the event was handled here.
+     */
+    fun consume(
+        event: ListenTogetherEvent,
+        myUserId: String?,
+        remoteController: Boolean,
+        leave: () -> Unit,
+    ): Boolean {
+        if (!mustLeave(event, myUserId, remoteController)) return false
+        leave()
+        return true
+    }
+
+    /** Whether going from [previous] to [now] starts the host's sync services: never for a remote controller, which has no player of its own to publish. */
+    fun startsHostServices(
+        previous: RoomRole,
+        now: RoomRole,
+        remoteController: Boolean,
+    ): Boolean = now == RoomRole.HOST && previous != RoomRole.HOST && !remoteController
 }
 
 /**

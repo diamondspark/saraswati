@@ -196,7 +196,9 @@ private fun LiveRoomRow(
                         when {
                             row.joined && room.carMode -> stringResource(R.string.family_sangat_remote_here)
                             row.joined -> stringResource(R.string.family_sangat_in_sync_here)
-                            else -> stringResource(R.string.family_sangat_listening, room.memberCount)
+                            else ->
+                                SangatDisplay.songTitle(room)?.let { stringResource(R.string.family_sangat_listening_song, room.memberCount, it) }
+                                    ?: stringResource(R.string.family_sangat_listening, room.memberCount)
                         },
                     style = MaterialTheme.typography.bodySmall,
                     color = if (row.joined) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,

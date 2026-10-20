@@ -73,7 +73,8 @@ fun SangatLiveBanner(
                         if (banner.joined && banner.syncedWith.isNotEmpty()) {
                             stringResource(R.string.family_sangat_live_sync, banner.syncedWith.joinToString(", "))
                         } else {
-                            stringResource(R.string.family_sangat_listening, room.memberCount)
+                            SangatDisplay.songTitle(room)?.let { stringResource(R.string.family_sangat_listening_song, room.memberCount, it) }
+                                ?: stringResource(R.string.family_sangat_listening, room.memberCount)
                         },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

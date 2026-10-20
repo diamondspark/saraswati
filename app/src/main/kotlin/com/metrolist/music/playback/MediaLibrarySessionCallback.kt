@@ -195,14 +195,28 @@ constructor(
     // rules; logs every denial at WARN so a real Android Auto / Bluetooth
     // / Assistant connection that gets refused is visible immediately
     // (Review Focus #1).
+    private fun callerOf(controller: MediaSession.ControllerInfo) =
+        CallerInfoFactory.create(
+            controllerPackage = controller.packageName,
+            controllerUid = controller.uid,
+            isTrusted = controller.isTrusted,
+            lookup = packageLookup,
+        )
+
+    // SARASWATI: final fix wave (M7) — the Sangat button is for the car only; a phone's notification or lock
+    // screen must not be able to start a room that approves joins by itself.
+    fun isAndroidAutoController(controller: MediaSession.ControllerInfo): Boolean =
+        ControllerPolicy.isAndroidAuto(callerOf(controller), ControllerPolicy.ANDROID_AUTO_DIGESTS)
+
+    override fun onPostConnect(
+        session: MediaSession,
+        controller: MediaSession.ControllerInfo,
+    ) {
+        if (isAndroidAutoController(controller)) service.refreshCustomLayout()
+    }
+
     private fun isCallerAllowed(controller: MediaSession.ControllerInfo): Boolean {
-        val caller =
-            CallerInfoFactory.create(
-                controllerPackage = controller.packageName,
-                controllerUid = controller.uid,
-                isTrusted = controller.isTrusted,
-                lookup = packageLookup,
-            )
+        val caller = callerOf(controller)
         val allowed = ControllerPolicy.isAllowed(context.packageName, caller, ControllerPolicy.ANDROID_AUTO_DIGESTS)
         if (!allowed) {
             val reason =

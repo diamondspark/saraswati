@@ -991,6 +991,7 @@ fun ListenTogetherDialog(
     // User action menu state
     var selectedUserForMenu by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedUsername by rememberSaveable { mutableStateOf<String?>(null) }
+    val isCarHost by listenTogetherManager.carModeActive.collectAsStateWithLifecycle() // SARASWATI: final fix wave (I1)
 
     // Localized helper strings
     val waitingForApprovalText = stringResource(R.string.waiting_for_approval)
@@ -1137,7 +1138,8 @@ fun ListenTogetherDialog(
             item { Spacer(modifier = Modifier.height(8.dp)) }
 
             // Transfer ownership button
-            item {
+            // SARASWATI: final fix wave (I1) — the car phone stays the host of a Sangat in the car.
+            if (!isCarHost) item {
                 Surface(
                     modifier =
                         Modifier

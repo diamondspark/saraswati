@@ -143,6 +143,7 @@ import com.metrolist.music.saraswati.family.FamilyRoutes
 import com.metrolist.music.saraswati.family.FamilyFeatureGate
 import com.metrolist.music.saraswati.family.FamilyViewModel
 import com.metrolist.music.saraswati.family.HealthReporter
+import com.metrolist.music.saraswati.family.parivaar.ParivaarMemberName
 import com.metrolist.music.saraswati.family.parivaar.ParivaarMixRefresher
 import com.metrolist.music.saraswati.family.parivaar.TopSongsPlaylistSync
 import com.metrolist.music.saraswati.family.sangat.SangatForeground
@@ -172,6 +173,7 @@ import com.metrolist.music.constants.ForceBottomNavBarKey
 import com.metrolist.music.constants.GrandparentRoleKey
 import com.metrolist.music.constants.LastSeenVersionKey
 import com.metrolist.music.constants.ListenTogetherInTopBarKey
+import com.metrolist.music.constants.ListenTogetherUsernameKey
 import com.metrolist.music.constants.LyricsProviderOrderKey
 import com.metrolist.music.constants.MiniPlayerBottomSpacing
 import com.metrolist.music.constants.MiniPlayerHeight
@@ -536,12 +538,17 @@ class MainActivity : FragmentActivity() {
                 launch { healthReporter.report() }
                 // SARASWATI: Phase 4 Task 12 — this phone's weekly top-songs playlist, then the daily Parivaar Mix
                 // built from everyone's. One job, in that order; each is a no-op until it is due and never throws.
+                // SARASWATI: final fix wave (I2, M1) — the switches are refreshed first in this job: nothing is written to
+                // the member's YouTube account until the hub has answered and Parivaar Mix is on. The member's name is the
+                // Sangat display name (the phone model only when there is none).
                 launch {
-                    topSongsPlaylistSync.syncIfDue(Instant.now(), Build.MODEL)
+                    featureGate.refresh()
+                    val saved = withContext(Dispatchers.IO) { dataStore.get(ListenTogetherUsernameKey, "") }
+                    val memberName = ParivaarMemberName.of(saved, Build.MODEL)
+                    topSongsPlaylistSync.syncIfDue(Instant.now(), memberName)
                     parivaarMixRefresher.refreshIfDue(Instant.now())
                 }
-                // SARASWATI: Phase 4 Task 9 — the kill-switches, and (owner phone only, once) a device session.
-                launch { featureGate.refresh() }
+                // SARASWATI: Phase 4 Task 9 — (owner phone only, once) a device session; the kill-switches refresh above.
                 // (the self-pair refreshes the gate again itself once it has a session — review fix M7)
                 launch { familyViewModel.ensureSelfPaired(Build.MODEL) }
             }

@@ -11,6 +11,7 @@ import com.metrolist.music.listentogether.RoomState
 import com.metrolist.music.listentogether.TrackInfo
 import com.metrolist.music.listentogether.UserInfo
 import com.metrolist.music.saraswati.family.LiveSangatRoom
+import com.metrolist.music.saraswati.family.LiveSangatSong
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -123,5 +124,18 @@ class SangatDisplayTest {
         assertEquals(108_000L, info.positionMs)
         assertTrue(SangatRoomInfo.from(state, "u-host")!!.isHost)
         assertNull(SangatRoomInfo.from(null, "u-me"))
+    }
+
+    @Test
+    fun `a live room shows its song title, shortened and on one line, or nothing`() {
+        assertNull(SangatDisplay.songTitle(live("A")))
+        assertNull(SangatDisplay.songTitle(live("A").copy(nowPlaying = LiveSangatSong("   "))))
+        assertEquals(
+            "Pal Pal Dil Ke Paas",
+            SangatDisplay.songTitle(live("A").copy(nowPlaying = LiveSangatSong(" Pal Pal\nDil Ke  Paas ", "Kishore Kumar"))),
+        )
+        val long = SangatDisplay.songTitle(live("A").copy(nowPlaying = LiveSangatSong("x".repeat(200))))!!
+        assertEquals(60, long.length)
+        assertTrue(long.endsWith("…"))
     }
 }
