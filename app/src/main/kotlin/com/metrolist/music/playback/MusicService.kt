@@ -324,6 +324,14 @@ class MusicService :
     @Inject
     lateinit var snoozeStore: com.metrolist.music.saraswati.craft.snooze.SnoozeStore
 
+    // SARASWATI: Phase 6 Task 4 — "Wahin se": the resume points that speed-dial collections leave behind.
+    @Inject
+    lateinit var resumeStore: com.metrolist.music.saraswati.craft.resume.ResumeStore
+
+    private val resumeRecorder by lazy {
+        com.metrolist.music.saraswati.craft.resume.ResumeRecorder(resumeStore, { System.currentTimeMillis() }, scope)
+    }
+
     private lateinit var audioManager: AudioManager
     private var audioFocusRequest: AudioFocusRequest? = null
     private var lastAudioFocusState = AudioManager.AUDIOFOCUS_NONE
@@ -1877,6 +1885,8 @@ class MusicService :
             return
         }
 
+        // SARASWATI: Phase 6 Task 4 — the queue being replaced saves where it was left.
+        recordResume(force = true)
         currentQueue = queue
         queueTitle = null
         val persistShuffleAcrossQueues = dataStore.get(PersistentShuffleAcrossQueuesKey, false)
@@ -2720,9 +2730,29 @@ class MusicService :
             }
         }
 
+        // SARASWATI: Phase 6 Task 4 — a song change saves the collection's place.
+        recordResume(force = true)
+
         if (cachedPersistentQueue) {
             saveQueueToDisk()
         }
+    }
+
+    // SARASWATI: Phase 6 Task 4 — a pause saves the collection's place at once; while playing, at most every 10 s.
+    override fun onIsPlayingChanged(isPlaying: Boolean) {
+        recordResume(force = !isPlaying)
+    }
+
+    private fun recordResume(force: Boolean) {
+        resumeRecorder.onProgress(
+            queue = currentQueue,
+            index = player.currentMediaItemIndex,
+            mediaId = player.currentMediaItem?.mediaId,
+            count = player.mediaItemCount,
+            positionMs = player.currentPosition,
+            durationMs = player.duration,
+            force = force,
+        )
     }
 
     override fun onPlaybackStateChanged(
