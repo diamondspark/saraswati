@@ -322,69 +322,76 @@ constructor(
 
     fun download(song: SongItem) = download(song.toMediaMetadata())
 
-    fun download(mediaMetadata: MediaMetadata) {
-        scope.launch {
-            downloadPreparations.withPermit {
-                if (!shouldPrepareDownload(downloads.value[mediaMetadata.id]?.state)) return@withPermit
+    // SARASWATI: Phase 5 Task 11 — the database and artwork half of download(), split out so the nightly smart
+    // downloads can queue a request on the DownloadManager directly, with no foreground service. download() keeps
+    // its behaviour: it sends the returned request to ExoDownloadService. Null when the song is already
+    // downloaded, or is a local file (those never leave the phone).
+    suspend fun prepareDownload(mediaMetadata: MediaMetadata): DownloadRequest? =
+        downloadPreparations.withPermit {
+            if (mediaMetadata.id.startsWith("local:")) return@withPermit null
+            if (!shouldPrepareDownload(downloads.value[mediaMetadata.id]?.state)) return@withPermit null
 
-                mediaMetadata.album?.let { album ->
-                    if (database.albumEntity(album.id) == null) {
-                        database.insert(
-                            AlbumEntity(
-                                id = album.id,
-                                title = album.title,
-                                thumbnailUrl = mediaMetadata.thumbnailUrl,
-                                songCount = 0,
-                                duration = 0,
-                            ),
-                        )
-                    }
-                }
-
-                val existing = database.getSongByIdBlocking(mediaMetadata.id)
-                if (existing == null) {
-                    database.insert(mediaMetadata)
-                } else {
-                    database.update(
-                        existing,
-                        mediaMetadata,
-                        overwriteTitle = false,
-                        overwriteArtists = false,
+            mediaMetadata.album?.let { album ->
+                if (database.albumEntity(album.id) == null) {
+                    database.insert(
+                        AlbumEntity(
+                            id = album.id,
+                            title = album.title,
+                            thumbnailUrl = mediaMetadata.thumbnailUrl,
+                            songCount = 0,
+                            duration = 0,
+                        ),
                     )
                 }
+            }
 
-                if (!shouldPrepareDownload(downloadManager.downloadIndex.getDownload(mediaMetadata.id)?.state)) {
-                    return@withPermit
-                }
-
-                val request =
-                    DownloadRequest
-                        .Builder(mediaMetadata.id, mediaMetadata.id.toUri())
-                        .setCustomCacheKey(mediaMetadata.id)
-                        .setData(mediaMetadata.title.toByteArray())
-                        .build()
-                DownloadService.sendAddDownload(
-                    context,
-                    ExoDownloadService::class.java,
-                    request,
-                    false,
+            val existing = database.getSongByIdBlocking(mediaMetadata.id)
+            if (existing == null) {
+                database.insert(mediaMetadata)
+            } else {
+                database.update(
+                    existing,
+                    mediaMetadata,
+                    overwriteTitle = false,
+                    overwriteArtists = false,
                 )
+            }
 
-                val albumArtwork = database.getSongByIdBlocking(mediaMetadata.id)?.album?.thumbnailUrl
-                downloadArtworkUrls(mediaMetadata.thumbnailUrl, albumArtwork).forEach { artworkUrl ->
-                    runCatching {
-                        context.imageLoader.execute(
-                            ImageRequest
-                                .Builder(context)
-                                .data(artworkUrl)
-                                .memoryCachePolicy(CachePolicy.DISABLED)
-                                .diskCachePolicy(CachePolicy.ENABLED)
-                                .networkCachePolicy(CachePolicy.ENABLED)
-                                .build(),
-                        )
-                    }
+            if (!shouldPrepareDownload(downloadManager.downloadIndex.getDownload(mediaMetadata.id)?.state)) {
+                return@withPermit null
+            }
+
+            val albumArtwork = database.getSongByIdBlocking(mediaMetadata.id)?.album?.thumbnailUrl
+            downloadArtworkUrls(mediaMetadata.thumbnailUrl, albumArtwork).forEach { artworkUrl ->
+                runCatching {
+                    context.imageLoader.execute(
+                        ImageRequest
+                            .Builder(context)
+                            .data(artworkUrl)
+                            .memoryCachePolicy(CachePolicy.DISABLED)
+                            .diskCachePolicy(CachePolicy.ENABLED)
+                            .networkCachePolicy(CachePolicy.ENABLED)
+                            .build(),
+                    )
                 }
             }
+
+            DownloadRequest
+                .Builder(mediaMetadata.id, mediaMetadata.id.toUri())
+                .setCustomCacheKey(mediaMetadata.id)
+                .setData(mediaMetadata.title.toByteArray())
+                .build()
+        }
+
+    fun download(mediaMetadata: MediaMetadata) {
+        scope.launch {
+            val request = prepareDownload(mediaMetadata) ?: return@launch
+            DownloadService.sendAddDownload(
+                context,
+                ExoDownloadService::class.java,
+                request,
+                false,
+            )
         }
     }
 

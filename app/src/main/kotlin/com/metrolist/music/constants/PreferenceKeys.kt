@@ -807,3 +807,6 @@ val CountryCodeToName =
 // SARASWATI: Phase 5 Task 10 — what the nightly smart downloads have done on this phone, as JSON
 // (SmartDownloadLedger). It describes this phone's own downloads, so a restored backup must not plant one (BackupPolicy).
 val SmartDownloadLedgerKey = stringPreferencesKey("saraswatiSmartDownloadLedger")
+
+// SARASWATI: Phase 5 Task 11 — the "Raat ke Gaane" (smart downloads) switch in Storage settings. On unless turned off.
+val SmartDownloadsEnabledKey = booleanPreferencesKey("saraswatiSmartDownloads")
