@@ -11,6 +11,7 @@ import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.metrolist.innertube.YouTube
+import com.metrolist.music.saraswati.localmedia.LocalSongIds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -82,7 +83,8 @@ data class SongEntity(
             likedDate = if (!liked) LocalDateTime.now() else null,
             inLibrary = if (!liked) inLibrary ?: LocalDateTime.now() else inLibrary,
         ).also {
-            if (syncToYouTube) {
+            // SARASWATI: Phase 5 Task 2 — a song on this phone is never liked on YouTube.
+            if (syncToYouTube && !LocalSongIds.isLocal(id)) {
                 CoroutineScope(Dispatchers.IO).launch {
                     YouTube.likeVideo(id, !liked)
                 }
@@ -95,7 +97,8 @@ data class SongEntity(
             inLibrary = if (inLibrary == null) LocalDateTime.now() else null,
             likedDate = if (inLibrary == null) likedDate else null,
         ).also {
-            if (syncToYouTube) {
+            // SARASWATI: Phase 5 Task 2 — nor added to the YouTube library.
+            if (syncToYouTube && !LocalSongIds.isLocal(id)) {
                 CoroutineScope(Dispatchers.IO).launch {
                     // Use the new reliable method that fetches fresh tokens
                     val addToLibrary = inLibrary == null

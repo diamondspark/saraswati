@@ -717,6 +717,8 @@ class SyncUtils @Inject constructor(
     }
 
     private suspend fun executeLikeSong(s: SongEntity) = withContext(Dispatchers.IO) {
+        // SARASWATI: Phase 5 Task 2 — a song on this phone is never sent to YouTube (or to Last.fm below).
+        if (com.metrolist.music.saraswati.localmedia.LocalSongIds.isLocal(s.id)) return@withContext
         if (!isLoggedIn()) {
             Timber.w("Skipping likeSong - user not logged in")
             return@withContext
@@ -1744,6 +1746,8 @@ class SyncUtils @Inject constructor(
             try {
                 val confirmed = mutableListOf<String>()
                 songIds.forEach { songId ->
+                    // SARASWATI: Phase 5 Task 2 — a song on this phone is never added to a YouTube playlist.
+                    if (com.metrolist.music.saraswati.localmedia.LocalSongIds.isLocal(songId)) return@forEach
                     try {
                         runQueuedPlaylistEdit {
                             YouTube.addToPlaylist(browseId, songId).getOrThrow()

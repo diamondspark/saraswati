@@ -1331,4 +1331,13 @@
     <string name="spotify_import_error_unsupported">This is not a Spotify export. Choose the zip or JSON file from your Spotify data.</string>
     <string name="spotify_import_error_too_large">This file is too large to import.</string>
     <string name="spotify_import_error_failed">The import stopped before it finished. Songs matched so far were kept.</string>
+    <!-- SARASWATI: Phase 5 Task 3 — Local files switch and the explanation shown before the permission prompt -->
+    <string name="local_files_title">Local files</string>
+    <string name="local_files_desc_on">Songs stored on this phone can be played here and in the car</string>
+    <string name="local_files_desc_off">Off. Saraswati does not look for songs on this phone.</string>
+    <string name="local_files_unsupported">Needs Android 13 or newer</string>
+    <string name="local_files_refused">Not allowed. You can allow it in this phone\'s app settings.</string>
+    <string name="local_files_explain_title">Songs on this phone</string>
+    <string name="local_files_explain_body">Saraswati will look for music files on this phone so you can play them here and in the car. It reads audio files only, never photos or videos. They never leave this phone, except to a Cast speaker you pick. You can switch this off at any time in Privacy settings.</string>
+    <string name="local_files_explain_continue">Continue</string>
 </resources>

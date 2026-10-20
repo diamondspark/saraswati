@@ -2043,4 +2043,26 @@ interface DatabaseDao {
 
     @Delete
     fun delete(podcast: PodcastEntity)
+
+    // SARASWATI: Phase 5 Task 3 — songs on this phone (id `local:<MediaStore id>`, isLocal = 1). They have no
+    // inLibrary stamp, so upstream's library, sync and "forgotten favourites" queries never list them.
+    @Transaction
+    @Query("SELECT * FROM song WHERE isLocal = 1 ORDER BY title COLLATE NOCASE, rowId")
+    fun localSongsByTitle(): Flow<List<Song>>
+
+    @Transaction
+    @Query("SELECT * FROM song WHERE isLocal = 1 ORDER BY title COLLATE NOCASE, rowId LIMIT :limit OFFSET :offset")
+    suspend fun localSongsPage(limit: Int, offset: Int): List<Song>
+
+    @Query("SELECT COUNT(1) FROM song WHERE isLocal = 1")
+    fun localSongCount(): Flow<Int>
+
+    @Query("SELECT id FROM song WHERE isLocal = 1")
+    suspend fun localSongIds(): List<String>
+
+    @Query("SELECT id, dateModified FROM song WHERE isLocal = 1")
+    suspend fun localSongStamps(): List<com.metrolist.music.saraswati.localmedia.LocalSongStamp>
+
+    @Query("DELETE FROM song WHERE id IN (:ids) AND isLocal = 1")
+    suspend fun deleteLocalSongs(ids: List<String>)
 }

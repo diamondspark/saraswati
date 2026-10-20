@@ -29,6 +29,7 @@ import com.metrolist.music.constants.ListenTogetherUsernameKey
 import com.metrolist.music.saraswati.castrelay.CacheRelayAudioSource
 import com.metrolist.music.saraswati.castrelay.CastRelayController
 import com.metrolist.music.saraswati.castrelay.WifiAddress
+import com.metrolist.music.saraswati.localmedia.LocalSongIds
 import com.metrolist.music.saraswati.family.FamilyFeature
 import com.metrolist.music.saraswati.family.PlaybackStatsPlan
 import com.metrolist.music.saraswati.family.TastePolicy
@@ -1771,7 +1772,8 @@ class MusicService :
             }
         }
 
-        if (!database.hasRelatedSongs(mediaId)) {
+        // SARASWATI: Phase 5 Task 2 — a song on this phone has no related songs to ask YouTube for.
+        if (!LocalSongIds.isLocal(mediaId) && !database.hasRelatedSongs(mediaId)) {
             val relatedEndpoint =
                 YouTube.next(WatchEndpoint(videoId = mediaId)).getOrNull()?.relatedEndpoint
                     ?: return
@@ -1934,6 +1936,8 @@ class MusicService :
         }
 
         val currentMediaMetadata = player.currentMetadata ?: return
+        // SARASWATI: Phase 5 Task 2 — a radio is seeded from YouTube; a song on this phone is never a seed.
+        if (LocalSongIds.isLocal(currentMediaMetadata.id)) return
 
         val currentIndex = player.currentMediaItemIndex
         val currentMediaId = currentMediaMetadata.id

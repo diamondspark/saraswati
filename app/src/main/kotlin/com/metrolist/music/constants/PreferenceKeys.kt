@@ -799,3 +799,11 @@ val CountryCodeToName =
         "YE" to "Yemen",
         "ZW" to "Zimbabwe",
     )
+
+// SARASWATI: Phase 5 Task 3 — when this phone last finished scanning its own audio files (epoch ms), so the
+// launch-time rescan runs at most every six hours (LocalSongsRepository).
+val LocalLastScanKey = longPreferencesKey("saraswatiLocalLastScan")
+
+// SARASWATI: Phase 5 Task 3 — the "Local files" switch. Absent means "on once the person has allowed access";
+// false means no scanning, no reads, no car entry, and the songs already found are hidden.
+val LocalFilesEnabledKey = booleanPreferencesKey("saraswatiLocalFilesEnabled")
