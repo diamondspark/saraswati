@@ -1,0 +1,54 @@
+name: worker
+
+# Tests and typechecks the family-hub Cloudflare Worker (worker/) whenever it
+# changes. Read-only and secretless on purpose: the tests run against a local
+# simulated Workers runtime, never against Cloudflare, and need no account,
+# token or login. Deploying stays a manual step on the owner's own machine.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "worker/**"
+      # test/applinks.test.ts pins the release certificate against this file.
+      - "security/release-cert.sha256"
+      - ".github/workflows/saraswati-worker.yml"
+  pull_request:
+    paths:
+      - "worker/**"
+      - "security/release-cert.sha256"
+      - ".github/workflows/saraswati-worker.yml"
+
+concurrency:
+  group: worker-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: typecheck-and-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Install the pinned dependencies
+        working-directory: worker
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: worker
+        run: npx tsc --noEmit
+
+      - name: Test
+        working-directory: worker
+        run: npx vitest run

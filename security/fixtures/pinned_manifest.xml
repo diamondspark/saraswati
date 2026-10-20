@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!--
+  Fixture: the shape of the merged gms release manifest that matters to the
+  intent-filter, <queries> and resource-reference pins (a trimmed copy of
+  `apkanalyzer manifest print` for app-gms-release-unsigned.apk). Used by
+  test_apk_gate.py, which derives the pins from it and then mutates it to prove
+  each kind of drift fails the gate.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="dev.diamondspark.saraswati">
+
+    <queries>
+        <package android:name="dev.diamondspark.saraswati.updater" />
+        <intent>
+            <action android:name="android.media.action.DISPLAY_AUDIO_EFFECT_CONTROL_PANEL" />
+        </intent>
+        <package android:name="com.google.android.projection.gearhead" />
+    </queries>
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:allowBackup="false"
+        android:fullBackupContent="@ref/0x7f150002"
+        android:networkSecurityConfig="@ref/0x7f150006"
+        android:dataExtractionRules="@ref/0x7f150003">
+
+        <activity android:name="com.metrolist.music.MainActivity" android:exported="true">
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:host="hub.example.workers.dev" />
+                <data android:path="/pair" />
+            </intent-filter>
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:host="music.youtube.com" />
+                <data android:pathPrefix="/watch" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
+        <activity-alias
+            android:name="com.metrolist.music.MainActivityAlias"
+            android:exported="true"
+            android:targetActivity="com.metrolist.music.MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity android:name="com.metrolist.music.ui.screens.CrashActivity" android:exported="false" />
+
+        <service android:name="com.metrolist.music.playback.MusicService" android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+                <action android:name="android.media.browse.MediaBrowserService" />
+            </intent-filter>
+        </service>
+
+        <service android:name="com.metrolist.music.playback.ExoDownloadService" android:exported="false">
+            <intent-filter>
+                <action android:name="androidx.media3.exoplayer.downloadService.action.RESTART" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </service>
+
+        <receiver android:name="androidx.media3.session.MediaButtonReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="dev.diamondspark.saraswati.FileProvider"
+            android:exported="false" />
+
+    </application>
+</manifest>

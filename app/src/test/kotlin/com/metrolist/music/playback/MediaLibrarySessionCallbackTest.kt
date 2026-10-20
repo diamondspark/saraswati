@@ -21,6 +21,20 @@ class MediaLibrarySessionCallbackTest {
         assertFalse(isBrowsableMediaId("${MusicService.SONG}/song-id"))
     }
 
+    // SARASWATI: Task 11 — the four car tabs are folders a car may subscribe to.
+    @Test
+    fun `the car tabs accept subscriptions`() {
+        for (tab in listOf(MusicService.CAR_HOME, MusicService.CAR_LIBRARY, MusicService.CAR_STATIONS, MusicService.CAR_FAMILY)) {
+            assertTrue(tab, isBrowsableMediaId(tab))
+        }
+    }
+
+    @Test
+    fun `a station is something to play, not a folder to subscribe to`() {
+        assertFalse(isBrowsableMediaId("${MusicService.CAR_STATIONS}/0/abcdefghijk"))
+        assertFalse(isBrowsableMediaId("${MusicService.CAR_FAMILY}/sangat_soon"))
+    }
+
     @Test
     fun `children are limited to the requested page`() {
         val children = listOf("one", "two", "three", "four", "five")

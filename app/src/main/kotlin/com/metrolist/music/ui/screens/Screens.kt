@@ -45,7 +45,16 @@ sealed class Screens(
         route = "library"
     )
 
+    // SARASWATI: Task 7 — the Family tab (Home · Search · Library · Family),
+    // shaped exactly like ListenTogether above.
+    object Family : Screens(
+        titleId = R.string.family,
+        iconIdInactive = R.drawable.group_outlined,
+        iconIdActive = R.drawable.group_filled,
+        route = "family"
+    )
+
     companion object {
-        val MainScreens = listOf(Home, Search, ListenTogether, Library)
+        val MainScreens = listOf(Home, Search, ListenTogether, Library, Family)
     }
 }

@@ -35965,9 +35965,6 @@ SPLcom/metrolist/music/saraswati/security/AndroidKeystoreKeyProvider;-><clinit>(
 SPLcom/metrolist/music/saraswati/security/AndroidKeystoreKeyProvider;-><init>(Ljava/lang/String;)V
 SPLcom/metrolist/music/saraswati/security/AndroidKeystoreKeyProvider;-><init>(Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 SPLcom/metrolist/music/saraswati/security/AndroidKeystoreKeyProvider;->key()Ljavax/crypto/SecretKey;
-Lcom/metrolist/music/saraswati/security/AndroidKeystoreKeyProvider$Companion;
-SPLcom/metrolist/music/saraswati/security/AndroidKeystoreKeyProvider$Companion;-><init>()V
-SPLcom/metrolist/music/saraswati/security/AndroidKeystoreKeyProvider$Companion;-><init>(Lkotlin/jvm/internal/DefaultConstructorMarker;)V
 Lcom/metrolist/music/saraswati/security/AndroidPackageLookup;
 SPLcom/metrolist/music/saraswati/security/AndroidPackageLookup;-><clinit>()V
 SPLcom/metrolist/music/saraswati/security/AndroidPackageLookup;-><init>(Landroid/content/Context;)V
@@ -35996,7 +35993,7 @@ SPLcom/metrolist/music/saraswati/security/ControllerPolicy;->isAllowed(Ljava/lan
 Lcom/metrolist/music/saraswati/security/CookieVault;
 SPLcom/metrolist/music/saraswati/security/CookieVault;-><clinit>()V
 SPLcom/metrolist/music/saraswati/security/CookieVault;-><init>(Lcom/metrolist/music/saraswati/security/AesGcmKeyProvider;)V
-SPLcom/metrolist/music/saraswati/security/CookieVault;->open(Ljava/lang/String;)Ljava/lang/String;
+SPLcom/metrolist/music/saraswati/security/CookieVault;->open(Ljava/lang/String;Ljava/lang/String;)Lcom/metrolist/music/saraswati/security/OpenResult;
 Lcom/metrolist/music/saraswati/security/CookieVault$Companion;
 SPLcom/metrolist/music/saraswati/security/CookieVault$Companion;-><init>()V
 SPLcom/metrolist/music/saraswati/security/CookieVault$Companion;-><init>(Lkotlin/jvm/internal/DefaultConstructorMarker;)V

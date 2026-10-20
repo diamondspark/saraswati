@@ -120,6 +120,12 @@ import com.metrolist.music.LocalPlayerAwareWindowInsets
 import com.metrolist.music.LocalPlayerConnection
 import com.metrolist.music.R
 import com.metrolist.music.saraswati.SaraswatiFeatures
+import com.metrolist.music.saraswati.culture.FestivalBanner
+import com.metrolist.music.saraswati.culture.FestivalRadio
+import com.metrolist.music.saraswati.culture.FestivalSeed
+import com.metrolist.music.saraswati.culture.radioEndpointFor
+import com.metrolist.music.saraswati.culture.rememberCurrentFestival
+import com.metrolist.music.saraswati.saral.YouTubeSaralSearch
 import com.metrolist.music.saraswati.update.SaraswatiUpdateHttpFetcher
 import com.metrolist.music.saraswati.update.UpdateBanner
 import com.metrolist.music.saraswati.update.UpdateChecker
@@ -792,6 +798,18 @@ fun HomeScreen(
         }
 
     val scope = rememberCoroutineScope()
+
+    // SARASWATI: Task 10 — the festival banner's state. Today's festival comes from the
+    // phone's clock (null on an ordinary day: no banner). Play finds a seed song with the
+    // festival's search and starts that song's radio, the way a Saral tile does; it is a
+    // one-off suggestion, never one of the owner's stations. While it is finding the song
+    // the button is off, so a second tap cannot start a second radio.
+    val festival by rememberCurrentFestival()
+    val festivalRadio = remember { FestivalRadio(YouTubeSaralSearch()) }
+    var festivalStarting by remember { mutableStateOf(false) }
+    val festivalFailedMessage = stringResource(R.string.festival_radio_failed)
+    val festivalOfflineMessage = stringResource(R.string.error_no_internet_connection)
+
     // Track randomization job
     var randomizeJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
@@ -1233,6 +1251,42 @@ fun HomeScreen(
                 state = lazylistState,
                 contentPadding = LocalPlayerAwareWindowInsets.current.asPaddingValues(),
             ) {
+                // SARASWATI: Task 10 — banner order on Home is: Sangat live (Phase 4,
+                // not built yet), then the festival banner, then the Sudhaar banner.
+                festival?.let { today ->
+                    item(key = "festival_banner") {
+                        // SARASWATI: fix wave B2 — a Listen Together guest follows the host's queue, so the
+                        // button is off for them, like every other control here that would start a queue.
+                        FestivalBanner(
+                            festival = today,
+                            enabled = !festivalStarting && !isListenTogetherGuest,
+                            onPlay = {
+                                if (isListenTogetherGuest) return@FestivalBanner
+                                festivalStarting = true
+                                scope.launch {
+                                    // Off again before any message, which waits on the snackbar to go.
+                                    val seed =
+                                        try {
+                                            festivalRadio.seedFor(today)
+                                        } finally {
+                                            festivalStarting = false
+                                        }
+                                    when (seed) {
+                                        is FestivalSeed.Found ->
+                                            playerConnection.playQueue(YouTubeQueue(radioEndpointFor(seed.videoId)))
+                                        FestivalSeed.NotFound ->
+                                            snackbarHostState.showSnackbar(festivalFailedMessage)
+                                        is FestivalSeed.Failed ->
+                                            snackbarHostState.showSnackbar(
+                                                if (seed.offline) festivalOfflineMessage else festivalFailedMessage,
+                                            )
+                                    }
+                                }
+                            },
+                        )
+                    }
+                }
+
                 // SARASWATI: Task 7 — the "Sudhaar" banner sits above every
                 // shelf, including the chips row, so it's the first thing a
                 // family member sees when an update (especially an urgent

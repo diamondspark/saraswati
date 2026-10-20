@@ -114,9 +114,11 @@ import androidx.core.net.toUri
 import androidx.core.util.Consumer
 import androidx.core.view.WindowCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.coroutineScope
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.navigation.NavController
@@ -136,6 +138,16 @@ import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.WatchEndpoint
 import com.metrolist.music.saraswati.SaraswatiDeepLinkPolicy
 import com.metrolist.music.saraswati.SaraswatiFeatures
+import com.metrolist.music.saraswati.family.FamilyRoutes
+import com.metrolist.music.saraswati.family.HealthReporter
+import com.metrolist.music.saraswati.family.PairingInbox
+import com.metrolist.music.saraswati.family.StationsCache
+import com.metrolist.music.saraswati.family.StationsRefresher
+import com.metrolist.music.saraswati.saral.GrandparentRoleSync
+import com.metrolist.music.saraswati.saral.SaralApp
+import com.metrolist.music.saraswati.saral.SaralActive
+import com.metrolist.music.saraswati.saral.SaralShell
+import com.metrolist.music.saraswati.family.PairingLink
 import com.metrolist.music.saraswati.security.DeepLinkGuard
 import com.metrolist.music.constants.AppBarHeight
 import com.metrolist.music.constants.AppLanguageKey
@@ -151,6 +163,7 @@ import com.metrolist.music.constants.EnableHighRefreshRateKey
 import com.metrolist.music.constants.EnableLandscapeScalingKey
 import com.metrolist.music.constants.ExperimentalLyricsKey
 import com.metrolist.music.constants.ForceBottomNavBarKey
+import com.metrolist.music.constants.GrandparentRoleKey
 import com.metrolist.music.constants.LastSeenVersionKey
 import com.metrolist.music.constants.ListenTogetherInTopBarKey
 import com.metrolist.music.constants.LyricsProviderOrderKey
@@ -264,8 +277,35 @@ class MainActivity : FragmentActivity() {
     @Inject
     lateinit var listenTogetherManager: com.metrolist.music.listentogether.ListenTogetherManager
 
+    // SARASWATI: Task 7 — holds a family pairing link until the join screen takes it.
+    @Inject
+    lateinit var pairingInbox: PairingInbox
+
+    // SARASWATI: Task 9 — refreshes the cached grandparent role from the hub.
+    @Inject
+    lateinit var grandparentRoleSync: GrandparentRoleSync
+
+    // SARASWATI: Task 9 — never read here. Injecting it builds it now, so its
+    // storage is read while the first frame is composed and Saral's tiles are
+    // already there when it appears.
+    @Inject
+    lateinit var stationsCache: StationsCache
+
+    // SARASWATI: Task 9 fix round 1 — keeps that cache fresh on every launch and resume.
+    @Inject
+    lateinit var stationsRefresher: StationsRefresher
+
+    // SARASWATI: fix wave B1 (I2) — the paired phone's heartbeat for the owner's health view.
+    @Inject
+    lateinit var healthReporter: HealthReporter
+
     private lateinit var navController: NavHostController
     private var pendingIntent: Intent? = null
+
+    // SARASWATI: Task 9 — a cache of the role the hub holds for this phone
+    // (GrandparentRoleKey). true makes Saral the whole app: setContent hosts it
+    // instead of MetrolistApp, so no route, tab or Settings exists to reach.
+    private var grandparentRole by mutableStateOf(false)
     private var latestVersionName by mutableStateOf(BuildConfig.BASE_VERSION_NAME)
 
     // Keep PlayerConnection as regular property - NOT mutableStateOf to prevent UI recomposition
@@ -384,6 +424,13 @@ class MainActivity : FragmentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        // SARASWATI: Task 9 — Saral follows no link, widget, share or recognition
+        // intent, and must not hold one for later either (it would be replayed
+        // the moment the owner switches this phone back to the full app).
+        if (!SaralShell.routesIncomingIntents(grandparentRole)) {
+            dropIntentsForSaral(intent)
+            return
+        }
         if (::navController.isInitialized) {
             handleWidgetTargetIntent(intent, navController)
             // SARASWATI (audit A9.3): a malformed link (e.g. a non-hierarchical
@@ -428,6 +475,33 @@ class MainActivity : FragmentActivity() {
                         window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
                     }
                 }
+        }
+
+        // SARASWATI: Task 9 — read the cached role before the first frame, so a
+        // grandparent's phone never flashes the full app, then follow it live.
+        applyGrandparentRole(dataStore[GrandparentRoleKey] == true)
+        if (grandparentRole) dropIntentsForSaral(intent)
+        lifecycleScope.launch {
+            dataStore.data
+                .map { it[GrandparentRoleKey] == true }
+                .distinctUntilChanged()
+                .collect {
+                    applyGrandparentRole(it)
+                    if (it) dropIntentsForSaral(intent)
+                }
+        }
+        // On launch and on every return to the app, ask the hub what this phone
+        // is (a failed or missing answer changes nothing: GrandparentRoleSync)
+        // and for the current stations. Separate jobs, so neither can hold up
+        // the other or the first frame.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                launch { grandparentRoleSync.refresh() }
+                // Every paired phone, not only Saral's: it is what fills the car's Stations tab.
+                launch { stationsRefresher.refresh() }
+                // SARASWATI: fix wave B1 (I2) — its own job too, so a slow hub holds up neither of the others.
+                launch { healthReporter.report() }
+            }
         }
 
         // Defer migration and version tracking to avoid blocking first frame
@@ -475,15 +549,38 @@ class MainActivity : FragmentActivity() {
         }
 
         setContent {
-            MetrolistApp(
-                latestVersionName = latestVersionName,
-                onLatestVersionNameChange = { latestVersionName = it },
-                playerConnection = playerConnectionSnapshot,
-                database = database,
-                downloadUtil = downloadUtil,
-                syncUtils = syncUtils,
-            )
+            when (SaralShell.contentFor(grandparentRole)) {
+                SaralShell.Content.SARAL -> {
+                    LaunchedEffect(Unit) { setSystemBarAppearance(isDark = true) }
+                    SaralApp(playerConnection = playerConnectionSnapshot)
+                }
+                SaralShell.Content.FULL_APP ->
+                    MetrolistApp(
+                        latestVersionName = latestVersionName,
+                        onLatestVersionNameChange = { latestVersionName = it },
+                        playerConnection = playerConnectionSnapshot,
+                        database = database,
+                        downloadUtil = downloadUtil,
+                        syncUtils = syncUtils,
+                    )
+            }
         }
+    }
+
+    // SARASWATI: fix wave A (M5) — the one place that changes the role, so the process-wide
+    // flag the crash screen reads (SaralActive) can never disagree with what is on screen.
+    private fun applyGrandparentRole(value: Boolean) {
+        grandparentRole = value
+        SaralActive.on = value
+    }
+
+    // SARASWATI: Task 9 — empties the launch intent and anything queued so that
+    // nothing sent while Saral is on is replayed later by the full app.
+    private fun dropIntentsForSaral(intent: Intent) {
+        pendingIntent = null
+        intent.action = null
+        intent.data = null
+        intent.replaceExtras(null as Bundle?)
     }
 
     @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
@@ -782,6 +879,7 @@ class MainActivity : FragmentActivity() {
                             Screens.Home.route,
                             Screens.Library.route,
                             Screens.ListenTogether.route,
+                            Screens.Family.route, // SARASWATI: Task 7
                             "settings",
                         )
                     }
@@ -1028,6 +1126,7 @@ class MainActivity : FragmentActivity() {
                             Screens.Search.route -> R.string.search
                             Screens.Library.route -> R.string.filter_library
                             Screens.ListenTogether.route -> R.string.together
+                            Screens.Family.route -> R.string.family_title // SARASWATI: Task 7
                             else -> null
                         }
                     }
@@ -1639,6 +1738,17 @@ class MainActivity : FragmentActivity() {
         // runs. This runs in addition to, not instead of, the broader
         // DeepLinkGuard check below.
         if (SaraswatiDeepLinkPolicy.isListenTogetherLink(uri.host, uri.pathSegments.firstOrNull())) {
+            return
+        }
+
+        // SARASWATI: Task 7 — a family pairing link (this build's hub host,
+        // path /pair, token in the fragment) goes to the join screen and never
+        // reaches the YouTube route-building code below. PairingLink accepts
+        // nothing but that exact shape; anything else falls through to the
+        // YouTube gate, which rejects it.
+        PairingLink.tokenFrom(uri.toString(), BuildConfig.HUB_BASE_URL)?.let { token ->
+            pairingInbox.offer(token)
+            navController.navigate(FamilyRoutes.JOIN) { launchSingleTop = true }
             return
         }
 
