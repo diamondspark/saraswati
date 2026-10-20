@@ -22,17 +22,39 @@ interface SpotifyImportStore {
 
     fun createPlaylist(name: String): String
 
+    /** Appends the songs and returns how many were written. Writes are complete when this returns. */
     fun appendSongs(
         playlistId: String,
         songIds: List<String>,
-    )
+    ): Int
 }
 
 data class ImportReport(
+    val playlistId: String,
     val matched: List<String>,
     val unmatched: List<ImportedTrack>,
+    val unresolved: List<ImportedSongResult>,
     val skippedOverLimit: Int,
 )
+
+/**
+ * Writes the songs the user picked in the review step. A YouTube pick is stored first, the same
+ * way a matched YouTube song is, so the playlist entry has a row to point at. Returns how many
+ * songs were actually appended.
+ */
+fun commitReviewedSongs(
+    store: SpotifyImportStore,
+    playlistId: String,
+    reviewed: List<ImportedSongResult>,
+): Int {
+    val chosen = reviewed.filter { it.isResolved }
+    chosen.forEach { result ->
+        val song = result.resolvedSong ?: return@forEach
+        if (result.source == ImportSource.YOUTUBE) store.persistSong(song)
+    }
+    val ids = chosen.mapNotNull { it.resolvedId }
+    return if (ids.isEmpty()) 0 else store.appendSongs(playlistId, ids)
+}
 
 /**
  * Matches an imported playlist to songs and writes the matches into a new local playlist.
@@ -70,6 +92,7 @@ class SpotifyImportRunner(
 
             val matched = mutableListOf<String>()
             val unmatched = mutableListOf<ImportedTrack>()
+            val unresolved = mutableListOf<ImportedSongResult>()
             toProcess.forEachIndexed { index, track ->
                 val result =
                     resolver
@@ -77,17 +100,29 @@ class SpotifyImportRunner(
                         .single()
                 val resolved = result.resolvedSong
                 val resolvedId = result.resolvedId
-                if (resolved != null && resolvedId != null) {
-                    if (result.source == ImportSource.YOUTUBE) store.persistSong(resolved)
-                    store.appendSongs(playlistId, listOf(resolvedId))
+                val appended =
+                    if (resolved != null && resolvedId != null) {
+                        if (result.source == ImportSource.YOUTUBE) store.persistSong(resolved)
+                        store.appendSongs(playlistId, listOf(resolvedId))
+                    } else {
+                        0
+                    }
+                if (appended > 0 && resolvedId != null) {
                     matched += resolvedId
                 } else {
                     unmatched += track
+                    unresolved += result
                 }
                 onProgress(index + 1, toProcess.size)
             }
 
-            ImportReport(matched = matched, unmatched = unmatched, skippedOverLimit = skippedOverLimit)
+            ImportReport(
+                playlistId = playlistId,
+                matched = matched,
+                unmatched = unmatched,
+                unresolved = unresolved,
+                skippedOverLimit = skippedOverLimit,
+            )
         }
 
     private fun ImportedTrack.toSong(index: Int): Song =
@@ -114,25 +149,28 @@ class SpotifyImportRunner(
 class MusicDatabaseSpotifyImportStore(
     private val database: MusicDatabase,
 ) : SpotifyImportStore {
+    // Every write runs on the calling thread and returns only once it is committed. The runner
+    // already runs on a background thread, so no executor hop is needed, and a later append can
+    // never race an earlier insert.
     override fun localSongs(): List<Song> = runBlocking { database.allSongs().first() }
 
     override fun persistSong(song: Song) {
-        database.query { insert(song.toMediaMetadata()) }
+        database.insert(song.toMediaMetadata())
     }
 
     override fun createPlaylist(name: String): String {
         val playlist = PlaylistEntity(name = name)
-        database.query { insert(playlist) }
+        database.insert(playlist)
         return playlist.id
     }
 
     override fun appendSongs(
         playlistId: String,
         songIds: List<String>,
-    ) {
+    ): Int =
         runBlocking {
-            val playlist = database.playlist(playlistId).first() ?: return@runBlocking
+            val playlist = database.playlist(playlistId).first() ?: return@runBlocking 0
             database.addSongsToPlaylist(playlist, songIds.map { it to null })
+            songIds.size
         }
-    }
 }

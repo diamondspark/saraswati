@@ -62,6 +62,14 @@ sealed class Screens(
         route = "sangat/remote",
     )
 
+    // SARASWATI: Phase 4 Task 21 — Import from Spotify, opened from the Library menu. Not a tab.
+    object SpotifyImport : Screens(
+        titleId = R.string.spotify_import_title,
+        iconIdInactive = R.drawable.upload,
+        iconIdActive = R.drawable.upload,
+        route = "spotify_import",
+    )
+
     companion object {
         val MainScreens = listOf(Home, Search, ListenTogether, Library, Family)
     }

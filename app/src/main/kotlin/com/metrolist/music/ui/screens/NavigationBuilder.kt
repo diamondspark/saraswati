@@ -31,6 +31,7 @@ import com.metrolist.music.saraswati.family.parivaar.TasteHistoryScreen
 import com.metrolist.music.saraswati.family.playlists.FamilyPlaylistScreen
 import com.metrolist.music.saraswati.family.JoinFamilyScreen
 import com.metrolist.music.saraswati.family.sangat.RemoteControllerScreen
+import com.metrolist.music.saraswati.spotifyimport.SpotifyImportScreen
 import com.metrolist.music.saraswati.family.ManageFamilyScreen
 import com.metrolist.music.ui.screens.artist.ArtistAlbumsScreen
 import com.metrolist.music.ui.screens.artist.ArtistItemsScreen
@@ -121,6 +122,11 @@ fun NavGraphBuilder.navigationBuilder(
 
     composable(FamilyRoutes.JOIN) {
         JoinFamilyScreen(navController)
+    }
+
+    // SARASWATI: Phase 4 Task 21 — Import from Spotify, reached from the Library menu.
+    composable(Screens.SpotifyImport.route) {
+        SpotifyImportScreen(navController)
     }
 
     // SARASWATI: Phase 4 Task 19 — a car passenger's remote-controller screen.
