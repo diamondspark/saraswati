@@ -588,6 +588,10 @@ val FamilyFeaturesDisabledKey = stringSetPreferencesKey("familyFeaturesDisabled"
 // the family's listening, so a restored backup must not plant one (BackupPolicy).
 val ParivaarMixKey = stringPreferencesKey("parivaarMix")
 
+// SARASWATI: Phase 5 Task 9 — the songs saved for each family Station to play with no network, as JSON
+// (StationOfflineStore). Derived from the hub's stations and this phone's downloads, so a restored backup must not plant any.
+val StationOfflineSetsKey = stringPreferencesKey("stationOfflineSets")
+
 // SARASWATI: Phase 4 Task 12 — this phone's own Parivaar top-songs playlist on YouTube (its id) and when the weekly
 // sync last finished and was registered with the hub (epoch ms). Both belong to this phone's YouTube account and hub
 // registration, so a restored backup must not point a phone at another account's playlist (BackupPolicy).

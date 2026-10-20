@@ -36,6 +36,9 @@ import com.metrolist.music.saraswati.offline.DefaultOfflinePlayability // SARASW
 import com.metrolist.music.saraswati.offline.NeverSilentController
 import com.metrolist.music.saraswati.offline.NeverSilentState
 import com.metrolist.music.saraswati.offline.NextStreamPrefetcher // SARASWATI: Phase 5 Task 8
+import com.metrolist.music.saraswati.offline.OfflineFirstStationQueue // SARASWATI: Phase 5 Task 9
+import com.metrolist.music.saraswati.culture.radioEndpointFor
+import com.metrolist.music.saraswati.family.parivaar.toMediaMetadata
 import com.metrolist.music.saraswati.offline.QueuePort
 import com.metrolist.music.saraswati.offline.SkipToPlayable
 import com.metrolist.music.saraswati.security.StartActions
@@ -301,6 +304,10 @@ class MusicService :
     // SARASWATI: Task 11 — read here only to tell the car's Stations tab to ask again once it loads or changes.
     @Inject
     lateinit var stationsCache: com.metrolist.music.saraswati.family.StationsCache
+
+    // SARASWATI: Phase 5 Task 9 — the songs saved for each Station, for its queue to fall back on.
+    @Inject
+    lateinit var stationOfflineStore: com.metrolist.music.saraswati.offline.StationOfflineStore
 
     @Inject
     lateinit var equalizerService: EqualizerService
@@ -608,7 +615,7 @@ class MusicService :
 
     // Local songs (Task 2/3 live on another branch): a "local:" id plays only with the audio permission.
     // Switch to LocalSongIds.isLocal / localAccess() when that branch merges.
-    private val offlinePlayability by lazy {
+    internal val offlinePlayability by lazy {
         DefaultOfflinePlayability(
             downloads = { downloadUtil.downloads.value },
             playerCache = playerCache,
@@ -694,6 +701,19 @@ class MusicService :
             resolve = ::resolveAndCacheStream,
         )
     }
+
+    /**
+     * SARASWATI: Phase 5 Task 9 — the queue for a Station: its radio online, its saved songs that can play offline
+     * when there is no network or the radio fails. Saral's tiles and the car's Stations tab both start stations with it.
+     */
+    fun stationQueue(seedVideoId: String): Queue =
+        OfflineFirstStationQueue(
+            title = stationsCache.snapshot().firstOrNull { it.seedVideoId == seedVideoId }?.title.orEmpty(),
+            online = YouTubeQueue(radioEndpointFor(seedVideoId)),
+            offline = stationOfflineStore.forSeed(seedVideoId)?.tracks.orEmpty().map { it.toMediaMetadata() },
+            isOnline = ::neverSilentOnline,
+            playable = offlinePlayability,
+        )
 
     private fun neverSilentOnline(): Boolean = connectivityObserver.networkStatus.value
 

@@ -36,6 +36,7 @@ import com.metrolist.music.constants.ListenTogetherServerUrlKey
 import com.metrolist.music.constants.OpenRouterApiKey
 import com.metrolist.music.constants.OpenRouterBaseUrlKey
 import com.metrolist.music.constants.ParivaarMixKey
+import com.metrolist.music.constants.StationOfflineSetsKey
 import com.metrolist.music.constants.ParivaarPlaylistIdKey
 import com.metrolist.music.constants.ParivaarTopSongsSyncedAtKey
 import com.metrolist.music.constants.ProxyPasswordKey
@@ -270,6 +271,7 @@ class BackupPolicyTest {
                 FamilyStationsCacheKey to "{}",
                 FamilyFeaturesDisabledKey to setOf("sangat"),
                 ParivaarMixKey to "{}",
+                StationOfflineSetsKey to "{}",
                 FamilyPlaylistsCacheKey to "[]",
                 ParivaarPlaylistIdKey to "PLabcdefghij",
                 ParivaarTopSongsSyncedAtKey to 1L,
@@ -281,6 +283,7 @@ class BackupPolicyTest {
         assertNull(sanitized[FamilyStationsCacheKey])
         assertNull(sanitized[FamilyFeaturesDisabledKey])
         assertNull(sanitized[ParivaarMixKey])
+        assertNull(sanitized[StationOfflineSetsKey])
         assertNull(sanitized[FamilyPlaylistsCacheKey])
         assertNull(sanitized[ParivaarPlaylistIdKey])
         assertNull(sanitized[ParivaarTopSongsSyncedAtKey])

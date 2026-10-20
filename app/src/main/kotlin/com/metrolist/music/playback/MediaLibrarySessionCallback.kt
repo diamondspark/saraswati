@@ -91,7 +91,6 @@ import kotlinx.coroutines.flow.flow
 import com.metrolist.music.saraswati.car.CarStations
 import com.metrolist.music.saraswati.car.carBrowsableMediaItem
 import com.metrolist.music.saraswati.car.carDrawableUri
-import com.metrolist.music.saraswati.culture.radioEndpointFor
 import com.metrolist.music.saraswati.family.StationsCache
 import com.metrolist.music.saraswati.security.AndroidPackageLookup
 import com.metrolist.music.saraswati.security.CallerInfoFactory
@@ -879,7 +878,8 @@ constructor(
                 // tile builds it. A station is a radio whatever the "auto radio" setting says.
                 MusicService.CAR_STATIONS -> {
                     val seed = CarStations.seedFrom(mediaItems.first().mediaId) ?: return@future defaultResult
-                    val radioQueue = YouTubeQueue(radioEndpointFor(seed))
+                    // SARASWATI: Phase 5 Task 9 — offline, or when the radio fails, the station plays its saved songs.
+                    val radioQueue = service.stationQueue(seed)
                     val radioStatus = runCatching {
                         withContext(Dispatchers.IO) {
                             radioQueue
