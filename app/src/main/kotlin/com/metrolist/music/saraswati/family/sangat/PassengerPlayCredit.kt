@@ -9,6 +9,13 @@
 // YouTube history. Another person's pick is never credited.
 package com.metrolist.music.saraswati.family.sangat
 
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
+
 class PassengerPlayCredit(
     private val historyDurationMs: Long = 30_000,
     private val clock: () -> Long = System::currentTimeMillis,
@@ -52,3 +59,25 @@ class PassengerPlayCredit(
         return id
     }
 }
+
+/**
+ * Re-emits the latest non-null value of [source] every [tickMs], and emits null once when it goes null. While the
+ * source is null nothing ticks, so a phone that is not a remote controller does no periodic work at all.
+ */
+@OptIn(ExperimentalCoroutinesApi::class)
+fun <T : Any> tickWhilePresent(
+    source: Flow<T?>,
+    tickMs: Long,
+): Flow<T?> =
+    source.flatMapLatest { value ->
+        if (value == null) {
+            flowOf(null)
+        } else {
+            flow {
+                while (true) {
+                    emit(value)
+                    delay(tickMs)
+                }
+            }
+        }
+    }

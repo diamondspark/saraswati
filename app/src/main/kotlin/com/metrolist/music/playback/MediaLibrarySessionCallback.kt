@@ -84,7 +84,7 @@ import com.metrolist.music.saraswati.family.parivaar.ParivaarMixStore
 import com.metrolist.music.saraswati.family.playlists.FamilyPlaylistsRepository
 import com.metrolist.music.saraswati.family.sangat.CarSangatController
 import com.metrolist.music.saraswati.family.sangat.CarSangatResult
-import com.metrolist.music.saraswati.family.sangat.currentQueue
+import com.metrolist.music.saraswati.family.sangat.RepeatSelectionGuard
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
@@ -268,6 +268,8 @@ constructor(
 
     // SARASWATI: Phase 4 Task 15 — the Sangat row and the Sangat button. The answer to the car comes at once; the
     // room takes a moment, and a failure is told in one short phrase.
+    private val sangatSelection = RepeatSelectionGuard()
+
     private fun toggleSangat() {
         scope.launch {
             val message =
@@ -906,10 +908,13 @@ constructor(
                     MediaItemsWithStartPosition(status.items, 0, C.TIME_UNSET)
                 }
 
+                // Phase 4 fix wave: a repeat of the selection does not toggle again, and the player's own queue is
+                // never set again (that rebuffers the song, and a paused player may then start): the request ends
+                // as "not supported", which media3 reports to the car without touching the player.
                 CarFamilyTree.SANGAT_TOGGLE_ID -> {
                     if (path.size != 1) return@future defaultResult
-                    toggleSangat()
-                    withContext(Dispatchers.Main) { currentQueue(mediaSession.player) }
+                    if (sangatSelection.shouldAct()) toggleSangat()
+                    throw UnsupportedOperationException("the Sangat row changes no queue")
                 }
 
                 MusicService.SEARCH -> {

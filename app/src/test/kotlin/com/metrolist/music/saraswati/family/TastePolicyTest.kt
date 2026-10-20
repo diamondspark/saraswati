@@ -22,6 +22,15 @@ class TastePolicyTest {
         mix: Boolean = false,
     ) = TastePolicy.resolve(inRoom, isHost, me, suggestedBy, mix)
 
+    // Truth table of the verdict a play gets, so a hard-coded `counts` or `mix` cannot pass
+    private fun verdict(
+        toggle: Boolean = false,
+        inRoom: Boolean = false,
+        isHost: Boolean = false,
+        suggestedBy: String? = null,
+        mix: Boolean = false,
+    ) = TastePolicy.counts(resolve(inRoom, isHost, suggestedBy = suggestedBy, mix = mix), toggle)
+
     private fun counts(
         context: PlayContext,
         toggle: Boolean = false,
@@ -67,9 +76,36 @@ class TastePolicyTest {
         assertTrue(counts(resolve(inRoom = true, isHost = false, suggestedBy = null), toggle = true))
     }
 
-    @Test fun `Sangat wins over Parivaar Mix when both apply`() {
-        assertEquals(PlayContext.Sangat(addedBySelf = false), resolve(inRoom = true, isHost = false, mix = true))
-        assertEquals(PlayContext.Sangat(addedBySelf = true), resolve(inRoom = true, isHost = true, mix = true))
+    @Test fun `a Parivaar Mix track stays the mix's even while hosting or joining a Sangat`() {
+        assertEquals(PlayContext.ParivaarMix, resolve(inRoom = true, isHost = true, mix = true))
+        assertEquals(PlayContext.ParivaarMix, resolve(inRoom = true, isHost = false, mix = true))
+        assertFalse(verdict(inRoom = true, isHost = true, mix = true))
+        assertTrue(verdict(toggle = true, inRoom = true, isHost = true, mix = true))
+    }
+
+    @Test fun `a passenger's own pick in a room still counts as theirs, flagged or not`() {
+        assertEquals(PlayContext.Sangat(addedBySelf = true), resolve(inRoom = true, isHost = false, suggestedBy = "mohit", mix = true))
+        assertTrue(verdict(inRoom = true, isHost = false, suggestedBy = "mohit", mix = true))
+        assertFalse(verdict(inRoom = true, isHost = true, suggestedBy = "papa", mix = true))
+    }
+
+    @Test fun `leaving a Sangat mid-song keeps a passenger's pick out of the owner's taste`() {
+        assertEquals(PlayContext.Sangat(addedBySelf = false), resolve(inRoom = false, suggestedBy = "papa"))
+        assertFalse(verdict(inRoom = false, suggestedBy = "papa"))
+        assertTrue(verdict(toggle = true, inRoom = false, suggestedBy = "papa"))
+        assertTrue("my own pick, after leaving, is still mine", verdict(inRoom = false, suggestedBy = "Mohit"))
+        assertEquals(PlayContext.Solo, resolve(inRoom = false, suggestedBy = ""))
+    }
+
+    @Test fun `the verdict table - a hard-coded counts or mix cannot pass`() {
+        assertTrue(verdict())
+        assertFalse(verdict(mix = true))
+        assertTrue(verdict(toggle = true, mix = true))
+        assertFalse(verdict(inRoom = true, isHost = false))
+        assertTrue(verdict(inRoom = true, isHost = true))
+        assertFalse(verdict(inRoom = true, isHost = true, suggestedBy = "papa"))
+        assertTrue(verdict(toggle = true, inRoom = true, isHost = true, suggestedBy = "papa"))
+        assertFalse(verdict(inRoom = false, mix = true, suggestedBy = null))
     }
 
     // ---- onPlaybackStatsReady's decision, extracted so it can run without a service ----
@@ -115,5 +151,16 @@ class TastePolicyTest {
         assertTrue(body.contains("plan.writeLocalEvent"))
         assertTrue(body.contains("plan.registerWithYouTube"))
         assertFalse("the raw threshold must not gate registerPlayback any more", body.contains("totalPlayTimeMs >= historyDurationMs"))
+        assertTrue(
+            "the verdict comes from the setting and the resolved context",
+            Regex("""counts\s*=\s*TastePolicy\.counts\(playContext,\s*dataStore\.get\(CountSharedPlaysKey,\s*false\)\)""").containsMatchIn(body),
+        )
+        assertTrue(
+            "the mix is read from the played item, never from the queue held at stats time",
+            Regex("""itemIsParivaarMix\s*=\s*mediaItem\.metadata\?\.fromParivaarMix\s*==\s*true""").containsMatchIn(body),
+        )
+        assertFalse(body.contains("currentQueue"))
+        assertTrue(Regex("""inRoom\s*=\s*listenTogetherManager\.isInRoom""").containsMatchIn(body))
+        assertTrue(Regex("""suggestedBy\s*=\s*mediaItem\.metadata\?\.suggestedBy""").containsMatchIn(body))
     }
 }

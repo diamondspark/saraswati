@@ -6,10 +6,6 @@
 // SARASWATI: Phase 4 Task 15 — the car's Sangat toggle against a fake room and a fake hub.
 package com.metrolist.music.saraswati.family.sangat
 
-import android.content.Context
-import androidx.media3.common.MediaItem
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.test.core.app.ApplicationProvider
 import com.metrolist.music.saraswati.family.FamilyFeature
 import com.metrolist.music.saraswati.family.HubIdentity
 import kotlinx.coroutines.CompletableDeferred
@@ -181,20 +177,18 @@ class CarSangatControllerTest {
         }
 
     @Test
-    fun `selecting the Sangat row keeps the current queue and position`() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val player = ExoPlayer.Builder(context).build()
-        try {
-            val items = listOf("a", "b", "c").map { MediaItem.Builder().setMediaId(it).setUri("https://example.invalid/$it").build() }
-            player.setMediaItems(items, 1, 42_000L)
+    fun `a re-delivered row selection inside the window is ignored, a later one acts`() {
+        var now = 1_000L
+        val guard = RepeatSelectionGuard(windowMs = 3_000L) { now }
+        assertTrue(guard.shouldAct())
+        now += 2_999
+        assertFalse("the same selection delivered again must not toggle back", guard.shouldAct())
+        now += 3_000
+        assertTrue("a real second tap, well after the first", guard.shouldAct())
+    }
 
-            val kept = currentQueue(player)
-
-            assertEquals(listOf("a", "b", "c"), kept.mediaItems.map { it.mediaId })
-            assertEquals(1, kept.startIndex)
-            assertEquals(42_000L, kept.startPositionMs)
-        } finally {
-            player.release()
-        }
+    @Test
+    fun `the first selection always acts, even at clock zero`() {
+        assertTrue(RepeatSelectionGuard(windowMs = 3_000L) { 0L }.shouldAct())
     }
 }

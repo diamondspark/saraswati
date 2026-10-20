@@ -33,25 +33,29 @@ object TastePolicy {
         }
 
     /**
-     * The host's own tracks carry no `suggestedBy`; a passenger's carry the passenger's name. A guest owns only
-     * a track carrying its own name. A Sangat takes precedence over the Parivaar Mix queue the phone may still
-     * hold.
+     * Decided from the played item, not from the queue the phone holds when the stats arrive (a queue swap, a
+     * restored plain list or a radio started over a mix track would otherwise change the answer).
+     *
+     * A Parivaar Mix track with nobody's name on it is the mix's, even while hosting a Sangat. Otherwise the
+     * host's own tracks carry no `suggestedBy` and a passenger's carry the passenger's name; a guest owns only a
+     * track carrying its own name. A name on the item says it was a room pick even after the room is left.
      */
     fun resolve(
         inRoom: Boolean,
         isHost: Boolean,
         myUsername: String,
         suggestedBy: String?,
-        queueIsParivaarMix: Boolean,
+        itemIsParivaarMix: Boolean,
     ): PlayContext {
-        if (inRoom) {
-            val by = suggestedBy?.trim().orEmpty()
-            val me = myUsername.trim()
-            val isMine = me.isNotEmpty() && by.equals(me, ignoreCase = true)
-            val addedBySelf = if (isHost) by.isEmpty() || isMine else isMine
-            return PlayContext.Sangat(addedBySelf)
+        val by = suggestedBy?.trim().orEmpty()
+        val me = myUsername.trim()
+        val isMine = me.isNotEmpty() && by.equals(me, ignoreCase = true)
+        return when {
+            itemIsParivaarMix && by.isEmpty() -> PlayContext.ParivaarMix
+            inRoom -> PlayContext.Sangat(addedBySelf = if (isHost) by.isEmpty() || isMine else isMine)
+            by.isNotEmpty() -> PlayContext.Sangat(addedBySelf = isMine)
+            else -> PlayContext.Solo
         }
-        return if (queueIsParivaarMix) PlayContext.ParivaarMix else PlayContext.Solo
     }
 }
 

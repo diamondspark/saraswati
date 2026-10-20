@@ -28,7 +28,6 @@ import com.metrolist.music.playback.audio.VolumeNormalizationAudioProcessor
 import com.metrolist.music.constants.ListenTogetherUsernameKey
 import com.metrolist.music.saraswati.family.PlaybackStatsPlan
 import com.metrolist.music.saraswati.family.TastePolicy
-import com.metrolist.music.saraswati.family.parivaar.ParivaarMixQueue
 import com.metrolist.music.saraswati.security.StartActions
 import com.metrolist.music.utils.safeDataStoreEdit
 import android.net.ConnectivityManager
@@ -757,7 +756,7 @@ class MusicService :
             }.distinctUntilChanged().collect { updateNotification() }
         }
         carSangatRoom.attachPlayer = {
-            listenTogetherManager.attachForCar { PlayerConnection(this@MusicService, binder, database, scope) }
+            listenTogetherManager.attachForCar { connectionScope -> PlayerConnection(this@MusicService, binder, database, connectionScope) }
         }
         // SARASWATI: fix wave B2 — the same for Home, which answers from its last snapshot at once and tells
         // the car to ask again when a background refresh brought a different one.
@@ -4122,7 +4121,7 @@ class MusicService :
                 isHost = listenTogetherManager.isHost,
                 myUsername = dataStore.get(ListenTogetherUsernameKey, ""),
                 suggestedBy = mediaItem.metadata?.suggestedBy,
-                queueIsParivaarMix = currentQueue is ParivaarMixQueue,
+                itemIsParivaarMix = mediaItem.metadata?.fromParivaarMix == true,
             )
         val plan =
             PlaybackStatsPlan.of(
@@ -4354,6 +4353,7 @@ class MusicService :
             }
         }
 
+        listenTogetherManager.releaseCarConnection(serviceGone = true) // SARASWATI: Phase 4 fix wave — nothing may outlive the service
         try {
             unregisterReceiver(screenStateReceiver)
         } catch (e: Exception) {

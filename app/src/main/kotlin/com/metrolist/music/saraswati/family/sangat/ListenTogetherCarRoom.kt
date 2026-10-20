@@ -40,8 +40,8 @@ class ListenTogetherCarRoom(
 
     override suspend fun createRoom(username: String): String? {
         withContext(mainContext) {
-            attachPlayer()
             if (manager.isInRoom) manager.leaveRoom()
+            attachPlayer() // after leaving: leaving a room frees the manager's service-made connection
             manager.createRoom(username)
         }
         val code =

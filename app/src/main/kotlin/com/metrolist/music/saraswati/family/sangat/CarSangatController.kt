@@ -14,9 +14,6 @@
 // A second tap while the first is still working gets the first one's answer, not a second room or an end.
 package com.metrolist.music.saraswati.family.sangat
 
-import androidx.media3.common.C
-import androidx.media3.common.Player
-import androidx.media3.session.MediaSession.MediaItemsWithStartPosition
 import com.metrolist.music.saraswati.family.FamilyFeature
 import com.metrolist.music.saraswati.family.HubIdentity
 import kotlinx.coroutines.flow.StateFlow
@@ -92,9 +89,25 @@ class CarSangatController(
     }
 }
 
-/** What the player holds right now, handed back unchanged when a car row asks for something that is not a new queue. */
-fun currentQueue(player: Player): MediaItemsWithStartPosition {
-    val items = List(player.mediaItemCount) { player.getMediaItemAt(it) }
-    if (items.isEmpty()) return MediaItemsWithStartPosition(emptyList(), C.INDEX_UNSET, C.TIME_UNSET)
-    return MediaItemsWithStartPosition(items, player.currentMediaItemIndex, player.currentPosition)
+/**
+ * A car may deliver the same row selection twice (a retried or re-sent command). The Sangat row is a toggle, so a
+ * repeat inside [windowMs] of the one just taken must be ignored, or it would undo it.
+ */
+class RepeatSelectionGuard(
+    private val windowMs: Long = DEFAULT_WINDOW_MS,
+    private val clock: () -> Long = System::currentTimeMillis,
+) {
+    private var lastAt = Long.MIN_VALUE
+
+    @Synchronized
+    fun shouldAct(): Boolean {
+        val now = clock()
+        if (lastAt != Long.MIN_VALUE && now - lastAt in 0 until windowMs) return false
+        lastAt = now
+        return true
+    }
+
+    companion object {
+        const val DEFAULT_WINDOW_MS = 3_000L
+    }
 }

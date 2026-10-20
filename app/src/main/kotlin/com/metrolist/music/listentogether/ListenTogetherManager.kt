@@ -24,7 +24,9 @@ import com.metrolist.music.models.MediaMetadata.Artist
 import com.metrolist.music.models.toMediaMetadata
 import com.metrolist.music.playback.PlayerConnection
 import com.metrolist.music.playback.queues.YouTubeQueue
+import com.metrolist.music.saraswati.family.sangat.CarConnectionKeeper
 import com.metrolist.music.saraswati.family.sangat.PassengerPlayCredit
+import com.metrolist.music.saraswati.family.sangat.tickWhilePresent
 import com.metrolist.music.saraswati.family.sangat.GuestPlaybackLock
 import com.metrolist.music.saraswati.family.sangat.RemoteControllerMode
 import com.metrolist.music.saraswati.family.sangat.RemoteControllerPolicy
@@ -39,8 +41,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -123,22 +128,19 @@ class ListenTogetherManager
         // lets a long song be credited without waiting for the next room update.
         private fun observePassengerCredit() {
             val credit = PassengerPlayCredit()
-            val ticker =
-                flow {
-                    while (true) {
-                        emit(Unit)
-                        delay(PASSENGER_CREDIT_TICK_MS)
-                    }
-                }
+            val username =
+                context.dataStore.data
+                    .map { it[ListenTogetherUsernameKey].orEmpty() }
+                    .distinctUntilChanged()
+                    .stateIn(scope, SharingStarted.Eagerly, "")
             scope.launch {
-                combine(remoteNowPlaying, ticker) { now, _ -> now }.collect { now ->
-                    val username = context.dataStore.data.first()[ListenTogetherUsernameKey].orEmpty()
+                tickWhilePresent(remoteNowPlaying, PASSENGER_CREDIT_TICK_MS).collect { now ->
                     val id =
                         credit.onRoomState(
                             videoId = now?.track?.id,
                             suggestedBy = now?.track?.suggestedBy,
                             isPlaying = now?.isPlaying == true,
-                            myUsername = username,
+                            myUsername = username.value,
                         )
                     if (id != null) registerPassengerPlay(id)
                 }
@@ -353,18 +355,56 @@ class ListenTogetherManager
                 }
             }
 
+        // SARASWATI: Phase 4 Task 15 — a Sangat started from the car may be the first Listen Together use since the
+        // process started: the app screen, which normally wires the manager up, has never been opened. Idempotent.
+        // Phase 4 fix wave — the manager keeps a service-made connection of its own for as long as this phone hosts
+        // a room and no app screen is bound, so opening and closing the app cannot stop a car-hosted Sangat syncing;
+        // it is disposed (with its scope) as soon as the screen binds, the room ends or the service goes.
+        private var carConnectionScope: CoroutineScope? = null
+        private val carConnection =
+            CarConnectionKeeper<PlayerConnection> {
+                it.dispose()
+                carConnectionScope?.cancel()
+                carConnectionScope = null
+            }
+
+        fun attachForCar(newConnection: (CoroutineScope) -> PlayerConnection) {
+            carConnection.register {
+                val connectionScope = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]))
+                carConnectionScope = connectionScope
+                newConnection(connectionScope)
+            }
+            if (eventCollectorJob == null) initialize()
+            if (playerConnection == null) bindPlayerConnection(carConnection.resolve(app = null, hosting = true), resync = true)
+        }
+
+        /**
+         * Drops the service-made connection, if that is what the manager holds. Safe to call at any time;
+         * [serviceGone] also forgets how to make another, for a service that is being destroyed.
+         */
+        fun releaseCarConnection(serviceGone: Boolean = false) {
+            if (carConnection.isCar(playerConnection)) bindPlayerConnection(null, resync = true)
+            carConnection.settle(playerConnection)
+            if (serviceGone) carConnection.register(null)
+        }
+
         /**
          * Set the player connection for playback sync.
          * Should be called when PlayerConnection is available.
          */
-        // SARASWATI: Phase 4 Task 15 — a Sangat started from the car may be the first Listen Together use since the
-        // process started: the app screen, which normally wires the manager up, has never been opened. Idempotent.
-        fun attachForCar(newConnection: () -> PlayerConnection) {
-            if (eventCollectorJob == null) initialize()
-            if (playerConnection == null) setPlayerConnection(newConnection())
+        fun setPlayerConnection(connection: PlayerConnection?) {
+            val old = playerConnection
+            val effective = carConnection.resolve(app = connection, hosting = isInRoom && isHost)
+            // Both connections drive the same player: handing a hosted room from one to the other needs no resync
+            val sameService = old != null && effective != null && carConnection.isCar(old) != carConnection.isCar(effective)
+            bindPlayerConnection(effective, resync = !sameService)
+            carConnection.settle(effective)
         }
 
-        fun setPlayerConnection(connection: PlayerConnection?) {
+        private fun bindPlayerConnection(
+            connection: PlayerConnection?,
+            resync: Boolean,
+        ) {
             Timber.tag(TAG).d("setPlayerConnection: ${connection != null}, isInRoom: $isInRoom")
 
             try {
@@ -431,7 +471,7 @@ class ListenTogetherManager
                     stopHeartbeat()
                     stopVolumeSyncObservation()
                 }
-                if (connection != null && oldConnection !== connection && isInRoom && (!isHost || oldConnection != null)) {
+                if (resync && connection != null && oldConnection !== connection && isInRoom && (!isHost || oldConnection != null)) {
                     applyNextHostSnapshot = isHost
                     client.requestSync()
                 }
@@ -638,6 +678,7 @@ class ListenTogetherManager
                     Timber.tag(TAG).d("Kicked from room: ${event.reason}")
                     cleanup()
                     remoteMode.clear() // SARASWATI: Phase 4 Task 10
+                    releaseCarConnection() // SARASWATI: Phase 4 fix wave
                 }
 
                 is ListenTogetherEvent.Disconnected -> {
@@ -1859,6 +1900,7 @@ class ListenTogetherManager
             cleanup()
             remoteMode.clear() // SARASWATI: Phase 4 Task 10
             client.disconnect()
+            releaseCarConnection() // SARASWATI: Phase 4 fix wave
         }
 
         /**
@@ -1902,6 +1944,7 @@ class ListenTogetherManager
             cleanup()
             remoteMode.clear() // SARASWATI: Phase 4 Task 10 — after cleanup, which must still see the mode
             client.leaveRoom()
+            releaseCarConnection() // SARASWATI: Phase 4 fix wave — a room that ends frees the car's connection
         }
 
         /**

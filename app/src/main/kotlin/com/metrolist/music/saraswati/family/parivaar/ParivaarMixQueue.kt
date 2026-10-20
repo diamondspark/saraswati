@@ -15,7 +15,7 @@ class ParivaarMixQueue(
 ) : Queue {
     override val preloadItem: MediaMetadata? = null
 
-    override suspend fun getInitialStatus() = Queue.Status(TITLE, tracks.map { it.toMediaMetadata().toMediaItem() }, 0)
+    override suspend fun getInitialStatus() = Queue.Status(TITLE, tracks.map { it.toQueueMetadata().toMediaItem() }, 0)
 
     override fun hasNextPage(): Boolean = false
 
@@ -25,3 +25,6 @@ class ParivaarMixQueue(
         const val TITLE = "Parivaar Mix"
     }
 }
+
+/** A mix track as the player holds it: flagged, so a finished play is known to be the mix's whatever queue is current. */
+internal fun MixTrack.toQueueMetadata(): MediaMetadata = toMediaMetadata().copy(fromParivaarMix = true)

@@ -16,6 +16,7 @@ import com.metrolist.music.saraswati.family.parivaar.MixTrack
 import com.metrolist.music.saraswati.family.parivaar.ParivaarMix
 import com.metrolist.music.saraswati.family.sangat.CarSangatState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -123,14 +124,15 @@ class CarFamilyTreeTest {
         (listOf(java.io.File(path), java.io.File("app/$path")).firstOrNull { it.isFile } ?: error("cannot find $path")).readText()
 
     @Test
-    fun `the Sangat row hands back the player's own queue and the mix is read from the phone`() {
+    fun `the Sangat row changes no queue, acts once per selection, and the mix is read from the phone`() {
         val callback = sourceText("src/main/kotlin/com/metrolist/music/playback/MediaLibrarySessionCallback.kt")
         val onSetMediaItems = callback.substringAfter("override fun onSetMediaItems")
         val sangatBranch = onSetMediaItems.substringAfter("CarFamilyTree.SANGAT_TOGGLE_ID ->").substringBefore("MusicService.SEARCH ->")
         val mixBranch = onSetMediaItems.substringAfter("CarFamilyTree.PARIVAAR_MIX_ID ->").substringBefore("CarFamilyTree.SANGAT_TOGGLE_ID ->")
 
-        assertTrue(sangatBranch.contains("currentQueue(mediaSession.player)"))
-        assertTrue("the queue is read on the player's thread", sangatBranch.contains("Dispatchers.Main"))
+        assertTrue(sangatBranch.contains("sangatSelection.shouldAct()"))
+        assertTrue("the player's items are never set again", sangatBranch.contains("throw UnsupportedOperationException"))
+        assertFalse(sangatBranch.contains("MediaItemsWithStartPosition("))
         assertTrue(mixBranch.contains("parivaarMixStore.cached()"))
         assertTrue(callback.contains("MediaSessionConstants.ACTION_TOGGLE_SANGAT -> toggleSangat()"))
     }
