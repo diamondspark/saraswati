@@ -42,6 +42,7 @@ import com.metrolist.music.constants.ListThumbnailSize
 import com.metrolist.music.constants.PlaylistSortType
 import com.metrolist.music.db.DatabaseDao
 import com.metrolist.music.db.entities.Playlist
+import com.metrolist.music.saraswati.localmedia.LocalSongIds
 import com.metrolist.music.ui.component.CreatePlaylistDialog
 import com.metrolist.music.ui.component.DefaultDialog
 import com.metrolist.music.ui.component.ListDialog
@@ -146,6 +147,10 @@ fun AddToPlaylistDialog(
             songIds = onGetSongIds?.invoke() ?: onGetSong()
         }
     }
+    // SARASWATI: Phase 5 Task 14 — songs on this phone go only into phone-only playlists (no browseId).
+    val songsAreLocal = songIds?.any { LocalSongIds.isLocal(it) } == true
+    val shownPlaylists = if (songsAreLocal) playlists.filter { it.playlist.browseId == null } else playlists
+
     LaunchedEffect(isVisible, songIds, playlists) {
         if (!isVisible) {
             songIds = null
@@ -286,7 +291,7 @@ fun AddToPlaylistDialog(
                 }
             }
 
-            items(playlists) { playlist ->
+            items(shownPlaylists) { playlist ->
                 val containsSong = playlist.id in playlistsContainingSong
                 val rowBg by animateColorAsState(
                     targetValue = if (containsSong)

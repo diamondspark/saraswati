@@ -1302,6 +1302,26 @@
     <string name="car_downloaded_title">Downloaded</string>
     <string name="car_local_title">On this phone</string>
     <string name="car_local_allow">Allow on your phone</string>
+    <!-- SARASWATI: Phase 5 Task 14 — the On this phone screen and its Library entry. -->
+    <string name="local_songs_title">On this phone</string>
+    <string name="local_songs_privacy">They never leave this phone, except to a Cast speaker you pick</string>
+    <string name="local_songs_needs_permission">Saraswati will look for music files on this phone so you can play them here and in the car. It reads audio files only, never photos or videos.</string>
+    <string name="local_songs_allow">Allow</string>
+    <string name="local_songs_open_settings">Open app settings</string>
+    <string name="local_songs_turn_on">Turn on</string>
+    <string name="local_songs_off_short">Off</string>
+    <string name="local_songs_tap_to_find">Tap to find your songs</string>
+    <string name="local_songs_scanning">Looking for songs on this phone</string>
+    <string name="local_songs_empty">No songs yet</string>
+    <string name="local_songs_empty_body">No music files were found on this phone.</string>
+    <string name="local_songs_check_again">Check again</string>
+    <string name="local_songs_play_all">Play all</string>
+    <string name="local_songs_shuffle">Shuffle</string>
+    <string name="local_songs_refresh">Refresh</string>
+    <plurals name="local_songs_count">
+        <item quantity="one">%d song</item>
+        <item quantity="other">%d songs</item>
+    </plurals>
     <!-- SARASWATI: Phase 5 Task 15 — Storage settings, "Raat ke Gaane" (smart downloads). -->
     <string name="smart_downloads_group">Smart downloads</string>
     <string name="smart_downloads_title">Raat ke Gaane</string>

@@ -90,6 +90,12 @@ class LocalSongsRepository
                 if (LocalFiles.enabled(stored, access())) allCount else flowOf(0)
             }
 
+        /** The songs on this phone as the database holds them. The caller applies the switch; this makes no read. */
+        val storedSongs: Flow<List<Song>> get() = allSongs
+
+        /** What access to this phone's audio files is right now, read fresh. */
+        fun currentAccess(): LocalAccess = access()
+
         private val scanning = Mutex()
         private val backoff = AttemptBackoff(RETRY_GAP_MS)
 

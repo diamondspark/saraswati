@@ -84,6 +84,9 @@ import com.metrolist.music.extensions.toMediaItem
 import com.metrolist.music.models.toMediaMetadata
 import com.metrolist.music.playback.ExoDownloadService
 import com.metrolist.music.playback.queues.YouTubeQueue
+import com.metrolist.music.saraswati.localmedia.LocalSongIds
+import com.metrolist.music.saraswati.localmedia.LocalSongMenuPolicy
+import com.metrolist.music.saraswati.localmedia.SongAction
 import com.metrolist.music.ui.component.DefaultDialog
 import com.metrolist.music.ui.component.ListDialog
 import com.metrolist.music.ui.component.LocalBottomSheetPageState
@@ -121,6 +124,7 @@ fun SongMenu(
     val playerConnection = LocalPlayerConnection.current ?: return
     val songState = database.song(originalSong.id).collectAsStateWithLifecycle(initialValue = originalSong)
     val song = songState.value ?: originalSong
+    val isLocal = LocalSongIds.isLocal(song.id)
     val downloadUtil = LocalDownloadUtil.current
     val download by downloadUtil
         .getDownload(originalSong.id)
@@ -504,11 +508,11 @@ fun SongMenu(
                         }
                     } else {
                         // Regular song: toggle like
-                        val s = song.song.toggleLike()
+                        val s = song.song.toggleLike(syncToYouTube = !isLocal)
                         database.query {
                             update(s)
                         }
-                        syncUtils.likeSong(s)
+                        if (!isLocal) syncUtils.likeSong(s)
                     }
                 },
             ) {
@@ -591,7 +595,7 @@ fun SongMenu(
                         } else {
                             null
                         },
-                        NewAction(
+                        if (LocalSongMenuPolicy.visible(SongAction.SHARE, isLocal)) NewAction(
                             icon = {
                                 Icon(
                                     painter = painterResource(R.drawable.share),
@@ -611,7 +615,7 @@ fun SongMenu(
                                     }
                                 context.startActivity(Intent.createChooser(intent, null))
                             },
-                        ),
+                        ) else null,
                     ),
                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 16.dp),
                 columns = if (isGuest) 2 else 3,
@@ -621,7 +625,8 @@ fun SongMenu(
             Material3MenuGroup(
                 items =
                     listOfNotNull(
-                        if (listenTogetherManager != null && listenTogetherManager.isInRoom && !listenTogetherManager.isHost) {
+                        if (listenTogetherManager != null && listenTogetherManager.isInRoom && !listenTogetherManager.isHost &&
+                            LocalSongMenuPolicy.visible(SongAction.SUGGEST_TO_HOST, isLocal)) {
                             Material3MenuItemData(
                                 title = { Text(text = stringResource(R.string.suggest_to_host)) },
                                 icon = {
@@ -648,7 +653,7 @@ fun SongMenu(
                         } else {
                             null
                         },
-                        if (!isGuest) {
+                        if (!isGuest && LocalSongMenuPolicy.visible(SongAction.START_RADIO, isLocal)) {
                             Material3MenuItemData(
                                 title = { Text(text = stringResource(R.string.start_radio)) },
                                 description = { Text(text = stringResource(R.string.start_radio_desc)) },
@@ -803,7 +808,7 @@ fun SongMenu(
                                     },
                                 ),
                             )
-                        } else {
+                        } else if (LocalSongMenuPolicy.visible(SongAction.ADD_TO_LIBRARY, isLocal)) {
                             add(
                                 Material3MenuItemData(
                                     title = {
@@ -906,7 +911,7 @@ fun SongMenu(
                                 ),
                             )
                         }
-                        if (isFromCache) {
+                        if (isFromCache && LocalSongMenuPolicy.visible(SongAction.REMOVE_FROM_CACHE, isLocal)) {
                             add(
                                 Material3MenuItemData(
                                     title = { Text(text = stringResource(R.string.remove_from_cache)) },
@@ -946,7 +951,7 @@ fun SongMenu(
 
         item { Spacer(modifier = Modifier.height(12.dp)) }
 
-        item {
+        if (LocalSongMenuPolicy.visible(SongAction.DOWNLOAD, isLocal)) item {
             Material3MenuGroup(
                 items =
                     listOf(
@@ -1013,6 +1018,17 @@ fun SongMenu(
                         },
                     ),
             )
+        }
+
+        if (isLocal) {
+            item {
+                Text(
+                    text = stringResource(R.string.local_songs_cant_join_sangat),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                )
+            }
         }
 
         item { Spacer(modifier = Modifier.height(12.dp)) }

@@ -6,8 +6,10 @@
 package com.metrolist.music.ui.screens.library
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -20,6 +22,8 @@ import com.metrolist.music.constants.ChipSortTypeKey
 import com.metrolist.music.constants.LibraryFilter
 import com.metrolist.music.constants.LibraryViewType
 import com.metrolist.music.constants.PlaylistViewTypeKey
+import com.metrolist.music.saraswati.localmedia.LOCAL_SONGS_ROUTE
+import com.metrolist.music.saraswati.localmedia.LocalSongsEntryRow
 import com.metrolist.music.ui.component.ChipsRow
 import com.metrolist.music.utils.rememberEnumPreference
 
@@ -49,36 +53,40 @@ fun LibraryScreen() {
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        when (filterType) {
-            LibraryFilter.LIBRARY -> LibraryMixScreen(
-                navController = navController,
-                filterContent = filterContent,
-                viewType = libraryViewType,
-                onViewTypeChange = { libraryViewType = it },
-            )
-            LibraryFilter.PLAYLISTS -> LibraryPlaylistsScreen(
-                navController = navController,
-                filterContent = filterContent,
-                viewType = playlistViewType,
-                onViewTypeChange = { playlistViewType = it },
-            )
-            LibraryFilter.SONGS -> LibrarySongsScreen(
-                navController,
-                { filterType = LibraryFilter.LIBRARY },
-            )
-            LibraryFilter.ALBUMS -> LibraryAlbumsScreen(
-                navController,
-                { filterType = LibraryFilter.LIBRARY },
-            )
-            LibraryFilter.ARTISTS -> LibraryArtistsScreen(
-                navController,
-                { filterType = LibraryFilter.LIBRARY },
-            )
-            LibraryFilter.PODCASTS -> LibraryPodcastsScreen(
-                navController,
-                { filterType = LibraryFilter.LIBRARY },
-            )
+    // SARASWATI: Phase 5 Task 14 — the On this phone entry sits above the library content and is never hidden.
+    Column(modifier = Modifier.fillMaxSize()) {
+        LocalSongsEntryRow(onClick = { navController.navigate(LOCAL_SONGS_ROUTE) })
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            when (filterType) {
+                LibraryFilter.LIBRARY -> LibraryMixScreen(
+                    navController = navController,
+                    filterContent = filterContent,
+                    viewType = libraryViewType,
+                    onViewTypeChange = { libraryViewType = it },
+                )
+                LibraryFilter.PLAYLISTS -> LibraryPlaylistsScreen(
+                    navController = navController,
+                    filterContent = filterContent,
+                    viewType = playlistViewType,
+                    onViewTypeChange = { playlistViewType = it },
+                )
+                LibraryFilter.SONGS -> LibrarySongsScreen(
+                    navController,
+                    { filterType = LibraryFilter.LIBRARY },
+                )
+                LibraryFilter.ALBUMS -> LibraryAlbumsScreen(
+                    navController,
+                    { filterType = LibraryFilter.LIBRARY },
+                )
+                LibraryFilter.ARTISTS -> LibraryArtistsScreen(
+                    navController,
+                    { filterType = LibraryFilter.LIBRARY },
+                )
+                LibraryFilter.PODCASTS -> LibraryPodcastsScreen(
+                    navController,
+                    { filterType = LibraryFilter.LIBRARY },
+                )
+            }
         }
     }
 }

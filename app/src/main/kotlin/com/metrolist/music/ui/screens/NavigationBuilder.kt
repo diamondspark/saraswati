@@ -28,6 +28,8 @@ import com.metrolist.music.constants.PureBlackKey
 import com.metrolist.music.saraswati.family.FamilyRoutes
 import com.metrolist.music.saraswati.family.FamilyScreen
 import com.metrolist.music.saraswati.family.parivaar.TasteHistoryScreen
+import com.metrolist.music.saraswati.localmedia.LOCAL_SONGS_ROUTE
+import com.metrolist.music.saraswati.localmedia.LocalSongsScreen
 import com.metrolist.music.saraswati.family.playlists.FamilyPlaylistScreen
 import com.metrolist.music.saraswati.family.JoinFamilyScreen
 import com.metrolist.music.saraswati.family.sangat.RemoteControllerScreen
@@ -134,6 +136,11 @@ fun NavGraphBuilder.navigationBuilder(
     // SARASWATI: Phase 4 Task 20 — Taste & history.
     composable(FamilyRoutes.TASTE) {
         TasteHistoryScreen(navController)
+    }
+
+    // SARASWATI: Phase 5 Task 14 — songs on this phone (opened from the Library entry).
+    composable(LOCAL_SONGS_ROUTE) {
+        LocalSongsScreen(navController)
     }
 
     // SARASWATI: Phase 4 Task 20 — one family playlist, by its YouTube playlist id.
