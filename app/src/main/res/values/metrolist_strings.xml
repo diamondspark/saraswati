@@ -1332,4 +1332,7 @@
     <string name="spotify_import_error_unsupported">This is not a Spotify export. Choose the zip or JSON file from your Spotify data.</string>
     <string name="spotify_import_error_too_large">This file is too large to import.</string>
     <string name="spotify_import_error_failed">The import stopped before it finished. Songs matched so far were kept.</string>
+
+    <!-- SARASWATI: Phase 6 Task 17 — radio tuning chip row above the upcoming queue (English only; AGENTS.md). -->
+    <string name="tuning_row_title">Sur · Radio tuning</string>
 </resources>
