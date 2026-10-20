@@ -437,6 +437,14 @@ fun LibraryMixScreen(
                             navController.navigate(Screens.SpotifyImport.route)
                         },
                     )
+                    // SARASWATI: Phase 6 Task 3 — the Library menu's "Snoozed songs" entry.
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.snoozed_songs_menu)) },
+                        onClick = {
+                            showLibraryMenu = false
+                            navController.navigate(Screens.Snoozed.route)
+                        },
+                    )
                 }
             }
 
