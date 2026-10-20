@@ -46,11 +46,7 @@ class RecapSnapshotStore(
 
     fun current(): RecapSnapshot? = held.value.firstOrNull()
 
-    fun previous(): RecapSnapshot? {
-        val now = current() ?: return null
-        val cutoff = now.takenAt - RECAP_PERIOD_DAYS * DAY_MS
-        return held.value.drop(1).firstOrNull { it.takenAt <= cutoff }
-    }
+    fun previous(): RecapSnapshot? = previousOf(held.value)
 
     /** Reads the stored snapshots once; a record that runs first reads them itself. */
     suspend fun ensureLoaded() {
@@ -104,6 +100,13 @@ class RecapSnapshotStore(
         private val SnapshotsKey = stringPreferencesKey("familyRecapSnapshots")
         private val LIST = ListSerializer(RecapSnapshot.serializer())
         private val json = Json { ignoreUnknownKeys = true }
+
+        /** The newest snapshot at least [RECAP_PERIOD_DAYS] older than the first (newest) one, or null. */
+        fun previousOf(newestFirst: List<RecapSnapshot>): RecapSnapshot? {
+            val now = newestFirst.firstOrNull() ?: return null
+            val cutoff = now.takenAt - RECAP_PERIOD_DAYS * DAY_MS
+            return newestFirst.drop(1).firstOrNull { it.takenAt <= cutoff }
+        }
 
         /**
          * Newest first: the newest snapshot, then the newest one at least [RECAP_PERIOD_DAYS] older than it. When none
