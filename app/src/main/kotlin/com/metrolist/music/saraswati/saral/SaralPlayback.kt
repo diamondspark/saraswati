@@ -31,6 +31,8 @@ import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.WatchEndpoint
 import com.metrolist.music.models.toMediaMetadata
 import com.metrolist.music.saraswati.culture.radioEndpointFor
+import com.metrolist.music.saraswati.family.parivaar.MixTrack
+import com.metrolist.music.saraswati.family.parivaar.ParivaarMixQueue
 import com.metrolist.music.playback.PlayerConnection
 import com.metrolist.music.playback.queues.Queue
 import com.metrolist.music.playback.queues.YouTubeQueue
@@ -111,6 +113,10 @@ internal class PlayerConnectionPlayback(
 
     override fun playSong(song: SongItem) {
         start("playSong", YouTubeQueue(WatchEndpoint(videoId = song.id), song.toMediaMetadata()))
+    }
+
+    override fun playParivaarMix(tracks: List<MixTrack>) {
+        start("playParivaarMix", ParivaarMixQueue(tracks))
     }
 
     override fun togglePlayPause() = connection.togglePlayPause()

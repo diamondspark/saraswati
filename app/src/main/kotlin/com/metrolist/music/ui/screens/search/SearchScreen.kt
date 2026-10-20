@@ -21,12 +21,14 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -58,6 +60,10 @@ import com.metrolist.music.LocalDatabase
 import com.metrolist.music.LocalIsPlayerExpanded
 import com.metrolist.music.LocalPlayerAwareWindowInsets
 import com.metrolist.music.LocalPlayerConnection
+// SARASWATI: Phase 6 Task 11 — the Poochho Saraswati entry point and its sheet.
+import com.metrolist.music.saraswati.ask.AskSheet
+import com.metrolist.music.saraswati.ask.AskViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.metrolist.music.R
 import com.metrolist.music.saraswati.SaraswatiFeatures
 import com.metrolist.music.constants.PauseSearchHistoryKey
@@ -125,6 +131,11 @@ fun SearchScreen(
         }
     }
 
+    // SARASWATI: Phase 6 Task 11 — the Poochho entry point, shown only while ask_saraswati is on.
+    val askViewModel: AskViewModel = hiltViewModel()
+    val askEnabled by askViewModel.enabled.collectAsState()
+    var showAsk by rememberSaveable { mutableStateOf(false) }
+
     var searchSource by rememberEnumPreference(SearchSourceKey, SearchSource.ONLINE)
     var query by rememberSaveable(stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue())
@@ -176,6 +187,11 @@ fun SearchScreen(
     val onSearch: (String) -> Unit = { searchQuery -> handleSearch(searchQuery) }
 
     val onSearchFromSuggestion: (String) -> Unit = { searchQuery -> handleSearch(searchQuery) }
+
+    // SARASWATI: Phase 6 Task 11 — the Poochho sheet, opened from the entry point above.
+    if (showAsk && askEnabled) {
+        AskSheet(navController = navController, playerConnection = playerConnection, onClose = { showAsk = false })
+    }
 
     Scaffold(
         topBar = {
@@ -229,6 +245,12 @@ fun SearchScreen(
                         )
 
                         Row {
+                            // SARASWATI: Phase 6 Task 11 — the Poochho entry point, shown only while ask_saraswati is on.
+                            if (askEnabled) {
+                                TextButton(onClick = { showAsk = true }) {
+                                    Text(stringResource(R.string.ask_entry))
+                                }
+                            }
                             if (query.text.isNotEmpty()) {
                                 IconButton(onClick = { query = TextFieldValue("") }) {
                                     Icon(

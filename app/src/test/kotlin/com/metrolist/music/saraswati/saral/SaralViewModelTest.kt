@@ -26,6 +26,7 @@ import com.metrolist.music.saraswati.family.Station
 import com.metrolist.music.saraswati.family.StationsRefresher
 import com.metrolist.music.saraswati.family.hubFailure
 import com.metrolist.music.saraswati.family.noThrottle
+import com.metrolist.music.saraswati.family.parivaar.MixTrack
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -61,6 +62,11 @@ class FakePlayback : SaralPlayback {
 
     override fun playSong(song: SongItem) {
         calls.add("song(${song.id})")
+        queued = true
+    }
+
+    override fun playParivaarMix(tracks: List<MixTrack>) {
+        calls.add("mix(${tracks.size})")
         queued = true
     }
 

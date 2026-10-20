@@ -25,6 +25,7 @@ import com.metrolist.music.saraswati.family.Station
 import com.metrolist.music.saraswati.family.StationsRefresher
 import com.metrolist.music.saraswati.family.VirtualTimeDispatcher
 import com.metrolist.music.saraswati.family.noThrottle
+import com.metrolist.music.saraswati.family.parivaar.MixTrack
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -76,6 +77,8 @@ private class HolderBackedPlayback(
     }
 
     override fun playSong(song: SongItem) = Unit
+
+    override fun playParivaarMix(tracks: List<MixTrack>) = Unit
 
     override fun togglePlayPause() = Unit
 
