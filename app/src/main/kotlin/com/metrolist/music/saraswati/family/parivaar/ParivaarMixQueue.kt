@@ -11,7 +11,7 @@ import com.metrolist.music.models.MediaMetadata
 import com.metrolist.music.playback.queues.Queue
 
 class ParivaarMixQueue(
-    private val tracks: List<MixTrack>,
+    val tracks: List<MixTrack>,
 ) : Queue {
     override val preloadItem: MediaMetadata? = null
 

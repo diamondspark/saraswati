@@ -1179,4 +1179,53 @@
     <string name="car_sangat_pair_first">Pair this phone first</string>
     <string name="car_sangat_off">Sangat is off</string>
     <string name="car_sangat_no_connection">No connection</string>
+
+    <!-- SARASWATI: Phase 4 Task 20 — Parivaar Mix card, Taste & history, family playlists and the song menu's add.
+         Copy follows the approved Phase 4 mockups (Main, Home, Taste, FamilyPlaylist). English only: the Family
+         and Home screens have no Hindi in this app. The playlist read-only line cannot name the creator yet
+         (the hub's playlist rows carry only the device id), so it says "the family phone that made this". -->
+    <string name="parivaar_mix_title">Parivaar Mix · Family mix</string>
+    <string name="parivaar_mix_today">Today\'s Parivaar Mix</string>
+    <plurals name="parivaar_mix_count">
+        <item quantity="one">%1$d song from everyone\'s favourites.</item>
+        <item quantity="other">%1$d songs from everyone\'s favourites.</item>
+    </plurals>
+    <string name="parivaar_mix_play">Play mix</string>
+    <string name="parivaar_mix_needs_two">Needs two family members with songs. It builds once they have played some music.</string>
+    <string name="parivaar_mix_footnote">Plays here stay out of your taste.</string>
+    <string name="parivaar_mix_change_taste">Change in Taste settings</string>
+    <string name="taste_title">Taste &amp; history</string>
+    <string name="parivaar_taste_title">Count Sangat and Parivaar Mix plays toward my taste</string>
+    <string name="taste_explain_off">Only songs you choose shape your History and weekly top songs. Songs others add in Sangat, and Parivaar Mix plays, stay out.</string>
+    <string name="taste_explain_on">Songs others add in Sangat, and Parivaar Mix plays, now shape your History and next week\'s top songs.</string>
+    <string name="taste_what_counts">What counts</string>
+    <string name="taste_what_counts_sub">· History and weekly top songs</string>
+    <string name="taste_row_own">A song you play yourself</string>
+    <string name="taste_row_own_sangat">A song you add in Sangat</string>
+    <string name="taste_row_others_sangat">A song someone else adds in Sangat</string>
+    <string name="taste_row_parivaar">Parivaar Mix plays</string>
+    <string name="taste_note_always">Always</string>
+    <string name="taste_note_counted">Counted, because this is on</string>
+    <string name="taste_note_not_counted">Not counted while this is off</string>
+    <string name="taste_chip_counts">✓ Counts</string>
+    <string name="taste_chip_not_counted">– Not counted</string>
+    <string name="taste_footnote">A play that doesn\'t count is not saved to History, is not sent to YouTube Music, and is not used for your weekly top-songs playlist.</string>
+    <string name="family_playlists_title">Family playlists</string>
+    <string name="family_playlists_sub">· Shared with everyone</string>
+    <string name="family_playlists_empty">No family playlists yet</string>
+    <string name="family_playlists_new">New family playlist</string>
+    <string name="family_playlists_name_label">Playlist name</string>
+    <string name="family_playlists_create">Create</string>
+    <string name="family_playlist_by_you">by You</string>
+    <string name="family_playlist_by_other">by another phone in the family</string>
+    <string name="family_playlist_status_edit">You can edit</string>
+    <string name="family_playlist_status_read">Read-only</string>
+    <string name="family_playlist_label">FAMILY PLAYLIST</string>
+    <string name="family_playlist_yours_note">You made this. Everyone in the family can listen; only you can change it.</string>
+    <string name="family_playlist_read_only">Only the family phone that made this can change it. You can listen to it.</string>
+    <string name="family_playlist_play">Play</string>
+    <string name="family_playlist_open">Open playlist</string>
+    <string name="family_playlist_not_found">This playlist is no longer on the family list.</string>
+    <string name="family_playlist_add_title">Add to family playlist</string>
+    <string name="family_playlist_added">Added to %1$s</string>
 </resources>

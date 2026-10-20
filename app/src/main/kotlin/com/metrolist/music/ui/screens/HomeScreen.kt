@@ -124,6 +124,9 @@ import com.metrolist.music.saraswati.culture.FestivalBanner
 import com.metrolist.music.saraswati.culture.FestivalRadio
 import com.metrolist.music.saraswati.culture.FestivalSeed
 import com.metrolist.music.saraswati.culture.radioEndpointFor
+import com.metrolist.music.saraswati.family.parivaar.ParivaarMixCard
+import com.metrolist.music.saraswati.family.parivaar.ParivaarUiState
+import com.metrolist.music.saraswati.family.parivaar.ParivaarViewModel
 import com.metrolist.music.saraswati.culture.rememberCurrentFestival
 import com.metrolist.music.saraswati.saral.YouTubeSaralSearch
 import com.metrolist.music.saraswati.update.SaraswatiUpdateHttpFetcher
@@ -804,6 +807,9 @@ fun HomeScreen(
     // festival's search and starts that song's radio, the way a Saral tile does; it is a
     // one-off suggestion, never one of the owner's stations. While it is finding the song
     // the button is off, so a second tap cannot start a second radio.
+    // SARASWATI: Phase 4 Task 20 — the Parivaar Mix card's state (Hidden or NeedsTwoMembers show no card).
+    val parivaarViewModel: ParivaarViewModel = hiltViewModel()
+    val parivaarState by parivaarViewModel.state.collectAsStateWithLifecycle()
     val festival by rememberCurrentFestival()
     val festivalRadio = remember { FestivalRadio(YouTubeSaralSearch()) }
     var festivalStarting by remember { mutableStateOf(false) }
@@ -1320,6 +1326,28 @@ fun HomeScreen(
                                 }
                             },
                         )
+                    }
+                }
+
+                // SARASWATI: Phase 4 Task 20 — the Parivaar Mix card, shown only once there is a mix to play. A Listen
+                // Together guest follows the host's queue, so it is off for them, like the festival banner.
+                if (parivaarState is ParivaarUiState.Ready) {
+                    item(key = "parivaar_mix_card") {
+                        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                            Text(
+                                stringResource(R.string.parivaar_mix_title),
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            ParivaarMixCard(
+                                state = parivaarState,
+                                onPlay = {
+                                    if (!isListenTogetherGuest) {
+                                        parivaarViewModel.play { playerConnection?.playQueue(it) }
+                                    }
+                                },
+                            )
+                        }
                     }
                 }
 

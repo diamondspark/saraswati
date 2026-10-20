@@ -90,6 +90,9 @@ import com.metrolist.music.ui.component.LocalBottomSheetPageState
 import com.metrolist.music.ui.component.Material3MenuGroup
 import com.metrolist.music.ui.component.Material3MenuItemData
 import com.metrolist.music.ui.component.NewAction
+import com.metrolist.music.saraswati.family.FamilyError
+import com.metrolist.music.saraswati.family.messageRes
+import com.metrolist.music.saraswati.family.playlists.FamilyPlaylistsViewModel
 import com.metrolist.music.ui.component.NewActionGrid
 import com.metrolist.music.ui.component.SongListItem
 import com.metrolist.music.ui.component.TextFieldDialog
@@ -236,6 +239,12 @@ fun SongMenu(
         mutableStateOf(false)
     }
 
+    // SARASWATI: Phase 4 Task 20 — "Add to family playlist" offers only the playlists this phone made.
+    val familyPlaylists: FamilyPlaylistsViewModel = hiltViewModel()
+    val addableFamily by familyPlaylists.addable.collectAsStateWithLifecycle()
+    var showFamilyPlaylistDialog by rememberSaveable { mutableStateOf(false) }
+    val familyScope = rememberCoroutineScope()
+
     AddToPlaylistDialog(
         isVisible = showChoosePlaylistDialog,
         onGetSong = { listOf(song.id) },
@@ -244,6 +253,33 @@ fun SongMenu(
             showChoosePlaylistDialog = false
         },
     )
+
+    if (showFamilyPlaylistDialog) {
+        ListDialog(onDismiss = { showFamilyPlaylistDialog = false }) {
+            items(addableFamily) { playlist ->
+                ListItem(
+                    content = { Text(text = playlist.title) },
+                    modifier =
+                        Modifier.clickable {
+                            showFamilyPlaylistDialog = false
+                            familyScope.launch {
+                                familyPlaylists
+                                    .addSong(playlist, song.id)
+                                    .onSuccess {
+                                        Toast
+                                            .makeText(context, context.getString(R.string.family_playlist_added, playlist.title), Toast.LENGTH_SHORT)
+                                            .show()
+                                    }.onFailure {
+                                        Toast
+                                            .makeText(context, context.getString(FamilyError.from(it).messageRes()), Toast.LENGTH_SHORT)
+                                            .show()
+                                    }
+                            }
+                        },
+                )
+            }
+        }
+    }
 
     if (showErrorPlaylistAddDialog) {
         ListDialog(
@@ -507,7 +543,7 @@ fun SongMenu(
         item {
             NewActionGrid(
                 actions =
-                    listOf(
+                    listOfNotNull(
                         NewAction(
                             icon = {
                                 Icon(
@@ -539,6 +575,22 @@ fun SongMenu(
                             text = stringResource(R.string.add_to_playlist),
                             onClick = { showChoosePlaylistDialog = true },
                         ),
+                        if (addableFamily.isNotEmpty()) {
+                            NewAction(
+                                icon = {
+                                    Icon(
+                                        painter = painterResource(R.drawable.playlist_add),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(28.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                },
+                                text = stringResource(R.string.family_playlist_add_title),
+                                onClick = { showFamilyPlaylistDialog = true },
+                            )
+                        } else {
+                            null
+                        },
                         NewAction(
                             icon = {
                                 Icon(
