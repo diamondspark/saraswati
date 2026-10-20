@@ -122,6 +122,8 @@ import com.metrolist.music.extensions.filterLocalPlaylistSongs
 import com.metrolist.music.extensions.toMediaItem
 import com.metrolist.music.models.MediaMetadata
 import com.metrolist.music.playback.queues.LocalAlbumRadio
+import com.metrolist.music.saraswati.localmedia.LocalFiles
+import com.metrolist.music.saraswati.localmedia.localAccess
 import com.metrolist.music.ui.utils.resize
 import com.metrolist.music.utils.dataStore
 import com.metrolist.music.utils.joinByBullet
@@ -133,6 +135,7 @@ import com.metrolist.music.utils.rememberPreference
 import com.metrolist.music.utils.reportException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
@@ -892,11 +895,15 @@ fun PlaylistListItem(
         val database = LocalDatabase.current
 
         val context = LocalContext.current
-        val songs by produceState<List<Song>>(initialValue = emptyList(), playlist.id) {
+        // SARASWATI: fix wave P5a C2 — reactive, not one-shot: flipping the Local files switch while this screen
+        // is open must retrigger the badge's download-state computation. LocalFiles.enabled() also treats access
+        // not being GRANTED as off, matching every other local-files surface in the app.
+        val localFilesEnabled by context.dataStore.data
+            .map { LocalFiles.enabled(it[LocalFilesEnabledKey], localAccess(context)) }
+            .distinctUntilChanged()
+            .collectAsStateWithLifecycle(initialValue = LocalFiles.enabled(null, localAccess(context)))
+        val songs by produceState<List<Song>>(initialValue = emptyList(), playlist.id, localFilesEnabled) {
             withContext(Dispatchers.IO) {
-                // SARASWATI: fix wave P5a C2 — a song on this phone must not count toward this badge's download
-                // state the moment the Local files switch goes off.
-                val localFilesEnabled = context.dataStore.data.map { it[LocalFilesEnabledKey] ?: true }.first()
                 value = database.playlistSongs(playlist.id).first().filterLocalPlaylistSongs(localFilesEnabled).map { it.song }
             }
         }
@@ -977,11 +984,15 @@ fun PlaylistGridItem(
         val database = LocalDatabase.current
 
         val context = LocalContext.current
-        val songs by produceState<List<Song>>(initialValue = emptyList(), playlist.id) {
+        // SARASWATI: fix wave P5a C2 — reactive, not one-shot: flipping the Local files switch while this screen
+        // is open must retrigger the badge's download-state computation. LocalFiles.enabled() also treats access
+        // not being GRANTED as off, matching every other local-files surface in the app.
+        val localFilesEnabled by context.dataStore.data
+            .map { LocalFiles.enabled(it[LocalFilesEnabledKey], localAccess(context)) }
+            .distinctUntilChanged()
+            .collectAsStateWithLifecycle(initialValue = LocalFiles.enabled(null, localAccess(context)))
+        val songs by produceState<List<Song>>(initialValue = emptyList(), playlist.id, localFilesEnabled) {
             withContext(Dispatchers.IO) {
-                // SARASWATI: fix wave P5a C2 — a song on this phone must not count toward this badge's download
-                // state the moment the Local files switch goes off.
-                val localFilesEnabled = context.dataStore.data.map { it[LocalFilesEnabledKey] ?: true }.first()
                 value = database.playlistSongs(playlist.id).first().filterLocalPlaylistSongs(localFilesEnabled).map { it.song }
             }
         }

@@ -21,6 +21,8 @@ import com.metrolist.music.db.entities.PlaylistSong
 import com.metrolist.music.extensions.filterLocalPlaylistSongs
 import com.metrolist.music.extensions.reversed
 import com.metrolist.music.extensions.toEnum
+import com.metrolist.music.saraswati.localmedia.LocalFiles
+import com.metrolist.music.saraswati.localmedia.localAccess
 import com.metrolist.music.utils.dataStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -78,7 +80,7 @@ constructor(
                         sortType = it[PlaylistSongSortTypeKey].toEnum(PlaylistSongSortType.CUSTOM),
                         sortDescending = it[PlaylistSongSortDescendingKey] ?: true,
                         hideVideoSongs = it[HideVideoSongsKey] ?: false,
-                        localFilesEnabled = it[LocalFilesEnabledKey] ?: true,
+                        localFilesEnabled = LocalFiles.enabled(it[LocalFilesEnabledKey], localAccess(context)),
                     )
                 }.distinctUntilChanged(),
         ) { songs, prefs ->

@@ -50,6 +50,8 @@ import com.metrolist.music.extensions.matchesNormalizedQuery
 import com.metrolist.music.extensions.normalizeForSearch
 import com.metrolist.music.extensions.toEnum
 import com.metrolist.music.playback.DownloadUtil
+import com.metrolist.music.saraswati.localmedia.LocalFiles
+import com.metrolist.music.saraswati.localmedia.localAccess
 import com.metrolist.music.utils.PodcastRefreshTrigger
 import com.metrolist.music.utils.SyncUtils
 import com.metrolist.music.utils.dataStore
@@ -402,7 +404,7 @@ constructor(
                 hideExplicit = it[HideExplicitKey] ?: false,
                 hideVideoSongs = it[HideVideoSongsKey] ?: false,
                 hideYoutubeShorts = it[HideYoutubeShortsKey] ?: false,
-                localFilesEnabled = it[LocalFilesEnabledKey] ?: true,
+                localFilesEnabled = LocalFiles.enabled(it[LocalFilesEnabledKey], localAccess(context)),
             )
         }
         .distinctUntilChanged()

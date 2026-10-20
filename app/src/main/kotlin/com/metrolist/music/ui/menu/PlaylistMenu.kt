@@ -59,6 +59,8 @@ import com.metrolist.music.extensions.toMediaItem
 import com.metrolist.music.playback.ExoDownloadService
 import com.metrolist.music.playback.queues.ListQueue
 import com.metrolist.music.playback.queues.YouTubeQueue
+import com.metrolist.music.saraswati.localmedia.LocalFiles
+import com.metrolist.music.saraswati.localmedia.localAccess
 import com.metrolist.music.ui.component.DefaultDialog
 import com.metrolist.music.ui.component.Material3MenuGroup
 import com.metrolist.music.ui.component.Material3MenuItemData
@@ -106,7 +108,9 @@ fun PlaylistMenu(
             // Local files switch goes off, and come back the moment it goes back on.
             combine(
                 database.playlistSongs(playlist.id),
-                context.dataStore.data.map { it[LocalFilesEnabledKey] ?: true }.distinctUntilChanged(),
+                context.dataStore.data
+                    .map { LocalFiles.enabled(it[LocalFilesEnabledKey], localAccess(context)) }
+                    .distinctUntilChanged(),
             ) { playlistSongs, localFilesEnabled ->
                 playlistSongs.filterLocalPlaylistSongs(localFilesEnabled).map(PlaylistSong::song)
             }.collect {
