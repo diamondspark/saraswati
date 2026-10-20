@@ -1346,4 +1346,18 @@
     <!-- SARASWATI: Phase 6 Task 5 — speed-dial resume badge. -->
     <string name="resume_badge">Wahin se · Resume</string>
     <!-- SARASWATI: end Phase 6 Task 5 strings -->
+    <!-- SARASWATI: Phase 6 Task 7 — car Home row for the Prahar mix. Placeholders are the window's Hindi and English names. -->
+    <string name="car_prahar_title">Prahar · %1$s</string>
+    <string name="car_prahar_subtitle">Time-of-day mix · %1$s</string>
+    <!-- SARASWATI: Phase 6 Task 8 — Home card for the Prahar mix. Blurbs are sample copy from the approved mockup, for the owner to refine. -->
+    <string name="prahar_card_title">Prahar · %1$s</string>
+    <string name="prahar_card_play">Play</string>
+    <string name="prahar_blurb_usha">Quiet songs for the first light.</string>
+    <string name="prahar_blurb_pratah">Bright songs to start the day.</string>
+    <string name="prahar_blurb_purvahna">Steady songs for the late morning.</string>
+    <string name="prahar_blurb_madhyahna">Easy songs for the middle of the day.</string>
+    <string name="prahar_blurb_aparahna">Warm songs for the slow afternoon.</string>
+    <string name="prahar_blurb_sandhya">Soft songs as the day winds down.</string>
+    <string name="prahar_blurb_pradosh">Calm songs for the late evening.</string>
+    <string name="prahar_blurb_nishith">Low songs for the night.</string>
 </resources>
