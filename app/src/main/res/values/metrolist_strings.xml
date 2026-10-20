@@ -1091,11 +1091,16 @@
          hub) for as long as it is configured, not just the first time. The copy must say so plainly, the way
          local_files_explain_body is explicit about scope, name the two facts that matter to this audience (a
          computer reads the words, and they are never saved — see worker/src/routes/ask.ts: "The question is
-         never stored and never logged"), and avoid "Saral"/"family hub" jargon. Mirrors local_files_explain_*
-         in shape only; still pending the owner's final wording. The Hindi line is a placeholder only: TODO,
-         needs a native Hindi speaker's copy — do not translate this programmatically or invent Devanagari text. -->
-    <string name="ask_voice_explanation_body">Each time you speak a request, your words (not your voice) go to a computer helper on the family\'s Saraswati system, to guess the song or station you want. Your words are never saved.</string>
+         never stored and never logged"), and avoid "Saral"/"family hub" jargon. Short sentences on purpose
+         (second-round review fix): the "not a recording of your voice" claim is scoped to what is sent, not a
+         blanket claim about the phone's own speech recognizer, which may still reach Google
+         (EXTRA_PREFER_OFFLINE is a preference, not a guarantee). Mirrors local_files_explain_* in shape only;
+         still pending the owner's final wording. The Hindi line is a placeholder only: TODO, needs a native
+         Hindi speaker's copy — do not translate this programmatically or invent Devanagari text, and
+         AskVoiceExplanationCard must never show it verbatim on screen (isAskVoiceExplanationPlaceholder). -->
+    <string name="ask_voice_explanation_body">Each time you speak a request, Saraswati sends the words to a computer helper on the family system. It guesses the song or station you meant, the same as before. Only the words are sent, not a recording of your voice, and they are never saved.</string>
     <string name="ask_voice_explanation_continue">Okay</string>
+    <string name="ask_voice_explanation_decline">Not now</string>
     <!-- TODO(hi): placeholder — needs a native Hindi speaker's review and real Hindi copy before this ships. -->
     <string name="ask_voice_explanation_body_hi" translatable="false">TODO: Hindi translation needed for ask_voice_explanation_body</string>
 
