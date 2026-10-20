@@ -1060,3 +1060,20 @@ class ShippedPermissionPinTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NetworkConfigFromXmltreeTests(unittest.TestCase):
+    def test_domains_and_flags_come_back_from_aapt2_xmltree_text(self):
+        dump = (
+            "E: network-security-config (line=26)\n"
+            "    E: domain-config (line=33)\n"
+            "        E: domain (line=34)\n"
+            "          A: includeSubdomains=true\n"
+            "            T: 'youtube.com'\n"
+            "    E: domain-config (line=70)\n"
+            "        E: domain (line=71)\n"
+            "          A: includeSubdomains=false\n"
+            "            T: 'hub.example.workers.dev'\n"
+        )
+        domains = apk_gate.parse_network_config_domains(apk_gate.network_config_xml_from_xmltree(dump))
+        self.assertEqual(domains, [("youtube.com", True), ("hub.example.workers.dev", False)])

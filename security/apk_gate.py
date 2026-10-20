@@ -476,9 +476,11 @@ def check_hub_agreement(
             f"the manifest's pairing-link host is {', '.join(sorted(pairing_hosts))}"
         )
 
-    if (host, False) not in parse_network_config_domains(nsc_xml_text):
+    nsc_domains = parse_network_config_domains(nsc_xml_text)
+    if (host, False) not in nsc_domains:
         violations.append(
             f"hub host mismatch: network_security_config has no exact (includeSubdomains=false) entry for {host}"
+            f" (parsed {len(nsc_domains)} domains; nsc head: {nsc_xml_text[:300]!r})"
         )
 
     allowed = {(entry.get("name"), bool(entry.get("subdomains"))) for entry in egress_allowlist.get("allowed", [])}
@@ -524,6 +526,26 @@ def _run_apkanalyzer_manifest_print(apk_path: str) -> str:
     return _run_apkanalyzer("manifest", "print", apk_path)
 
 
+def network_config_xml_from_xmltree(xmltree_text: str) -> str:
+    """A minimal network-security-config XML (domains only) from ``aapt2 dump xmltree`` text."""
+    domains: list[tuple[str, bool]] = []
+    include = False
+    in_domain = False
+    for line in xmltree_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("E: "):
+            in_domain = stripped.startswith("E: domain ")
+            include = False
+        elif in_domain and stripped.startswith("A: includeSubdomains="):
+            include = "true" in stripped.split("=", 1)[1]
+        elif in_domain and stripped.startswith("T: '") and stripped.endswith("'"):
+            domains.append((stripped[4:-1], include))
+    body = "".join(
+        f'<domain includeSubdomains="{"true" if inc else "false"}">{host}</domain>' for host, inc in domains
+    )
+    return f"<network-security-config><domain-config>{body}</domain-config></network-security-config>"
+
+
 def _read_apk_network_config(apk_path: str) -> str:
     """The compiled network security config inside the APK, as text.
 
@@ -536,7 +558,18 @@ def _read_apk_network_config(apk_path: str) -> str:
     ).strip()
     if not path:
         raise RuntimeError(f"no xml resource named {_NSC_RESOURCE_NAME} in {apk_path}")
-    return _run_apkanalyzer("resources", "xml", "--file", path, apk_path)
+    text = _run_apkanalyzer("resources", "xml", "--file", path, apk_path)
+    # Some apkanalyzer versions (seen on the CI runner) print every <domain/> without its host text.
+    if text.count("<domain") != len(parse_network_config_domains(text)):
+        aapt2 = find_aapt2()
+        if aapt2:
+            dumped = subprocess.run(
+                [aapt2, "dump", "xmltree", "--file", path, apk_path],
+                capture_output=True, text=True, check=False, timeout=_AAPT2_TIMEOUT_SECONDS,
+            )
+            if dumped.returncode == 0:
+                return network_config_xml_from_xmltree(dumped.stdout)
+    return text
 
 
 def _run_aapt2_resources(aapt2: str, apk_path: str) -> str:
