@@ -228,15 +228,12 @@ fun SaralScreen(
         }
 
         if (askExplanation) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(Color(0xEB0A0806))
-                    .padding(24.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                AskVoiceExplanationPrompt(onContinue = viewModel::onAskExplanationAcknowledged)
-            }
+            AskVoiceExplanationOverlay(
+                textColor = TextPrimary,
+                onContinue = viewModel::onAskExplanationAcknowledged,
+                onDismiss = viewModel::onOverlayDismissed,
+                closeLabel = stringResource(R.string.saral_close),
+            )
         } else if (voice != VoicePhase.IDLE) {
             ListeningOverlay(voice, onClose = viewModel::onOverlayDismissed)
         }

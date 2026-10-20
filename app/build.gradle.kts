@@ -400,6 +400,13 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.ktor.client.mock)
+    // SARASWATI: security-ask-explanation (branch audit) — a real Compose UI test (AskVoiceExplanationUiTest)
+    // for the scrim that must consume its own taps: every other Saral UI check so far is source-level regex
+    // (SaralIsolationTest) or ViewModel-only, which is exactly how a non-consuming scrim slipped through review.
+    // Robolectric 4.17 renders Compose content without needing the instrumentation (androidTest) runtime, so
+    // this stays a JVM unit test: createEmptyComposeRule() + Robolectric.setupActivity(ComponentActivity) (not
+    // createComposeRule(), whose own Activity launch Robolectric cannot resolve here).
+    testImplementation("androidx.compose.ui:ui-test-junit4:${libs.versions.compose.get()}")
     // SARASWATI: Task 6 — HubClientTest runs HubClient against a real local
     // HTTP server instead of a mocked OkHttp Call.
     testImplementation(libs.okhttp.mockwebserver)

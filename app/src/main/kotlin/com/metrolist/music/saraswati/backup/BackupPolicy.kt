@@ -45,6 +45,7 @@ import com.metrolist.music.constants.FamilyStationsSavedKey
 import com.metrolist.music.constants.FamilyUnauthorizedAtKey
 import com.metrolist.music.constants.FamilyUnauthorizedCountKey
 import com.metrolist.music.constants.GrandparentRoleKey
+import com.metrolist.music.constants.HasSeenAskVoiceExplanationKey
 import com.metrolist.music.constants.IsFamilyOwnerKey
 import com.metrolist.music.constants.ListenTogetherServerUrlKey
 import com.metrolist.music.constants.ListenTogetherSessionTimestampKey
@@ -160,6 +161,11 @@ object BackupPolicy {
                 // a phone early, a restored absence would hand a failing one a fresh start.
                 FamilyUnauthorizedCountKey,
                 FamilyUnauthorizedAtKey,
+                // SARASWATI: security-ask-explanation (branch audit fix 5) — whether THIS phone's person has
+                // actually acknowledged the ask-voice explanation. Restoring another phone's backup onto this
+                // one must not mark it seen here too: that would suppress the one-time disclosure for someone
+                // who has genuinely never seen it.
+                HasSeenAskVoiceExplanationKey,
             )
 
     // Preference keys the coverage test's wider regex flags as

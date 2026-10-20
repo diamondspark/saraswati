@@ -1088,11 +1088,13 @@
 
     <!-- SARASWATI: security-ask-explanation — the EXPLANATION SCREEN is shown once, but what it describes is not:
          every voice search is routed through Ask Saraswati (SaralAsk resolves the spoken words on the family
-         hub) for as long as it is configured, not just the first time. The copy below must say so plainly, the
-         way local_files_explain_body is explicit about scope. Mirrors local_files_explain_* in shape only. The
-         Hindi line is a placeholder only: TODO, needs a native Hindi speaker's copy — do not translate this
-         programmatically or invent Devanagari text. -->
-    <string name="ask_voice_explanation_body">Every time you use voice search, Saral now sends what you say to Saraswati\'s family hub, to help find a better answer before searching as before.</string>
+         hub) for as long as it is configured, not just the first time. The copy must say so plainly, the way
+         local_files_explain_body is explicit about scope, name the two facts that matter to this audience (a
+         computer reads the words, and they are never saved — see worker/src/routes/ask.ts: "The question is
+         never stored and never logged"), and avoid "Saral"/"family hub" jargon. Mirrors local_files_explain_*
+         in shape only; still pending the owner's final wording. The Hindi line is a placeholder only: TODO,
+         needs a native Hindi speaker's copy — do not translate this programmatically or invent Devanagari text. -->
+    <string name="ask_voice_explanation_body">Each time you speak a request, your words (not your voice) go to a computer helper on the family\'s Saraswati system, to guess the song or station you want. Your words are never saved.</string>
     <string name="ask_voice_explanation_continue">Okay</string>
     <!-- TODO(hi): placeholder — needs a native Hindi speaker's review and real Hindi copy before this ships. -->
     <string name="ask_voice_explanation_body_hi" translatable="false">TODO: Hindi translation needed for ask_voice_explanation_body</string>
