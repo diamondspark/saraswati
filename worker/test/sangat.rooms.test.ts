@@ -36,6 +36,32 @@ async function readRoom(hub: ReturnType<typeof hubStub>, code: string): Promise<
   }) as RoomRecord;
 }
 
+const toHex = (bytes: ArrayBuffer): string =>
+  Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, "0")).join("");
+
+/**
+ * Every row of every Sangat table, as searchable text: a BLOB column (a
+ * room's state, a suggestion's track) is hex-encoded first, since
+ * JSON.stringify drops an ArrayBuffer's bytes rather than searching them.
+ */
+async function dumpSangatTables(hub: ReturnType<typeof hubStub>): Promise<string> {
+  const dumped = await sql(hub, (db) => {
+    const tables: Record<string, unknown[]> = {};
+    for (const table of ["sangat_rooms", "sangat_members", "sangat_pending_joins", "sangat_suggestions"]) {
+      tables[table] = db
+        .exec(`SELECT * FROM ${table} ORDER BY rowid`)
+        .toArray()
+        .map((row) =>
+          Object.fromEntries(
+            Object.entries(row).map(([key, value]) => [key, value instanceof ArrayBuffer ? toHex(value) : value]),
+          ),
+        );
+    }
+    return tables;
+  });
+  return JSON.stringify(dumped);
+}
+
 describe("GET /ws guards", () => {
   it("426 without an Upgrade header", async () => {
     const hub = hubStub();
@@ -141,9 +167,9 @@ describe("rooms", () => {
       { userId: host.userId, sessionTokenHash: await sha256Hex(host.token) },
       { userId: bharat.userId, sessionTokenHash: await sha256Hex(bharat.token) },
     ]);
-    const text = JSON.stringify(rows);
-    expect(text).not.toContain(host.token);
-    expect(text).not.toContain(bharat.token);
+    const afterApprove = await dumpSangatTables(hub);
+    expect(afterApprove).not.toContain(host.token);
+    expect(afterApprove).not.toContain(bharat.token);
 
     // The real token still works to reconnect; its own hash does not.
     const back = await SangatClient.connect(hub, a.token);
@@ -152,6 +178,10 @@ describe("rooms", () => {
     const thief = await SangatClient.connect(hub, b.token);
     await thief.send("reconnect", { session_token: await sha256Hex(bharat.token) });
     expect((await thief.next("error")).payload.code).toBe("session_not_found");
+
+    const afterReconnect = await dumpSangatTables(hub);
+    expect(afterReconnect).not.toContain(host.token);
+    expect(afterReconnect).not.toContain(bharat.token);
   });
 
   it("create_room validates the username and refuses a second room on the same socket", async () => {

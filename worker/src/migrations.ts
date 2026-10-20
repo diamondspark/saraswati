@@ -19,12 +19,15 @@ import { sha256Hex } from "./secrets";
 //       its roster keeps every row.
 //   v4  Ask Saraswati's daily counters (`ask_usage`). Counts only, never the
 //       question. Nothing else changes, so a v3 hub keeps every row.
-//   v5  sangat_members.sessionToken renamed to sessionTokenHash, the same way
-//       the roster's session token was hashed at v2. No value migration: a
-//       Sangat room is live-only state, deleted on leave, expiry, revoke and
-//       the kill switch, so there is nothing worth hashing in place. A seat
-//       mid-reconnect-grace at the exact moment of this deploy just rejoins,
-//       as it would if its grace had simply run out.
+//   v5  sangat_members.sessionToken renamed to sessionTokenHash and hashed in
+//       place, the same way the roster's session token was hashed at v2. A
+//       deploy drops every hibernated socket, and every phone in a live room
+//       is expected to recover by reconnecting with the token it already
+//       holds; renaming the column without hashing what is in it would make
+//       that reconnect's hash of the real token never match the still-
+//       plaintext value, orphaning every room live at deploy time (not just a
+//       seat that happened to be mid-reconnect-grace) until the alarm cleans
+//       it up minutes later.
 export const LATEST_SCHEMA_VERSION = 5;
 
 type Row = Record<string, SqlStorageValue>;
@@ -243,25 +246,44 @@ function applyV4(storage: DurableObjectStorage): void {
 }
 
 /**
- * Idempotent, like v1, v3 and v4. Renames sangat_members.sessionToken to
- * sessionTokenHash, the way v2 renamed the roster's. A hub created fresh in
- * this same migrate() call already has the new name from createSangatTables,
- * so the rename is skipped for it; an existing hub still has the old column.
+ * Renames sangat_members.sessionToken to sessionTokenHash and hashes every
+ * existing value in place, the way v2 hashed the roster's (values hashed
+ * first, since crypto.subtle is asynchronous, then applied in one
+ * transaction with the rename and the version bump). A hub created fresh in
+ * this same migrate() call already has the new column name from
+ * createSangatTables and no rows to hash, so the rename and the hashing are
+ * both skipped for it; an existing hub still has the old column and
+ * whatever tokens its live rooms are holding.
  */
-function applyV5(storage: DurableObjectStorage): void {
+async function applyV5(storage: DurableObjectStorage): Promise<void> {
   const sql = storage.sql;
+
+  const hasOldColumn = sql
+    .exec<{ name: string } & Row>("PRAGMA table_info(sangat_members)")
+    .toArray()
+    .some((row) => row.name === "sessionToken");
+  const members = hasOldColumn
+    ? sql
+        .exec<{ userId: string; sessionToken: string } & Row>("SELECT userId, sessionToken FROM sangat_members")
+        .toArray()
+    : [];
+  const sessionTokenHashes = await Promise.all(members.map((row) => sha256Hex(row.sessionToken)));
+
   storage.transactionSync(() => {
     // Checked again inside the transaction that does the work.
     if (readVersion(sql) !== 4) {
       return;
     }
 
-    const columns = sql
-      .exec<{ name: string } & Row>("PRAGMA table_info(sangat_members)")
-      .toArray()
-      .map((row) => row.name);
-    if (columns.includes("sessionToken")) {
+    if (hasOldColumn) {
       sql.exec("ALTER TABLE sangat_members RENAME COLUMN sessionToken TO sessionTokenHash");
+      members.forEach((row, index) => {
+        sql.exec(
+          "UPDATE sangat_members SET sessionTokenHash = ? WHERE userId = ?",
+          sessionTokenHashes[index],
+          row.userId,
+        );
+      });
     }
     writeVersion(sql, 5);
   });
@@ -286,6 +308,6 @@ export async function migrate(storage: DurableObjectStorage): Promise<void> {
     applyV4(storage);
   }
   if (version < 5) {
-    applyV5(storage);
+    await applyV5(storage);
   }
 }
