@@ -262,6 +262,9 @@ class SaralViewModel
         // SARASWATI: security-ask-explanation — null skips the one-time explanation (treated as already seen),
         // so tests that do not care about it are unaffected.
         private val explanationGate: AskVoiceExplanationGate? = null,
+        // SARASWATI: security-ask-explanation (fourth-round audit fix 2) — overridable only so a test can move
+        // time without a real 600ms delay; real callers always get the wall clock.
+        private val nowMs: () -> Long = { System.currentTimeMillis() },
     ) : ViewModel(scope) {
         @Inject
         constructor(
@@ -341,6 +344,18 @@ class SaralViewModel
         // "seen" cannot become false again, so there is nothing left to learn from another DataStore read.
         private var explanationSeenCache = false
 
+        // SARASWATI: security-ask-explanation (fourth-round audit fix 2) — the instant the explanation closes
+        // (either button), askExplanation goes false while voice can still be SEARCHING (Okay's hub call, or
+        // Not now's fallback search, is still in flight): SaralScreen then draws the full-screen, tap-to-cancel
+        // ListeningOverlay under the same finger that just tapped the button, and a very plausible second tap
+        // reaches onOverlayDismissed() and cancels it — for Okay, after the words already left the phone, with
+        // nothing to show for it. Set on every path that closes the explanation; onOverlayDismissed ignores
+        // itself for a short window after. null (never closed yet) rather than a Long.MIN_VALUE sentinel: this
+        // ViewModel is used for the life of the process, and nowMs() - Long.MIN_VALUE overflows and wraps
+        // negative, which satisfied "< DISMISS_DEBOUNCE_MS" and wrongly debounced the very first real dismiss
+        // of an ordinary voice search that never touched the explanation at all.
+        private var explanationClosedAtMs: Long? = null
+
         private data class PendingAsk(
             val spoken: String,
             val guesses: List<String>?,
@@ -418,6 +433,7 @@ class SaralViewModel
                 val pending = pendingAsk
                 pendingAsk = null
                 _askExplanation.value = false
+                explanationClosedAtMs = nowMs()
                 voiceJob?.cancel()
                 // SARASWATI: security-ask-explanation (third-round audit fix 5, owner's product ruling) —
                 // declining the explanation means "skip the hub for this", not "drop what I said": search the
@@ -426,6 +442,10 @@ class SaralViewModel
                 if (pending != null) searchFor(pending.guesses) else _voice.value = VoicePhase.IDLE
                 return
             }
+            // SARASWATI: security-ask-explanation (fourth-round audit fix 2) — see explanationClosedAtMs: a
+            // stray second tap landing on the overlay that appears the instant Okay/Not now closes the
+            // explanation must not cancel the fallback search or hub call that tap just started.
+            if (explanationClosedAtMs?.let { nowMs() - it < DISMISS_DEBOUNCE_MS } == true) return
             if (_voice.value != VoicePhase.SEARCHING) return
             voiceJob?.cancel()
             _voice.value = VoicePhase.IDLE
@@ -518,12 +538,16 @@ class SaralViewModel
             _voice.value = VoicePhase.SEARCHING
             voiceJob =
                 viewModelScope.launch {
-                    // SARASWATI: security-ask-explanation (third-round audit fix 1) — the explanation's claim
-                    // ("sends the words to a computer helper") must be true when it is shown: Ask Saraswati off,
-                    // or no session, means resolve() below will not reach the hub either (AskRepository.ask
-                    // fails the same check), so there is nothing to explain or to decline out of yet.
+                    // SARASWATI: security-ask-explanation (third-round audit fix 1; fourth-round audit fix 3) —
+                    // the explanation's claim ("sends the words to a computer helper") must be true when it is
+                    // shown: Ask Saraswati off, or no session, means the hub must not be asked at all. Calling
+                    // searchFor directly here, instead of runAsk (which would call asker.resolve -> repo.ask,
+                    // re-checking willReachHub a second time), makes "no explanation shown -> never reaches the
+                    // hub" structural rather than a timing coincidence: gate/session state flipping true between
+                    // this check and a second one inside ask() could otherwise let a question through with no
+                    // explanation ever having been shown.
                     if (!asker.willReachHub()) {
-                        runAsk(asker, spoken, guesses)
+                        searchFor(guesses)
                         return@launch
                     }
                     val gate = explanationGate
@@ -561,6 +585,8 @@ class SaralViewModel
             val asker = ask ?: return
             pendingAsk = null
             _askExplanation.value = false
+            // SARASWATI: security-ask-explanation (fourth-round audit fix 2) — see explanationClosedAtMs.
+            explanationClosedAtMs = nowMs()
             // The person has seen and acknowledged it now, whatever happens to the write below.
             explanationSeenCache = true
             voiceJob =
@@ -714,5 +740,8 @@ class SaralViewModel
         private companion object {
             const val MAX_GUESSES = 3
             const val FESTIVAL_STOP_TIMEOUT_MS = 5_000L
+
+            // SARASWATI: security-ask-explanation (fourth-round audit fix 2)
+            const val DISMISS_DEBOUNCE_MS = 600L
         }
     }

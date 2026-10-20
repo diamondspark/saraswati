@@ -17,14 +17,14 @@
 // of its own (the bug that shipped first), an imprecise tap could fall through to a tile, play/pause or the
 // sign-in prompt underneath while the ask it was waiting on was still pending.
 //
-// Fix (second-round audit, critical) — the card itself used to be a plain Column with no clickable, so it did
-// not stop a tap from reaching the scrim behind it: reading the body text (or tapping anywhere but the Okay
-// button) counted as tapping the scrim and silently dropped the pending ask, with no visible edge to the card
-// and no labelled way to decline. The card is now a bordered Surface with a no-op clickable that absorbs its
-// own taps, and declining is a real, visible "Not now" button wired to the same callback as the scrim
-// ([onDecline] below and [AskVoiceExplanationScrim]'s [onDismiss] are the same callback in practice — see
-// AskVoiceExplanationOverlay). This also fixes the TalkBack finding from the same audit: the explanation no
-// longer reads as a single tap target where a double-tap anywhere drops the request.
+// Fix (second-round audit, critical) — the card itself used to be a plain Column with no tap-absorbing
+// modifier at all, so it did not stop a tap from reaching the scrim behind it: reading the body text (or
+// tapping anywhere but the Okay button) counted as tapping the scrim and silently dropped the pending ask,
+// with no visible edge to the card and no labelled way to decline. The card is now a bordered Surface that
+// absorbs its own taps (see the pointerInput/semantics modifiers below for how, and why that took two more
+// rounds to get right), and declining is a real, visible "Not now" button wired to the same callback as the
+// scrim ([onDecline] below and [AskVoiceExplanationScrim]'s [onDismiss] are the same callback in practice —
+// see AskVoiceExplanationOverlay).
 //
 // [AskVoiceExplanationCard] takes its strings as plain parameters, with [AskVoiceExplanationPrompt] the only
 // place that resolves them from resources: AskVoiceExplanationUiTest renders the real card and scrim together
@@ -43,7 +43,18 @@
 // detectTapGestures, not clickable: clickable always adds a semantics OnClick action and merges descendants
 // into one TalkBack node ("double-tap to activate"), even with indication = null and an empty lambda — which
 // just moved the old "whole card is one dead tap target" bug instead of fixing it. pointerInput consumes the
-// tap without adding any semantics.
+// tap without adding any semantics of its own.
+//
+// Fix (fourth-round audit 1) — pointerInput also adds no *merge boundary*, so without a semantics() of its
+// own the card's text was merging UPWARD into the scrim's clickable instead of being isolated: TalkBack read
+// the whole explanation as the scrim's "Close" button, so a double-tap after hearing it out declined —
+// against the person's intent, and worse than round 3's dead no-op. An empty
+// Modifier.semantics(mergeDescendants = true) {} on the card gives its text its own node with no click action
+// of its own, which stops the scrim's OnClick from reaching up through it, while Okay/Not now (each already
+// its own merge boundary, from Button/TextButton) stay separate, reachable buttons.
+//
+// Fix (fourth-round audit 5) — Okay/Not now are stacked full-width, not side by side, so two 18sp buttons
+// cannot get squeezed into wrapping mid-word at larger system font scales on a narrow phone.
 package com.metrolist.music.saraswati.saral
 
 import androidx.compose.foundation.BorderStroke
@@ -51,16 +62,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -77,6 +86,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -200,19 +210,28 @@ internal fun AskVoiceExplanationCard(
                 .widthIn(max = 420.dp)
                 // Fix (second-round audit, critical; third-round audit fix 3) — consumes the tap here so it
                 // never reaches AskVoiceExplanationScrim's own clickable behind it: reading the body text, or
-                // tapping anywhere else on the card, must never count as declining. pointerInput + detectTapGestures
-                // on purpose, not clickable: clickable always adds a semantics click action and merges this
-                // whole card into one TalkBack node, even with indication = null and an empty onClick — moving
-                // the "whole card is one dead tap target" bug rather than fixing it.
-                .pointerInput(Unit) { detectTapGestures {} },
+                // tapping anywhere else on the card, must never count as declining. pointerInput +
+                // detectTapGestures on purpose, not clickable: clickable always adds a semantics click action,
+                // which (see the semantics() line below for why that alone is not enough) would otherwise read
+                // as one giant "double-tap to activate" TalkBack target over the whole card.
+                .pointerInput(Unit) { detectTapGestures {} }
+                // Fix (fourth-round audit 1) — pointerInput adds no merge boundary of its own, so without this
+                // the card's text was merging UPWARD into AskVoiceExplanationScrim's clickable instead of being
+                // isolated: TalkBack read the whole explanation as the scrim's "Close" button, so a double-tap
+                // after hearing it out *declined* (worse than round 3's dead no-op, which at least did nothing).
+                // An empty mergeDescendants=true boundary gives the card's own text its own node with no click
+                // action, stopping it there, while Okay/Not now (their own merge boundaries, from Button/TextButton)
+                // remain separate, reachable buttons; the scrim above shrinks to a bare "Close" button.
+                .semantics(mergeDescendants = true) {},
         shape = RoundedCornerShape(16.dp),
         color = CardSurfaceColor,
         border = BorderStroke(1.dp, CardBorderColor),
     ) {
         Column {
             // Fix (third-round audit 2) — only the text scrolls (weight + fill = false means it takes no more
-            // than the space left over for it, but never forces the footer below off screen); the button row
-            // is a separate, fixed-position child of this outer Column, so Okay/Not now are always visible.
+            // than the space left over for it, but never forces the footer below off screen); the button
+            // column below is a separate, fixed-position child of this outer Column, so Okay/Not now are
+            // always visible.
             Column(
                 modifier =
                     Modifier
@@ -239,22 +258,23 @@ internal fun AskVoiceExplanationCard(
                     )
                 }
             }
-            Row(
+            // Fix (fourth-round audit 5) — stacked full-width, not side by side: at larger system font scales
+            // on a narrow (~320dp) phone, two 18sp buttons side by side could get tight enough to wrap mid-word.
+            Column(
                 modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 20.dp).fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
             ) {
-                TextButton(
-                    onClick = onDecline,
-                    modifier = Modifier.testTag(ASK_VOICE_EXPLANATION_DECLINE_TAG),
-                ) {
-                    Text(text = declineLabel, style = ExplanationButtonStyle)
-                }
-                Spacer(Modifier.width(8.dp))
                 Button(
                     onClick = onContinue,
-                    modifier = Modifier.testTag(ASK_VOICE_EXPLANATION_CONTINUE_TAG),
+                    modifier = Modifier.fillMaxWidth().testTag(ASK_VOICE_EXPLANATION_CONTINUE_TAG),
                 ) {
                     Text(text = continueLabel, style = ExplanationButtonStyle)
+                }
+                Spacer(Modifier.height(8.dp))
+                TextButton(
+                    onClick = onDecline,
+                    modifier = Modifier.fillMaxWidth().testTag(ASK_VOICE_EXPLANATION_DECLINE_TAG),
+                ) {
+                    Text(text = declineLabel, style = ExplanationButtonStyle)
                 }
             }
         }

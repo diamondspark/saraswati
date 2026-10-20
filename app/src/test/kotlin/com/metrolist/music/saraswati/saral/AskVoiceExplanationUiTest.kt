@@ -32,6 +32,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -114,6 +116,22 @@ class AskVoiceExplanationUiTest {
 
         assertFalse(callbacks.declined)
         assertFalse(callbacks.continued)
+    }
+
+    // SARASWATI: security-ask-explanation (fourth-round audit fix 1) — confirms the merge boundary actually
+    // isolates the card: without it, the scrim's own merged semantics node (what TalkBack reads for a tap
+    // there) included the card's body text, reading the whole explanation as one "Close" button.
+    @Test
+    fun `the scrim's merged semantics do not include the card's body text`() {
+        renderRealExplanation()
+
+        val scrimNode = compose.onNodeWithTag(ASK_VOICE_EXPLANATION_SCRIM_TAG).fetchSemanticsNode()
+        val scrimText = scrimNode.config.getOrNull(SemanticsProperties.Text)?.joinToString(" ") { it.text } ?: ""
+
+        assertFalse(
+            "the card must be its own accessibility boundary; its text must not merge into the scrim's node",
+            scrimText.contains("Each time"),
+        )
     }
 
     @Test

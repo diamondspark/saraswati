@@ -28,6 +28,7 @@ import com.metrolist.music.saraswati.family.Station
 import com.metrolist.music.saraswati.family.StationsRefresher
 import com.metrolist.music.saraswati.family.noThrottle
 import com.metrolist.music.saraswati.family.parivaar.ParivaarMixStore
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -108,6 +109,7 @@ class SaralAskVoiceExplanationTest {
     private fun newVm(
         explanationGate: AskVoiceExplanationGate?,
         repoSessionToken: String? = "sess",
+        nowMs: () -> Long = { System.currentTimeMillis() },
     ): SaralViewModel {
         val repo =
             AskRepository(askHub, FixedIdentity(repoSessionToken), gate, Clock.fixed(Instant.parse("2026-10-19T10:00:00Z"), ZoneOffset.UTC))
@@ -120,6 +122,7 @@ class SaralAskVoiceExplanationTest {
             scope,
             ask = ask,
             explanationGate = explanationGate,
+            nowMs = nowMs,
         ).also { it.bindPlayback(playback) }
     }
 
@@ -285,5 +288,58 @@ class SaralAskVoiceExplanationTest {
 
         assertTrue("a failed read must fall back to showing the explanation", vm.askExplanation.value)
         assertEquals(emptyList<String>(), playback.calls.toList())
+    }
+
+    // SARASWATI: security-ask-explanation (fourth-round audit fix 2, critical, confirmed by running it) — the
+    // instant the explanation closes, voice can still be SEARCHING (Not now's fallback search, or Okay's hub
+    // call, is in flight), and SaralScreen then draws the full-screen, tap-to-cancel ListeningOverlay under the
+    // same finger that just tapped the button: a very plausible second tap reaches onOverlayDismissed() and
+    // used to cancel it outright — for Okay, after the words had already left the phone, with nothing to show
+    // for it. These hold the fallback search in flight (FakeSearch.gate) to prove a stray tap inside the
+    // debounce window does not cancel it.
+    @Test
+    fun `a stray second tap right after declining does not cancel the fallback search`() {
+        answer(AskIntent.PlayStation(bhajan.id))
+        val explanationGate = FakeAskVoiceExplanationGate(seen = false)
+        var clockMs = 1_000L
+        val vm = newVm(explanationGate, nowMs = { clockMs })
+        search.gate = CompletableDeferred()
+
+        vm.heard("bhajan lagao")
+        assertTrue(vm.askExplanation.value)
+
+        vm.onOverlayDismissed()
+        assertEquals("the fallback search must start", VoicePhase.SEARCHING, vm.voice.value)
+
+        // The stray second tap, well inside the debounce window.
+        clockMs += 50
+        vm.onOverlayDismissed()
+
+        assertEquals("the debounced dismiss must not cancel the fallback search", VoicePhase.SEARCHING, vm.voice.value)
+
+        search.gate?.complete(Unit)
+        // A cancelled coroutine's remaining code (including this write) never runs: VoicePhase.IDLE here, not
+        // SEARCHING or stuck, is what actually proves the stray tap did not cancel it.
+        assertEquals("the search must be allowed to finish, proving it was never cancelled", VoicePhase.IDLE, vm.voice.value)
+        assertEquals(listOf("bhajan lagao"), search.queries.toList())
+    }
+
+    @Test
+    fun `a dismiss outside the debounce window still cancels a stuck search`() {
+        answer(AskIntent.PlayStation(bhajan.id))
+        val explanationGate = FakeAskVoiceExplanationGate(seen = false)
+        var clockMs = 1_000L
+        val vm = newVm(explanationGate, nowMs = { clockMs })
+        search.gate = CompletableDeferred()
+
+        vm.heard("bhajan lagao")
+        vm.onOverlayDismissed()
+        assertEquals(VoicePhase.SEARCHING, vm.voice.value)
+
+        // Well past the debounce window: a real dismiss, not a stray tap.
+        clockMs += 700
+        vm.onOverlayDismissed()
+
+        assertEquals(VoicePhase.IDLE, vm.voice.value)
     }
 }

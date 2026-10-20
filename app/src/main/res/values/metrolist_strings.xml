@@ -1095,14 +1095,17 @@
          (second-round review fix): the "not a recording of your voice" claim is scoped to what is sent, not a
          blanket claim about the phone's own speech recognizer, which may still reach Google
          (EXTRA_PREFER_OFFLINE is a preference, not a guarantee). Third-round copy nits: cut the meaningless
-         "the same as before" for a first-time reader, and "never saved" is scoped to the hub helper itself —
-         when it can't tell what was meant, the words still go to a plain YouTube search on the signed-in
-         account, which is not private, so that line says so instead of implying nothing is ever kept anywhere.
-         Mirrors local_files_explain_* in shape only; still pending the owner's final wording. The Hindi line
+         "the same as before" for a first-time reader; "never saved" is scoped to the hub helper itself, since
+         a fallback also means a plain YouTube search on the signed-in account, which is not private. Fourth-
+         round fix 4: "If it can't tell what you meant, they are searched on YouTube instead" undersold how
+         often that happens — a YouTube search also follows any AskIntent.Search/Answer/Sangat reply, so nearly
+         every request that isn't a station or the family mix ends up there regardless of whether the helper
+         understood; the copy now says so plainly instead of implying YouTube is only a rare fallback. Mirrors
+         local_files_explain_* in shape only; still pending the owner's final wording. The Hindi line
          is a placeholder only: TODO, needs a native Hindi speaker's copy — do not translate this
          programmatically or invent Devanagari text, and AskVoiceExplanationCard must never show it verbatim
          on screen (isAskVoiceExplanationPlaceholder). -->
-    <string name="ask_voice_explanation_body">Each time you speak a request, Saraswati sends the words — not a recording of your voice — to a computer helper. It guesses the song or station you meant. The helper itself never saves your words. If it can\'t tell what you meant, they are searched on YouTube instead, the same as any other search here.</string>
+    <string name="ask_voice_explanation_body">Each time you speak a request, Saraswati sends the words — not a recording of your voice — to a computer helper. It picks a family station, or looks the song up on YouTube like any other search here. The helper itself never saves your words.</string>
     <string name="ask_voice_explanation_continue">Okay</string>
     <string name="ask_voice_explanation_decline">Not now</string>
     <!-- TODO(hi): placeholder — needs a native Hindi speaker's review and real Hindi copy before this ships. -->
