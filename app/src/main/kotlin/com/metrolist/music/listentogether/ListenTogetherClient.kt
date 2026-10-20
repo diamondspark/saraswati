@@ -73,6 +73,7 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.cancellation.CancellationException
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.metrolist.innertube.saraswati.LocalIdEgressInterceptor
 
 /**
  * Connection state for the Listen Together feature
@@ -646,7 +647,7 @@ class ListenTogetherClient
             SangatConnect
                 .hardened(
                     OkHttpClient
-                        .Builder()
+                        .Builder().addInterceptor(LocalIdEgressInterceptor)
                         .connectTimeout(30, TimeUnit.SECONDS)
                         .readTimeout(60, TimeUnit.SECONDS)
                         .writeTimeout(30, TimeUnit.SECONDS)

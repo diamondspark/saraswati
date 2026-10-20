@@ -70,6 +70,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
+import com.metrolist.innertube.saraswati.LocalIdEgressInterceptor
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -86,7 +87,7 @@ object FamilyModule {
         HubClient(
             config.baseUrl,
             OkHttpClient
-                .Builder()
+                .Builder().addInterceptor(LocalIdEgressInterceptor)
                 .connectTimeout(10, TimeUnit.SECONDS)
                 .readTimeout(15, TimeUnit.SECONDS)
                 .callTimeout(30, TimeUnit.SECONDS)

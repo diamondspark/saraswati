@@ -22,11 +22,12 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import timber.log.Timber
 import java.util.concurrent.TimeUnit
+import com.metrolist.innertube.saraswati.LocalIdEgressInterceptor
 
 object OpenRouterStreamingService {
     private val client =
         OkHttpClient
-            .Builder()
+            .Builder().addInterceptor(LocalIdEgressInterceptor)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(120, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)

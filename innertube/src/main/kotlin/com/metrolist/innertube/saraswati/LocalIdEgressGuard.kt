@@ -12,12 +12,17 @@ package com.metrolist.innertube.saraswati
 import io.ktor.client.plugins.api.createClientPlugin
 import io.ktor.client.request.HttpSendPipeline
 import io.ktor.http.content.TextContent
+import okhttp3.Interceptor
+import okhttp3.Response
+import okio.Buffer
 
 class LocalSongEgressException(
     message: String = "A song on this phone cannot be sent over the network",
 ) : IllegalStateException(message)
 
-private val LOCAL_ID = Regex("(?i)local(:|%3A)\\d+")
+// The `local` must start the id or follow a non-letter (`"local:42"`, `=local%3A42`, `%20local:42`), so a word that
+// merely ends in "local" (`biolocal:3`) is not refused. Encoded forms (`%3A`, double-encoded `%253A`) are refused too.
+private val LOCAL_ID = Regex("(?i)(?<![a-z])local(:|%3A|%253A)\\d+")
 
 internal fun mentionsLocalId(text: String): Boolean = LOCAL_ID.containsMatchIn(text)
 
@@ -31,3 +36,22 @@ val LocalIdEgressGuard =
             }
         }
     }
+
+/**
+ * The OkHttp counterpart of [LocalIdEgressGuard]: refuses a request whose URL or text body names a song on this phone,
+ * before the call reaches the network. Install it on every OkHttp client that could carry song data.
+ */
+object LocalIdEgressInterceptor : Interceptor {
+    // Bodies up to this size (or of unknown length) are read and checked; a larger body is not a song request.
+    private const val MAX_CHECKED_BODY = 1L shl 20
+
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        val body = request.body
+        val bodyNamesLocal =
+            body != null && body.contentLength() <= MAX_CHECKED_BODY &&
+                Buffer().also { body.writeTo(it) }.readUtf8().let(::mentionsLocalId)
+        if (mentionsLocalId(request.url.toString()) || bodyNamesLocal) throw LocalSongEgressException()
+        return chain.proceed(request)
+    }
+}

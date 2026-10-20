@@ -30,6 +30,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import timber.log.Timber
 import java.util.Locale
+import com.metrolist.innertube.saraswati.LocalIdEgressGuard
 
 /**
  * Zemer: verified lyrics for Jewish music, matched by YouTube videoId (exact identity, no title search).
@@ -65,6 +66,7 @@ object ZemerLyricsProvider : LyricsProvider {
 
     private val client by lazy {
         HttpClient(OkHttp) {
+            install(LocalIdEgressGuard)
             install(ContentNegotiation) { json(json) }
             install(HttpTimeout) {
                 requestTimeoutMillis = 15000

@@ -63,6 +63,7 @@ import java.time.LocalDateTime
 import java.util.concurrent.Executor
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.metrolist.innertube.saraswati.LocalIdEgressInterceptor
 
 @Singleton
 class DownloadUtil
@@ -80,7 +81,7 @@ constructor(
     private val audioQuality by enumPreference(context, AudioQualityKey, AudioQuality.AUTO)
     private val songUrlCache = StreamUrlCache()
     private val streamHttpClient =
-        OkHttpClient.Builder()
+        OkHttpClient.Builder().addInterceptor(LocalIdEgressInterceptor)
             .proxy(YouTube.proxy)
             .proxyAuthenticator { _, response ->
                 YouTube.proxyAuth?.let { auth ->

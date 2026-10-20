@@ -268,6 +268,7 @@ import java.time.LocalDateTime
 import javax.inject.Inject
 import kotlin.random.Random
 import java.util.Collections
+import com.metrolist.innertube.saraswati.LocalIdEgressInterceptor
 
 private const val INSTANT_SILENCE_SKIP_STEP_MS = 15_000L
 private const val INSTANT_SILENCE_SKIP_SETTLE_MS = 350L
@@ -3809,7 +3810,7 @@ class MusicService :
                             this,
                             OkHttpDataSource.Factory(
                                 OkHttpClient
-                                    .Builder()
+                                    .Builder().addInterceptor(LocalIdEgressInterceptor)
                                     .proxy(YouTube.proxy)
                                     .proxyAuthenticator { _, response ->
                                         YouTube.proxyAuth?.let { auth ->

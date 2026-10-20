@@ -13,11 +13,13 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
 import timber.log.Timber
+import com.metrolist.innertube.saraswati.LocalIdEgressGuard
 
 object BetterLyrics {
     private const val TAG = "BetterLyrics"
     private val client by lazy {
         HttpClient(OkHttp) {
+            install(LocalIdEgressGuard)
             install(ContentNegotiation) {
                 json(
                     Json {

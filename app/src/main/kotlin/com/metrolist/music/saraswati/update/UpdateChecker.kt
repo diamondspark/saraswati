@@ -30,6 +30,7 @@ import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.CancellationException
+import com.metrolist.innertube.saraswati.LocalIdEgressGuard
 
 /** One GET. Implementations should return null rather than throw on failure; [UpdateChecker] tolerates either. */
 fun interface HttpFetcher {
@@ -44,7 +45,7 @@ fun interface HttpFetcher {
  * no reason to make it rely on that.
  */
 object SaraswatiUpdateHttpFetcher : HttpFetcher {
-    private val client by lazy { HttpClient(OkHttp) }
+    private val client by lazy { HttpClient(OkHttp) { install(LocalIdEgressGuard) } }
 
     override suspend fun get(url: String): String? = try {
         val response = client.get(url)
