@@ -115,6 +115,13 @@
             android:name="com.metrolist.music.playback.alarm.MusicAlarmRescheduleReceiver"
             tools:node="remove" />
 
+        <!-- SARASWATI: Phase 5 Task 11 — the nightly "Raat ke Gaane" job. Not exported: only the system binds it
+             (BIND_JOB_SERVICE). Adds no uses-permission. -->
+        <service
+            android:name="com.metrolist.music.saraswati.offline.SmartDownloadJobService"
+            android:permission="android.permission.BIND_JOB_SERVICE"
+            android:exported="false" />
+
     </application>
 
 </manifest>

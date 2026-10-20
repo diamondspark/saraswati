@@ -1302,4 +1302,20 @@
     <string name="car_downloaded_title">Downloaded</string>
     <string name="car_local_title">On this phone</string>
     <string name="car_local_allow">Allow on your phone</string>
+    <!-- SARASWATI: Phase 5 Task 15 — Storage settings, "Raat ke Gaane" (smart downloads). -->
+    <string name="smart_downloads_group">Smart downloads</string>
+    <string name="smart_downloads_title">Raat ke Gaane</string>
+    <string name="smart_downloads_headline">Wi-Fi + charging, ~50 songs a night</string>
+    <string name="smart_downloads_body">While the phone sleeps, Saraswati saves songs so they are ready without internet.</string>
+    <string name="smart_downloads_rule_wifi">Only on Wi-Fi. It never uses mobile data.</string>
+    <string name="smart_downloads_rule_charging">Only while charging. It never drains the battery.</string>
+    <string name="smart_downloads_rule_amount">About 50 songs a night, one at a time.</string>
+    <string name="smart_downloads_rule_off">Turn it off any time. Downloads that haven\'t finished are stopped.</string>
+    <string name="smart_downloads_privacy">They never leave this phone, except to a Cast speaker you pick</string>
+    <string name="smart_downloads_not_run_yet">Hasn\'t run yet</string>
+    <string name="smart_downloads_off">Off</string>
+    <plurals name="smart_downloads_last_night">
+        <item quantity="one">Last night: %d song</item>
+        <item quantity="other">Last night: %d songs</item>
+    </plurals>
 </resources>

@@ -7,10 +7,13 @@ package com.metrolist.music.baselineprofile
 
 import androidx.benchmark.macro.CompilationMode
 import androidx.benchmark.macro.FrameTimingMetric
+import androidx.benchmark.macro.MacrobenchmarkScope
 import androidx.benchmark.macro.StartupMode
 import androidx.benchmark.macro.junit4.MacrobenchmarkRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.LargeTest
+import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Until
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -19,6 +22,10 @@ private const val TARGET_PACKAGE_NAME = "dev.diamondspark.saraswati.benchmark"
 private const val MEASUREMENT_ITERATIONS = 10
 private const val SWIPE_COUNT = 10
 private const val SWIPE_STEPS = 30
+private const val UI_TIMEOUT_MS = 10_000L
+
+// SARASWATI: Task 13 — a fling is a faster swipe than the Home scroll, so the list moves on after the finger lifts.
+private const val FLING_STEPS = 8
 
 /**
  * Jank on the Home feed against the design spec's budget
@@ -44,6 +51,42 @@ class HomeScrollBenchmark {
 
     @Test
     fun scrollCompilationBaselineProfile() = scrollHome(CompilationMode.Partial())
+
+    // SARASWATI: Task 13 — the Library's On this phone list (Task 3's screen): open it in setup, fling it while measured.
+    @Test
+    fun scrollOnThisPhone() =
+        benchmarkRule.measureRepeated(
+            packageName = TARGET_PACKAGE_NAME,
+            metrics = listOf(FrameTimingMetric()),
+            compilationMode = CompilationMode.Partial(),
+            startupMode = StartupMode.WARM,
+            iterations = MEASUREMENT_ITERATIONS,
+            setupBlock = {
+                pressHome()
+                startActivityAndWait()
+                clickText("Library")
+                clickText("On this phone")
+            },
+        ) {
+            val x = device.displayWidth / 2
+            val topY = (device.displayHeight * 0.8).toInt()
+            val bottomY = (device.displayHeight * 0.2).toInt()
+            repeat(SWIPE_COUNT) { i ->
+                if (i % 2 == 0) {
+                    device.swipe(x, topY, x, bottomY, FLING_STEPS)
+                } else {
+                    device.swipe(x, bottomY, x, topY, FLING_STEPS)
+                }
+                device.waitForIdle()
+            }
+        }
+
+    private fun MacrobenchmarkScope.clickText(text: String) {
+        device.wait(Until.hasObject(By.text(text)), UI_TIMEOUT_MS)
+        val node = checkNotNull(device.findObject(By.text(text))) { "No '$text' on screen" }
+        node.click()
+        device.waitForIdle()
+    }
 
     private fun scrollHome(compilationMode: CompilationMode) =
         benchmarkRule.measureRepeated(

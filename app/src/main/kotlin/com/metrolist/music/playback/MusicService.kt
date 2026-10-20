@@ -41,6 +41,17 @@ import com.metrolist.music.saraswati.localmedia.LocalSongIds
 import com.metrolist.music.saraswati.family.FamilyFeature
 import com.metrolist.music.saraswati.family.PlaybackStatsPlan
 import com.metrolist.music.saraswati.family.TastePolicy
+import com.metrolist.music.saraswati.offline.DefaultOfflinePlayability // SARASWATI: Phase 5 Task 7
+import com.metrolist.music.saraswati.perf.TapToAudioClock // SARASWATI: Phase 5 Task 12
+import com.metrolist.music.saraswati.perf.TapToAudioTracer // SARASWATI: Phase 5 Task 12
+import com.metrolist.music.saraswati.offline.NeverSilentController
+import com.metrolist.music.saraswati.offline.NeverSilentState
+import com.metrolist.music.saraswati.offline.NextStreamPrefetcher // SARASWATI: Phase 5 Task 8
+import com.metrolist.music.saraswati.offline.OfflineFirstStationQueue // SARASWATI: Phase 5 Task 9
+import com.metrolist.music.saraswati.culture.radioEndpointFor
+import com.metrolist.music.saraswati.family.parivaar.toMediaMetadata
+import com.metrolist.music.saraswati.offline.QueuePort
+import com.metrolist.music.saraswati.offline.SkipToPlayable
 import com.metrolist.music.saraswati.security.StartActions
 import com.metrolist.music.utils.safeDataStoreEdit
 import android.net.ConnectivityManager
@@ -282,6 +293,10 @@ class MusicService :
     // SARASWATI: Task 11 — read here only to tell the car's Stations tab to ask again once it loads or changes.
     @Inject
     lateinit var stationsCache: com.metrolist.music.saraswati.family.StationsCache
+
+    // SARASWATI: Phase 5 Task 9 — the songs saved for each Station, for its queue to fall back on.
+    @Inject
+    lateinit var stationOfflineStore: com.metrolist.music.saraswati.offline.StationOfflineStore
 
     @Inject
     lateinit var equalizerService: EqualizerService
@@ -582,6 +597,160 @@ class MusicService :
     }
 
     private suspend fun castRelayStoredMimeType(mediaId: String): String? = database.format(mediaId).first()?.mimeType
+
+    // SARASWATI: Phase 5 Task 12 — the tap-to-audio tracer. "Offline" is decided at the tap, from the local id or
+    // the first chunk being in a cache; it reads the caches only, so a tap makes no request.
+    private val tapToAudioTracer =
+        TapToAudioTracer(TapToAudioClock(System::currentTimeMillis)) { id ->
+            id.startsWith("local:") ||
+                downloadCache.isCached(id, 0, CHUNK_LENGTH) ||
+                playerCache.isCached(id, 0, CHUNK_LENGTH)
+        }
+
+    // SARASWATI: Phase 5 Task 7 — never silent: skip to what plays without a network when the signal or YouTube
+    // fails. It reads caches and downloads only, so choosing makes no request.
+    private val neverSilentState = NeverSilentState(System::currentTimeMillis)
+
+    // Local songs (Task 2/3 live on another branch): a "local:" id plays only with the audio permission.
+    // Switch to LocalSongIds.isLocal / localAccess() when that branch merges.
+    internal val offlinePlayability by lazy {
+        DefaultOfflinePlayability(
+            downloads = { downloadUtil.downloads.value },
+            playerCache = playerCache,
+            contentLength = { id ->
+                database.format(id).first()?.contentLength
+                    ?: ContentMetadata.getContentLength(playerCache.getContentMetadata(id)).takeIf { it > 0L }
+            },
+            isLocal = { it.startsWith("local:") },
+            localGranted = {
+                Build.VERSION.SDK_INT >= 33 &&
+                    checkSelfPermission("android.permission.READ_MEDIA_AUDIO") == android.content.pm.PackageManager.PERMISSION_GRANTED
+            },
+        )
+    }
+
+    private val neverSilentPort =
+        object : QueuePort {
+            override fun playOrderAfterCurrent(): List<Int> {
+                val timeline = player.currentTimeline
+                if (timeline.isEmpty) return emptyList()
+                val shuffle = player.shuffleModeEnabled
+                val order = ArrayList<Int>(timeline.windowCount)
+                var index = timeline.getFirstWindowIndex(shuffle)
+                while (index != C.INDEX_UNSET && order.size < timeline.windowCount) {
+                    order += index
+                    index = timeline.getNextWindowIndex(index, Player.REPEAT_MODE_OFF, shuffle)
+                }
+                return SkipToPlayable.orderAfter(order, player.currentMediaItemIndex, player.repeatMode == REPEAT_MODE_ALL)
+            }
+
+            override fun idAt(index: Int): String = player.getMediaItemAt(index).mediaId
+
+            override fun currentId(): String? = player.currentMediaItem?.mediaId
+
+            override fun jumpTo(index: Int, play: Boolean) {
+                player.seekTo(index, C.TIME_UNSET)
+                player.prepare()
+                // A restored paused queue, or a pause pressed during the scan, must stay paused.
+                if (play && player.playWhenReady) player.play()
+            }
+
+            override suspend fun insertAfterCurrent(ids: List<String>): Int? {
+                val items =
+                    withContext(Dispatchers.IO) { ids.mapNotNull { id -> database.song(id).first()?.toMediaItem() } }
+                if (items.isEmpty()) return null
+                val at = player.currentMediaItemIndex + 1
+                player.addMediaItems(at, items)
+                return at
+            }
+        }
+
+    private val neverSilent by lazy {
+        NeverSilentController(
+            port = neverSilentPort,
+            playability = offlinePlayability,
+            state = neverSilentState,
+            bridgePool = {
+                withContext(Dispatchers.IO) {
+                    downloadUtil.downloads.value
+                        .filterValues { it.state == androidx.media3.exoplayer.offline.Download.STATE_COMPLETED }
+                        .keys
+                        .toList()
+                }
+            },
+            isCasting = { castConnectionHandler?.isCasting?.value == true },
+            isSangatGuest = { listenTogetherManager.isInRoom && !listenTogetherManager.isHost },
+            inRoom = { listenTogetherManager.isInRoom },
+        )
+    }
+
+    // SARASWATI: Phase 5 Task 8 — the next song's stream is looked up 15 s into a track, never for a local, downloaded,
+    // cached or already-resolved song, never while offline, while YouTube is failing or while casting.
+    private val nextStreamPrefetcher by lazy {
+        NextStreamPrefetcher(
+            scope = scope,
+            shouldResolve = { id ->
+                player.playWhenReady &&
+                    castConnectionHandler?.isCasting?.value != true &&
+                    !neverSilentState.preferOffline(neverSilentOnline()) &&
+                    !id.startsWith("local:") &&
+                    songUrlCache[id] == null &&
+                    !offlinePlayability.isPlayableOffline(id)
+            },
+            resolve = ::resolveAndCacheStream,
+        )
+    }
+
+    /**
+     * SARASWATI: Phase 5 Task 9 — the queue for a Station: its radio online, its saved songs that can play offline
+     * when there is no network or the radio fails. Saral's tiles and the car's Stations tab both start stations with it.
+     */
+    fun stationQueue(seedVideoId: String): Queue =
+        OfflineFirstStationQueue(
+            title = stationsCache.snapshot().firstOrNull { it.seedVideoId == seedVideoId }?.title.orEmpty(),
+            online = YouTubeQueue(radioEndpointFor(seedVideoId)),
+            offline = stationOfflineStore.forSeed(seedVideoId)?.tracks.orEmpty().map { it.toMediaMetadata() },
+            isOnline = ::neverSilentOnline,
+            playable = offlinePlayability,
+        )
+
+    private fun neverSilentOnline(): Boolean = connectivityObserver.networkStatus.value
+
+    // Runs [decide] on the main thread; false (or a failure) means upstream's own handling runs.
+    private fun launchNeverSilent(
+        decide: suspend () -> Boolean,
+        otherwise: () -> Unit = {},
+    ) {
+        scope.launch {
+            val handled =
+                try {
+                    decide()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Timber.tag(TAG).w("Never-silent check failed type=${e::class.simpleName}")
+                    false
+                }
+            if (handled) {
+                // The song that was waiting for the network is no longer the one to retry: drop that wait.
+                waitingForNetworkConnection.value = false
+                retryJob?.cancel()
+                retryJob = null
+            } else {
+                otherwise()
+            }
+        }
+    }
+
+    override fun onIsPlayingChanged(isPlaying: Boolean) {
+        if (!isPlaying) return
+        val id = player.currentMediaItem?.mediaId ?: return
+        scope.launch {
+            if (!withContext(Dispatchers.IO) { offlinePlayability.isPlayableOffline(id) }) {
+                neverSilentState.onNetworkPlaybackStarted()
+            }
+        }
+    }
 
     private val screenStateReceiver =
         object : BroadcastReceiver() {
@@ -1279,6 +1448,8 @@ class MusicService :
             }
         }
         player.addAnalyticsListener(PlaybackStatsListener(false, this@MusicService))
+        // SARASWATI: Task 12 — times a tap to its first audio (SarTapToAudio* trace sections; debug log only).
+        player.addAnalyticsListener(tapToAudioTracer)
 
         // Cleanup handled manually in onDestroy/release
         _playerFlow.value = player
@@ -2435,6 +2606,9 @@ class MusicService :
     // onMediaItemTransition call, so we can decide whether IT finished
     // naturally (and is therefore safe to mark as fully cached).
     private var lastTransitionedMediaId: String? = null
+
+    // SARASWATI: Phase 5 Task 7 — the error of the last player error, read when a song gives up for good.
+    private var lastPlayerError: PlaybackException? = null
     private var previousEpisodePosition: Long = 0L
 
     /**
@@ -2484,6 +2658,20 @@ class MusicService :
             }
         }
         lastTransitionedMediaId = mediaItem?.mediaId
+        // SARASWATI: Phase 5 Task 7 — a streamed song while the signal is gone (or YouTube is failing) is skipped at once.
+        // Only while playing: a queue restored paused at launch must not start by itself.
+        // An explicit choice (a tap, Next, a seek) is never redirected: only automatic transitions are checked.
+        val explicitChoice =
+            reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED || reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK
+        mediaItem?.mediaId?.let { id ->
+            if (player.playWhenReady && !explicitChoice) {
+                launchNeverSilent(decide = { neverSilent.onTransition(id, neverSilentOnline()) })
+            }
+        }
+        // SARASWATI: Phase 5 Task 8 — 15 s into this song, look up the next one's stream (at most once per song).
+        nextStreamPrefetcher.onTrackStarted(
+            player.nextMediaItemIndex.takeIf { it != C.INDEX_UNSET }?.let { player.getMediaItemAt(it).mediaId },
+        )
         initialBufferRecoveryJob?.cancel()
         initialBufferRecoveryJob = null
         initialBufferRecoveryAttemptedMediaId = null
@@ -2897,6 +3085,17 @@ class MusicService :
         }
     }
 
+    /**
+     * Only a failure that says YouTube itself is unreachable or refusing us (network, timeout, 429, 5xx) makes it look
+     * degraded. A removed, region-blocked or age-restricted video is that video's problem.
+     */
+    private fun isYouTubeHealthFailure(error: PlaybackException?): Boolean {
+        if (error == null) return false
+        if (isNetworkRelatedError(error)) return true
+        val status = (error.cause as? HttpDataSource.InvalidResponseCodeException)?.responseCode ?: return false
+        return status == 429 || status in 500..599
+    }
+
     private fun isNetworkRelatedError(error: PlaybackException): Boolean {
         // Don't treat specific errors as network errors - they need special handling
         if (isExpiredUrlError(error) || isRangeNotSatisfiableError(error) || isPageReloadError(error)) {
@@ -2947,6 +3146,7 @@ class MusicService :
 
     override fun onPlayerError(error: PlaybackException) {
         super.onPlayerError(error)
+        lastPlayerError = error
 
         if (!playerInitialized.value) {
             Timber.tag(TAG).e(error, "Player error occurred but player not initialized")
@@ -3024,7 +3224,9 @@ class MusicService :
 
             !isNetworkConnected.value -> {
                 Timber.tag(TAG).d("No internet connection, waiting for connection")
-                waitOnNetworkError()
+                // SARASWATI: Phase 5 Task 7 — a song that plays offline is better than a wait; upstream's wait runs if there is none.
+                val wasPlaying = player.playWhenReady
+                launchNeverSilent(decide = { neverSilent.onOffline(wasPlaying) }, otherwise = ::waitOnNetworkError)
                 return
             }
 
@@ -3382,6 +3584,21 @@ class MusicService :
      * Handles final failure when all recovery attempts have been exhausted.
      */
     private fun handleFinalFailure() {
+        // SARASWATI: Phase 5 Task 7 — after repeated failures, or none of them online, jump to what plays offline.
+        val failedId = player.currentMediaItem?.mediaId
+        if (failedId == null) {
+            handleFinalFailureUpstream()
+            return
+        }
+        val wasPlaying = player.playWhenReady
+        val youTubeFailed = isYouTubeHealthFailure(lastPlayerError)
+        launchNeverSilent(
+            decide = { neverSilent.onFinalFailure(failedId, neverSilentOnline(), wasPlaying, youTubeFailed) },
+            otherwise = ::handleFinalFailureUpstream,
+        )
+    }
+
+    private fun handleFinalFailureUpstream() {
         val autoSkipOnError = dataStore.get(AutoSkipNextOnErrorKey, false)
         val autoplay = dataStore.get(AutoplayKey, true)
         val canAdvance = player.hasNextMediaItem()
@@ -3491,6 +3708,120 @@ class MusicService :
         }
     }
 
+    /**
+     * SARASWATI: Phase 5 Task 8 — fetches the stream for [mediaId], stores its format, and puts the URL in
+     * [songUrlCache]. This is the resolver's own block (see createDataSourceFactory) moved here unchanged apart
+     * from the two things only the song being played may do (apply its loudness gain, report its stream client),
+     * which the resolver still does; the next-song prefetch calls it for a song that is not playing yet.
+     */
+    private suspend fun resolveAndCacheStream(mediaId: String): InnerTubeXPlayer.PlaybackData {
+        val cacheGeneration = songUrlCache.generation(mediaId)
+        val playbackData =
+            withContext(Dispatchers.IO) {
+                val song = database.songEntity(mediaId)
+                InnerTubeXPlayer.playerResponseForPlayback(
+                    mediaId,
+                    audioQuality = audioQuality,
+                    connectivityManager = connectivityManager,
+                    contentHints = ContentHints(
+                        isExplicit = song?.explicit,
+                        isUploaded = song?.isUploaded,
+                    ),
+                )
+            }.getOrElse { throwable ->
+                when (throwable) {
+                    is PlaybackException -> {
+                        throw throwable
+                    }
+
+                    is java.net.ConnectException, is java.net.UnknownHostException -> {
+                        throw PlaybackException(
+                            getString(R.string.error_no_internet),
+                            throwable,
+                            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+                        )
+                    }
+
+                    is java.net.SocketTimeoutException -> {
+                        throw PlaybackException(
+                            getString(R.string.error_timeout),
+                            throwable,
+                            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+                        )
+                    }
+
+                    else -> {
+                        throw PlaybackException(
+                            getString(R.string.error_unknown),
+                            throwable,
+                            PlaybackException.ERROR_CODE_REMOTE_ERROR,
+                        )
+                    }
+                }
+            }
+
+        val nonNullPlayback =
+            requireNotNull(playbackData) {
+                getString(R.string.error_unknown)
+            }
+        val format = nonNullPlayback.format
+        val loudnessDb = nonNullPlayback.audioConfig?.loudnessDb
+        val perceptualLoudnessDb = nonNullPlayback.audioConfig?.perceptualLoudnessDb
+
+        Timber
+            .tag(TAG)
+            .d("Storing format for $mediaId with loudnessDb: $loudnessDb, perceptualLoudnessDb: $perceptualLoudnessDb")
+        if (loudnessDb == null && perceptualLoudnessDb == null) {
+            Timber.tag(TAG).w("No loudness data available from YouTube for video: $mediaId")
+        }
+
+        format.contentLength?.let { contentLength ->
+            database.query {
+                upsert(
+                    FormatEntity(
+                        id = mediaId,
+                        itag = format.itag,
+                        mimeType = format.mimeType.substringBefore(";"),
+                        codecs =
+                            format.mimeType
+                                .substringAfter("codecs=", missingDelimiterValue = "")
+                                .substringBefore(";")
+                                .trim()
+                                .removeSurrounding("\""),
+                        bitrate = format.bitrate,
+                        sampleRate = format.audioSampleRate,
+                        contentLength = contentLength,
+                        loudnessDb = loudnessDb,
+                        perceptualLoudnessDb = perceptualLoudnessDb,
+                        playbackUrl = nonNullPlayback.playbackTracking?.videostatsPlaybackUrl?.baseUrl,
+                    ),
+                )
+            }
+        } ?: Timber.tag(TAG).w("Skipping format persistence without content length for $mediaId")
+        recoverSongDeduped(mediaId, nonNullPlayback)
+
+        if (bypassCacheForQualityChange.remove(mediaId)) {
+            Timber.tag(TAG).d("Cleared bypass cache flag for $mediaId after fresh fetch")
+        }
+
+        songUrlCache.put(
+            mediaId = mediaId,
+            url = nonNullPlayback.streamUrl,
+            requestHeaders = nonNullPlayback.streamHeaders,
+            clientName = nonNullPlayback.streamClient,
+            expiresInSeconds = nonNullPlayback.streamExpiresInSeconds,
+            requireBoundedRange = nonNullPlayback.requireBoundedRange,
+            rangeChunkSizeBytes = nonNullPlayback.rangeChunkSizeBytes,
+            useRangeChunks = nonNullPlayback.useRangeChunks,
+            expectedGeneration = cacheGeneration,
+        )
+
+        nonNullPlayback.playbackTracking?.videostatsPlaybackUrl?.baseUrl?.let {
+            playbackUrlCache[cacheKey(mediaId)] = it
+        }
+        return nonNullPlayback
+    }
+
     private fun createDataSourceFactory(
         normalizationProcessor: VolumeNormalizationAudioProcessor,
         playerProvider: () -> ExoPlayer?,
@@ -3543,122 +3874,19 @@ class MusicService :
                 Timber.tag(TAG).i("BYPASSING CACHE for $mediaId due to quality change")
             }
 
-            val cacheGeneration = songUrlCache.generation(mediaId)
             Timber.tag(TAG).i("FETCHING STREAM: $mediaId | quality=$audioQuality")
-            val playbackData =
-                runBlocking(Dispatchers.IO) {
-                    val song = database.songEntity(mediaId)
-                    InnerTubeXPlayer.playerResponseForPlayback(
-                        mediaId,
-                        audioQuality = audioQuality,
-                        connectivityManager = connectivityManager,
-                        contentHints = ContentHints(
-                            isExplicit = song?.explicit,
-                            isUploaded = song?.isUploaded,
-                        ),
-                    )
-                }.getOrElse { throwable ->
-                    when (throwable) {
-                        is PlaybackException -> {
-                            throw throwable
-                        }
-
-                        is java.net.ConnectException, is java.net.UnknownHostException -> {
-                            throw PlaybackException(
-                                getString(R.string.error_no_internet),
-                                throwable,
-                                PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
-                            )
-                        }
-
-                        is java.net.SocketTimeoutException -> {
-                            throw PlaybackException(
-                                getString(R.string.error_timeout),
-                                throwable,
-                                PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
-                            )
-                        }
-
-                        else -> {
-                            throw PlaybackException(
-                                getString(R.string.error_unknown),
-                                throwable,
-                                PlaybackException.ERROR_CODE_REMOTE_ERROR,
-                            )
-                        }
-                    }
-                }
-
-            val nonNullPlayback =
-                requireNotNull(playbackData) {
-                    getString(R.string.error_unknown)
-                }
+            // SARASWATI: Phase 5 Task 8 — the fetch-and-cache block is resolveAndCacheStream, shared with the next-song prefetch.
+            val nonNullPlayback = runBlocking(Dispatchers.IO) { resolveAndCacheStream(mediaId) }
             run {
-                val format = nonNullPlayback.format
-                val loudnessDb = nonNullPlayback.audioConfig?.loudnessDb
-                val perceptualLoudnessDb = nonNullPlayback.audioConfig?.perceptualLoudnessDb
-
-                Timber
-                    .tag(TAG)
-                    .d("Storing format for $mediaId with loudnessDb: $loudnessDb, perceptualLoudnessDb: $perceptualLoudnessDb")
-                if (loudnessDb == null && perceptualLoudnessDb == null) {
-                    Timber.tag(TAG).w("No loudness data available from YouTube for video: $mediaId")
-                }
                 applyAudioNormalizationBeforePlayback(
                     processor = normalizationProcessor,
                     playerProvider = playerProvider,
                     mediaId = mediaId,
-                    loudnessDb = loudnessDb,
-                    perceptualLoudnessDb = perceptualLoudnessDb,
+                    loudnessDb = nonNullPlayback.audioConfig?.loudnessDb,
+                    perceptualLoudnessDb = nonNullPlayback.audioConfig?.perceptualLoudnessDb,
                 )
-
-                format.contentLength?.let { contentLength ->
-                    database.query {
-                        upsert(
-                            FormatEntity(
-                                id = mediaId,
-                                itag = format.itag,
-                                mimeType = format.mimeType.substringBefore(";"),
-                                codecs =
-                                    format.mimeType
-                                        .substringAfter("codecs=", missingDelimiterValue = "")
-                                        .substringBefore(";")
-                                        .trim()
-                                        .removeSurrounding("\""),
-                                bitrate = format.bitrate,
-                                sampleRate = format.audioSampleRate,
-                                contentLength = contentLength,
-                                loudnessDb = loudnessDb,
-                                perceptualLoudnessDb = perceptualLoudnessDb,
-                                playbackUrl = nonNullPlayback.playbackTracking?.videostatsPlaybackUrl?.baseUrl,
-                            ),
-                        )
-                    }
-                } ?: Timber.tag(TAG).w("Skipping format persistence without content length for $mediaId")
-                recoverSongDeduped(mediaId, nonNullPlayback)
-
-                if (bypassCacheForQualityChange.remove(mediaId)) {
-                    Timber.tag(TAG).d("Cleared bypass cache flag for $mediaId after fresh fetch")
-                }
-
                 val streamUrl = nonNullPlayback.streamUrl
                 currentStreamClient.value = nonNullPlayback.streamClient
-
-                songUrlCache.put(
-                    mediaId = mediaId,
-                    url = streamUrl,
-                    requestHeaders = nonNullPlayback.streamHeaders,
-                    clientName = nonNullPlayback.streamClient,
-                    expiresInSeconds = nonNullPlayback.streamExpiresInSeconds,
-                    requireBoundedRange = nonNullPlayback.requireBoundedRange,
-                    rangeChunkSizeBytes = nonNullPlayback.rangeChunkSizeBytes,
-                    useRangeChunks = nonNullPlayback.useRangeChunks,
-                    expectedGeneration = cacheGeneration,
-                )
-
-                nonNullPlayback.playbackTracking?.videostatsPlaybackUrl?.baseUrl?.let {
-                    playbackUrlCache[cacheKey(mediaId)] = it
-                }
 
                 return@Factory dataSpec.withResolvedStream(
                     CachedStreamUrl(

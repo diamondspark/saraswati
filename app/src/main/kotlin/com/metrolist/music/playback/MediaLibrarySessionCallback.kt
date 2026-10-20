@@ -73,6 +73,7 @@ import com.metrolist.music.playback.queues.Queue
 import com.metrolist.music.playback.queues.YouTubeQueue
 import com.metrolist.music.saraswati.car.CarBrowseTree
 import com.metrolist.music.saraswati.car.CarLocalTree
+import com.metrolist.music.saraswati.perf.sarTraceSection // SARASWATI: Phase 5 Task 12
 import com.metrolist.music.saraswati.car.CarHomeHolder
 import com.metrolist.music.saraswati.car.CarHomeSnapshot
 import com.metrolist.music.saraswati.car.FileCarHomeStore
@@ -93,7 +94,6 @@ import kotlinx.coroutines.flow.flow
 import com.metrolist.music.saraswati.car.CarStations
 import com.metrolist.music.saraswati.car.carBrowsableMediaItem
 import com.metrolist.music.saraswati.car.carDrawableUri
-import com.metrolist.music.saraswati.culture.radioEndpointFor
 import com.metrolist.music.saraswati.family.StationsCache
 import com.metrolist.music.saraswati.security.AndroidPackageLookup
 import com.metrolist.music.saraswati.security.CallerInfoFactory
@@ -364,7 +364,8 @@ constructor(
         pageSize: Int,
         params: MediaLibraryService.LibraryParams?,
     ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> =
-        scope.future(Dispatchers.IO) {
+        // SARASWATI: Task 12 — the whole browse is one trace section ("SarCarChildren") for the car speed budget.
+        scope.future(Dispatchers.IO) { sarTraceSection("SarCarChildren") {
             try {
                 // SARASWATI: Task 11 — the root and the four tabs. Checked first: Stations and Family are
                 // answered from the cache at once and must not wait behind a database or network lookup.
@@ -443,7 +444,7 @@ constructor(
                 reportException(e)
                 LibraryResult.ofItemList(emptyList(), params)
             }
-        }
+        } }
 
     // SARASWATI: Task 11 — what the "Mixes" folder (MusicService.YOUTUBE_PLAYLIST) used to hold, moved here
     // unchanged except that the setting that used to switch it on is no longer read: it is the car's Home tab,
@@ -942,7 +943,8 @@ constructor(
 
                 MusicService.CAR_STATIONS -> {
                     val seed = CarStations.seedFrom(mediaItems.first().mediaId) ?: return@future defaultResult
-                    val radioQueue = YouTubeQueue(radioEndpointFor(seed))
+                    // SARASWATI: Phase 5 Task 9 — offline, or when the radio fails, the station plays its saved songs.
+                    val radioQueue = service.stationQueue(seed)
                     val radioStatus = runCatching {
                         withContext(Dispatchers.IO) {
                             radioQueue

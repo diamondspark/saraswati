@@ -28,6 +28,7 @@ import com.metrolist.music.saraswati.family.parivaar.DatabaseTopSongsSource
 import com.metrolist.music.saraswati.family.parivaar.HubClientParivaarHub
 import com.metrolist.music.saraswati.family.parivaar.InnerTubePlaylistPort
 import com.metrolist.music.saraswati.family.parivaar.MixDownloader
+import com.metrolist.music.saraswati.offline.StationOfflineStore
 import com.metrolist.music.saraswati.family.parivaar.ParivaarHub
 import com.metrolist.music.saraswati.family.parivaar.ParivaarMixRefresher
 import com.metrolist.music.saraswati.family.parivaar.ParivaarMixStore
@@ -188,6 +189,13 @@ object FamilyModule {
     fun provideParivaarMixStore(
         @ApplicationContext context: Context,
     ): ParivaarMixStore = ParivaarMixStore(context.dataStore, CoroutineScope(SupervisorJob() + Dispatchers.IO))
+
+    // SARASWATI: Phase 5 Task 9 — the songs saved for each Station to play offline.
+    @Provides
+    @Singleton
+    fun provideStationOfflineStore(
+        @ApplicationContext context: Context,
+    ): StationOfflineStore = StationOfflineStore(context.dataStore, CoroutineScope(SupervisorJob() + Dispatchers.IO))
 
     @Provides
     @Singleton

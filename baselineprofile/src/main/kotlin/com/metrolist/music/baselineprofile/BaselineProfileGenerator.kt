@@ -5,6 +5,7 @@
 
 package com.metrolist.music.baselineprofile
 
+import androidx.benchmark.macro.MacrobenchmarkScope
 import androidx.benchmark.macro.junit4.BaselineProfileRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.uiautomator.By
@@ -39,6 +40,10 @@ class BaselineProfileGenerator {
         packageName = TARGET_PACKAGE_NAME,
         includeInStartupProfile = true,
     ) {
+        // SARASWATI: Task 13 — the On this phone journeys need the audio permission already granted, or they profile
+        // the permission prompt instead of the list.
+        device.executeShellCommand("pm grant $TARGET_PACKAGE_NAME android.permission.READ_MEDIA_AUDIO")
+
         pressHome()
         startActivityAndWait()
 
@@ -72,6 +77,37 @@ class BaselineProfileGenerator {
         device.waitForIdle()
         Thread.sleep(500)
         device.pressBack()
+        device.waitForIdle()
+
+        // SARASWATI: Task 13 — Library, then On this phone, then scroll.
+        clickText("Library")
+        clickText("On this phone")
+        repeat(4) { i ->
+            val x = device.displayWidth / 2
+            val topY = (device.displayHeight * 0.8).toInt()
+            val bottomY = (device.displayHeight * 0.2).toInt()
+            if (i % 2 == 0) device.swipe(x, topY, x, bottomY, 30) else device.swipe(x, bottomY, x, topY, 30)
+            device.waitForIdle()
+        }
+        device.pressBack()
+        device.waitForIdle()
+
+        // SARASWATI: Task 13 — the Family tab.
+        clickText("Family")
+        device.pressBack()
+        device.waitForIdle()
+
+        // SARASWATI: Task 13 — Library, then Downloaded.
+        clickText("Library")
+        clickText("Downloaded")
+        device.pressBack()
+        device.waitForIdle()
+    }
+
+    // SARASWATI: Task 13 — a tab or row by its visible text; fails the profile run if the screen is not what it expects.
+    private fun MacrobenchmarkScope.clickText(text: String) {
+        device.wait(Until.hasObject(By.text(text)), UI_TIMEOUT_MS)
+        checkNotNull(device.findObject(By.text(text))) { "No '$text' on screen" }.click()
         device.waitForIdle()
     }
 }

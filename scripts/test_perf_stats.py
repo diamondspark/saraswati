@@ -54,6 +54,17 @@ class ParseAmStartTotalTimeTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_am_start_total_time("Status: ok\nComplete\n")
 
+    def test_falls_back_to_wait_time_when_total_time_is_missing(self) -> None:
+        # Android 17 on the Pixel prints no TotalTime line, only WaitTime.
+        out = (
+            "Status: ok\n"
+            "LaunchState: COLD\n"
+            "Activity: dev.diamondspark.saraswati/com.metrolist.music.MainActivity\n"
+            "WaitTime: 612\n"
+            "Complete\n"
+        )
+        self.assertEqual(parse_am_start_total_time(out), 612)
+
 
 class ParseGfxinfoJankyPercentTest(unittest.TestCase):
     def test_janky_frames_4_80_percent(self) -> None:
