@@ -213,6 +213,8 @@ import com.metrolist.music.playback.queues.YouTubeQueue
 import com.metrolist.music.playback.queues.YouTubePlaylistQueue
 import com.metrolist.music.playback.queues.filterExplicit
 import com.metrolist.music.playback.queues.filterVideoSongs
+// SARASWATI: Phase 6 Task 2 — snoozed songs are dropped as queue, radio and automix items enter the player.
+import com.metrolist.music.saraswati.craft.snooze.SnoozeFilter
 import com.metrolist.music.constants.LoudnessLevel
 import com.metrolist.music.constants.LoudnessLevelKey
 import com.metrolist.music.utils.CoilBitmapLoader
@@ -317,6 +319,10 @@ class MusicService :
 
     @Inject
     lateinit var familyFeatureGate: com.metrolist.music.saraswati.family.FamilyFeatureGate
+
+    // SARASWATI: Phase 6 Task 2 — the "Abhi nahin" snoozes, read as queues enter the player.
+    @Inject
+    lateinit var snoozeStore: com.metrolist.music.saraswati.craft.snooze.SnoozeStore
 
     private lateinit var audioManager: AudioManager
     private var audioFocusRequest: AudioFocusRequest? = null
@@ -1890,6 +1896,8 @@ class MusicService :
                         .getInitialStatus()
                         .filterExplicit(dataStore.get(HideExplicitKey, false))
                         .filterVideoSongs(dataStore.get(HideVideoSongsKey, false))
+                        // SARASWATI: Phase 6 Task 2 — the song at the start index plays even when snoozed.
+                        .let { SnoozeFilter.status(it, snoozeStore.awaitActiveIds()) }
                 }
             if (queue.preloadItem != null && player.playbackState == STATE_IDLE) return@launch
             if (initialStatus.title != null) {
@@ -1972,10 +1980,14 @@ class MusicService :
                     queueTitle = initialStatus.title
                 }
 
+                // SARASWATI: Phase 6 Task 2 — snoozed songs are never queued from radio.
                 val radioItems =
-                    initialStatus.items.filter { item ->
-                        item.mediaId != currentMediaId
-                    }
+                    SnoozeFilter.items(
+                        initialStatus.items.filter { item ->
+                            item.mediaId != currentMediaId
+                        },
+                        snoozeStore.awaitActiveIds(),
+                    )
 
                 if (radioItems.isNotEmpty()) {
                     val itemCount = player.mediaItemCount
@@ -2010,6 +2022,8 @@ class MusicService :
                                     .map { it.toMediaItem() }
                                     .filterExplicit(cachedHideExplicit)
                                     .filterVideoSongs(cachedHideVideoSongs)
+                                    // SARASWATI: Phase 6 Task 2 — snoozed songs are never queued from radio.
+                                    .let { SnoozeFilter.items(it, snoozeStore.awaitActiveIds()) }
 
                             if (radioItems.isNotEmpty()) {
                                 val itemCount = player.mediaItemCount
@@ -2038,6 +2052,8 @@ class MusicService :
             !(dataStore.get(DisableLoadMoreWhenRepeatAllKey, false) && player.repeatMode == REPEAT_MODE_ALL)
         ) {
             scope.launch(SilentHandler) {
+                // SARASWATI: Phase 6 Task 2 — snoozed songs are never queued from automix.
+                val snoozed = snoozeStore.awaitActiveIds()
                 try {
                     YouTube
                         .next(WatchEndpoint(playlistId = playlistId))
@@ -2046,15 +2062,21 @@ class MusicService :
                                 .next(WatchEndpoint(playlistId = firstResult.endpoint.playlistId))
                                 .onSuccess { secondResult ->
                                     automixItems.value =
-                                        secondResult.items.map { song ->
-                                            song.toMediaItem()
-                                        }
+                                        SnoozeFilter.items(
+                                            secondResult.items.map { song ->
+                                                song.toMediaItem()
+                                            },
+                                            snoozed,
+                                        )
                                 }.onFailure {
                                     if (firstResult.items.isNotEmpty()) {
                                         automixItems.value =
-                                            firstResult.items.map { song ->
-                                                song.toMediaItem()
-                                            }
+                                            SnoozeFilter.items(
+                                                firstResult.items.map { song ->
+                                                    song.toMediaItem()
+                                                },
+                                                snoozed,
+                                            )
                                     }
                                 }
                         }.onFailure {
@@ -2072,7 +2094,7 @@ class MusicService :
                                                 .filter { it.id != currentSong.id }
                                                 .map { it.toMediaItem() }
                                         if (filteredItems.isNotEmpty()) {
-                                            automixItems.value = filteredItems
+                                            automixItems.value = SnoozeFilter.items(filteredItems, snoozed)
                                         }
                                     }.onFailure {
                                         YouTube
@@ -2086,7 +2108,7 @@ class MusicService :
                                                             .filter { it.id != currentSong.id }
                                                             .map { it.toMediaItem() }
                                                     if (relatedItems.isNotEmpty()) {
-                                                        automixItems.value = relatedItems
+                                                        automixItems.value = SnoozeFilter.items(relatedItems, snoozed)
                                                     }
                                                 }
                                             }
@@ -2686,6 +2708,8 @@ class MusicService :
                             .nextPage()
                             .filterExplicit(cachedHideExplicit)
                             .filterVideoSongs(cachedHideVideoSongs)
+                            // SARASWATI: Phase 6 Task 2 — snoozed songs are never queued from a next page.
+                            .let { SnoozeFilter.items(it, snoozeStore.awaitActiveIds()) }
                     }
                 if (player.playbackState != STATE_IDLE && mediaItems.isNotEmpty()) {
                     player.addMediaItems(mediaItems)
