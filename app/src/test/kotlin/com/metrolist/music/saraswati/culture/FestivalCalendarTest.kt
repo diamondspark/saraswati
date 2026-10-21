@@ -39,24 +39,78 @@ class FestivalCalendarTest {
     ) = Pinned(name, LocalDate.parse(start), LocalDate.parse(end))
 
     // Window = the festival's own days: Holika Dahan to Rangwali Holi; Rakhi and Janmashtami to the day after;
-    // Ghatasthapana to Vijayadashami; Dhanteras to Bhai Dooj.
+    // Ghatasthapana to Vijayadashami; Dhanteras to Bhai Dooj. The other festivals are single days unless noted:
+    // Ganesh Chaturthi runs Chaturthi to Anant Chaturdashi, and Chhath Puja its four days.
     private val pinned =
         listOf(
+            pin("New Year's Day", "2026-01-01", "2026-01-01"),
+            pin("Lohri", "2026-01-13", "2026-01-13"),
+            pin("Makar Sankranti", "2026-01-14", "2026-01-14"),
+            pin("Vasant Panchami", "2026-01-23", "2026-01-23"),
+            pin("Republic Day", "2026-01-26", "2026-01-26"),
+            pin("Valentine's Day", "2026-02-14", "2026-02-14"),
+            pin("Maha Shivratri", "2026-02-15", "2026-02-15"),
             pin("Holi", "2026-03-03", "2026-03-04"),
+            pin("Ram Navami", "2026-03-26", "2026-03-26"),
+            pin("Hanuman Jayanti", "2026-04-02", "2026-04-02"),
+            pin("Baisakhi", "2026-04-14", "2026-04-14"),
+            pin("Canada Day", "2026-07-01", "2026-07-01"),
+            pin("Guru Purnima", "2026-07-29", "2026-07-29"),
+            pin("Independence Day", "2026-08-15", "2026-08-15"),
             pin("Raksha Bandhan", "2026-08-28", "2026-08-29"),
             pin("Krishna Janmashtami", "2026-09-04", "2026-09-05"),
+            pin("Ganesh Chaturthi", "2026-09-14", "2026-09-24"),
             pin("Navratri", "2026-10-11", "2026-10-20"),
+            pin("Karva Chauth", "2026-10-29", "2026-10-29"),
             pin("Diwali", "2026-11-06", "2026-11-11"),
+            pin("Chhath Puja", "2026-11-13", "2026-11-16"),
+            pin("Christmas", "2026-12-25", "2026-12-25"),
+            pin("New Year's Day", "2027-01-01", "2027-01-01"),
+            pin("Lohri", "2027-01-14", "2027-01-14"),
+            pin("Makar Sankranti", "2027-01-15", "2027-01-15"),
+            pin("Republic Day", "2027-01-26", "2027-01-26"),
+            pin("Vasant Panchami", "2027-02-11", "2027-02-11"),
+            pin("Valentine's Day", "2027-02-14", "2027-02-14"),
+            pin("Maha Shivratri", "2027-03-06", "2027-03-06"),
             pin("Holi", "2027-03-21", "2027-03-22"),
+            pin("Baisakhi", "2027-04-14", "2027-04-14"),
+            pin("Ram Navami", "2027-04-15", "2027-04-15"),
+            pin("Hanuman Jayanti", "2027-04-20", "2027-04-20"),
+            pin("Canada Day", "2027-07-01", "2027-07-01"),
+            pin("Guru Purnima", "2027-07-18", "2027-07-18"),
+            pin("Independence Day", "2027-08-15", "2027-08-15"),
             pin("Raksha Bandhan", "2027-08-17", "2027-08-18"),
             pin("Krishna Janmashtami", "2027-08-25", "2027-08-26"),
+            pin("Ganesh Chaturthi", "2027-09-04", "2027-09-14"),
             pin("Navratri", "2027-09-30", "2027-10-09"),
+            pin("Thanksgiving", "2027-10-11", "2027-10-11"),
+            pin("Karva Chauth", "2027-10-18", "2027-10-18"),
             pin("Diwali", "2027-10-27", "2027-10-31"),
+            pin("Chhath Puja", "2027-11-02", "2027-11-05"),
+            pin("Christmas", "2027-12-25", "2027-12-25"),
+            pin("New Year's Day", "2028-01-01", "2028-01-01"),
+            pin("Lohri", "2028-01-14", "2028-01-14"),
+            pin("Makar Sankranti", "2028-01-15", "2028-01-15"),
+            pin("Republic Day", "2028-01-26", "2028-01-26"),
+            pin("Vasant Panchami", "2028-01-31", "2028-01-31"),
+            pin("Valentine's Day", "2028-02-14", "2028-02-14"),
+            pin("Maha Shivratri", "2028-02-23", "2028-02-23"),
             pin("Holi", "2028-03-10", "2028-03-11"),
+            pin("Ram Navami", "2028-04-03", "2028-04-03"),
+            pin("Hanuman Jayanti", "2028-04-09", "2028-04-09"),
+            pin("Baisakhi", "2028-04-13", "2028-04-13"),
+            pin("Canada Day", "2028-07-01", "2028-07-01"),
+            pin("Guru Purnima", "2028-07-06", "2028-07-06"),
             pin("Raksha Bandhan", "2028-08-05", "2028-08-06"),
             pin("Krishna Janmashtami", "2028-08-13", "2028-08-14"),
+            pin("Independence Day", "2028-08-15", "2028-08-15"),
+            pin("Ganesh Chaturthi", "2028-08-23", "2028-09-02"),
             pin("Navratri", "2028-09-19", "2028-09-27"),
+            pin("Karva Chauth", "2028-10-07", "2028-10-07"),
+            pin("Thanksgiving", "2028-10-09", "2028-10-09"),
             pin("Diwali", "2028-10-15", "2028-10-19"),
+            pin("Chhath Puja", "2028-10-21", "2028-10-24"),
+            pin("Christmas", "2028-12-25", "2028-12-25"),
         )
 
     private val festivals = FestivalCalendar.all
@@ -64,18 +118,14 @@ class FestivalCalendarTest {
     // --- the table is the sourced one --------------------------------------
 
     @Test
-    fun `the table is exactly the sourced dates, five festivals for each of three years`() {
+    fun `the table is exactly the sourced dates`() {
         val actual = festivals.map { Pinned(it.name, it.startDate, it.endDate) }
 
         assertEquals(pinned.sortedBy { it.start }, actual)
-        assertEquals(15, festivals.size)
-        for (year in 2026..2028) {
-            assertEquals(
-                "year $year",
-                setOf("Diwali", "Holi", "Navratri", "Raksha Bandhan", "Krishna Janmashtami"),
-                festivals.filter { it.startDate.year == year }.map { it.name }.toSet(),
-            )
-        }
+        assertEquals(68, festivals.size)
+        assertEquals("year 2026", setOf("New Year's Day", "Lohri", "Makar Sankranti", "Vasant Panchami", "Republic Day", "Valentine's Day", "Maha Shivratri", "Holi", "Ram Navami", "Hanuman Jayanti", "Baisakhi", "Canada Day", "Guru Purnima", "Independence Day", "Raksha Bandhan", "Krishna Janmashtami", "Ganesh Chaturthi", "Navratri", "Karva Chauth", "Diwali", "Chhath Puja", "Christmas"), festivals.filter { it.startDate.year == 2026 }.map { it.name }.toSet())
+        assertEquals("year 2027", setOf("New Year's Day", "Lohri", "Makar Sankranti", "Republic Day", "Vasant Panchami", "Valentine's Day", "Maha Shivratri", "Holi", "Baisakhi", "Ram Navami", "Hanuman Jayanti", "Canada Day", "Guru Purnima", "Independence Day", "Raksha Bandhan", "Krishna Janmashtami", "Ganesh Chaturthi", "Navratri", "Thanksgiving", "Karva Chauth", "Diwali", "Chhath Puja", "Christmas"), festivals.filter { it.startDate.year == 2027 }.map { it.name }.toSet())
+        assertEquals("year 2028", setOf("New Year's Day", "Lohri", "Makar Sankranti", "Republic Day", "Vasant Panchami", "Valentine's Day", "Maha Shivratri", "Holi", "Ram Navami", "Hanuman Jayanti", "Baisakhi", "Canada Day", "Guru Purnima", "Raksha Bandhan", "Krishna Janmashtami", "Independence Day", "Ganesh Chaturthi", "Navratri", "Karva Chauth", "Thanksgiving", "Diwali", "Chhath Puja", "Christmas"), festivals.filter { it.startDate.year == 2028 }.map { it.name }.toSet())
     }
 
     @Test
@@ -106,7 +156,7 @@ class FestivalCalendarTest {
 
     @Test
     fun `a day between festivals has none`() {
-        for (day in listOf("2026-01-01", "2026-03-05", "2026-06-15", "2026-08-30", "2026-12-25", "2027-01-01", "2027-06-01", "2028-12-31")) {
+        for (day in listOf("2026-05-15", "2026-03-05", "2026-06-15", "2026-08-30", "2026-12-31", "2027-05-15", "2027-06-01", "2028-12-31")) {
             assertNull(day, FestivalCalendar.current(LocalDate.parse(day)))
         }
     }
@@ -175,7 +225,7 @@ class FestivalCalendarTest {
 
         assertEquals("दीपावली की शुभकामनाएं!", diwali.greetingHi)
         assertEquals("Happy Diwali!", diwali.greetingEn)
-        assertEquals("Diwali songs", diwali.radioQuery)
+        assertEquals("Diwali songs", diwali.radioQueryHi)
     }
 
     @Test
@@ -185,23 +235,24 @@ class FestivalCalendarTest {
             assertTrue("${f.name} greetingEn", f.greetingEn.isNotBlank() && f.greetingEn.endsWith("!"))
             assertTrue("${f.name} greetingHi", devanagariOrPunctuation.matches(f.greetingHi))
             assertTrue("${f.name} greetingHi ends with a mark", f.greetingHi.endsWith("!"))
-            assertTrue("${f.name} radioQuery", f.radioQuery.isNotBlank())
-            assertTrue("${f.name} radioQuery names the festival", f.radioQuery.contains(f.name.substringBefore(" ")))
+            assertTrue("${f.name} radioQueryHi", f.radioQueryHi.isNotBlank())
+            assertTrue("${f.name} radioQueryEn", f.radioQueryEn.isNotBlank())
+            assertTrue("${f.name} radioQueryEn names the festival", f.radioQueryEn.contains(f.name.substringBefore(" ")))
         }
     }
 
     @Test
     fun `a festival reads the same in every year`() {
         for ((name, years) in festivals.groupBy { it.name }) {
-            assertEquals(name, 1, years.map { Triple(it.greetingEn, it.greetingHi, it.radioQuery) }.toSet().size)
+            assertEquals(name, 1, years.map { listOf(it.greetingEn, it.greetingHi, it.radioQueryHi, it.radioQueryEn) }.toSet().size)
         }
     }
 
     @Test
     fun `each festival's radio search is its own`() {
-        val queries = festivals.groupBy { it.name }.mapValues { it.value.first().radioQuery }
+        val queries = festivals.groupBy { it.name }.mapValues { it.value.first().radioQueryHi }
 
-        assertEquals(5, queries.values.toSet().size)
+        assertEquals(23, queries.values.toSet().size)
     }
 
     // --- the Home banner's title -------------------------------------------------
@@ -226,7 +277,7 @@ class FestivalCalendarTest {
 
     @Test
     fun `the flow starts with none on an ordinary day`() {
-        val clock = Clock.fixed(Instant.parse("2026-12-25T05:00:00Z"), ZoneOffset.UTC)
+        val clock = Clock.fixed(Instant.parse("2026-05-01T05:00:00Z"), ZoneOffset.UTC)
 
         assertNull(runBlocking { currentFestivalFlow(clock).first() })
     }
@@ -263,7 +314,7 @@ class FestivalCalendarTest {
             assertEquals("Happy Dussehra!", last.greetingEn)
             assertEquals("विजयादशमी की शुभकामनाएं!", last.greetingHi)
             assertEquals("the banner title carries both", "Happy Dussehra! · विजयादशमी की शुभकामनाएं", last.bannerTitle())
-            assertEquals("still the Navratri festival, with its own radio", "Navratri songs", last.radioQuery)
+            assertEquals("still the Navratri festival, with its own radio", "Navratri songs", last.radioQueryHi)
 
             val eve = FestivalCalendar.current(window.end.minusDays(1))!!
             assertEquals("Happy Navratri!", eve.greetingEn)
@@ -337,8 +388,8 @@ class FestivalCalendarTest {
     }
 
     @Test
-    fun `the table ends on 2028-10-19`() {
-        assertEquals(LocalDate.parse("2028-10-19"), festivals.maxOf { it.endDate })
+    fun `the table ends on 2028-12-25`() {
+        assertEquals(LocalDate.parse("2028-12-25"), festivals.maxOf { it.endDate })
     }
 
     // The strict mode is for the weekly festival-table workflow and a deliberate manual run only, never for

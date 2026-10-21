@@ -1164,6 +1164,24 @@
     <string name="saral_festival_navratri" translatable="false">नवरात्रि</string>
     <string name="saral_festival_raksha_bandhan" translatable="false">रक्षाबंधन</string>
     <string name="saral_festival_janmashtami" translatable="false">जन्माष्टमी</string>
+    <string name="saral_festival_new_year" translatable="false">नव वर्ष</string>
+    <string name="saral_festival_lohri" translatable="false">लोहड़ी</string>
+    <string name="saral_festival_makar_sankranti" translatable="false">मकर संक्रांति</string>
+    <string name="saral_festival_vasant_panchami" translatable="false">वसंत पंचमी</string>
+    <string name="saral_festival_republic_day" translatable="false">गणतंत्र दिवस</string>
+    <string name="saral_festival_maha_shivratri" translatable="false">महाशिवरात्रि</string>
+    <string name="saral_festival_ram_navami" translatable="false">राम नवमी</string>
+    <string name="saral_festival_hanuman_jayanti" translatable="false">हनुमान जयंती</string>
+    <string name="saral_festival_baisakhi" translatable="false">बैसाखी</string>
+    <string name="saral_festival_canada_day" translatable="false">कनाडा दिवस</string>
+    <string name="saral_festival_guru_purnima" translatable="false">गुरु पूर्णिमा</string>
+    <string name="saral_festival_independence_day" translatable="false">स्वतंत्रता दिवस</string>
+    <string name="saral_festival_ganesh_chaturthi" translatable="false">गणेश चतुर्थी</string>
+    <string name="saral_festival_karva_chauth" translatable="false">करवा चौथ</string>
+    <string name="saral_festival_thanksgiving" translatable="false">थैंक्सगिविंग</string>
+    <string name="saral_festival_chhath_puja" translatable="false">छठ पूजा</string>
+    <string name="saral_festival_christmas" translatable="false">क्रिसमस</string>
+    <string name="saral_festival_valentines_day" translatable="false">वैलेंटाइन डे</string>
     <string name="saral_festival_generic" translatable="false">त्योहार</string>
 
     <!-- SARASWATI: Task 11 — the car's four tabs. Home, Library and Family reuse existing strings. -->
