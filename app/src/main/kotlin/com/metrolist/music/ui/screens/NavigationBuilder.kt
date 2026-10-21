@@ -27,6 +27,8 @@ import com.metrolist.music.constants.DarkModeKey
 import com.metrolist.music.constants.PureBlackKey
 import com.metrolist.music.saraswati.family.FamilyRoutes
 import com.metrolist.music.saraswati.family.FamilyScreen
+import com.metrolist.music.saraswati.family.feedback.FeedbackInboxScreen
+import com.metrolist.music.saraswati.family.feedback.FeedbackScreen
 import com.metrolist.music.saraswati.family.parivaar.TasteHistoryScreen
 import com.metrolist.music.saraswati.localmedia.LOCAL_SONGS_ROUTE
 import com.metrolist.music.saraswati.localmedia.LocalSongsScreen
@@ -122,6 +124,11 @@ fun NavGraphBuilder.navigationBuilder(
 
     composable(FamilyRoutes.JOIN) {
         JoinFamilyScreen(navController)
+    }
+
+    // SARASWATI: feedback — the owner's Feedback inbox.
+    composable(FamilyRoutes.FEEDBACK) {
+        FeedbackInboxScreen(navController)
     }
 
     // SARASWATI: Phase 4 Task 21 — Import from Spotify, reached from the Library menu.
@@ -445,6 +452,11 @@ fun NavGraphBuilder.navigationBuilder(
 
     composable("settings/updater") {
         UpdaterScreen(navController)
+    }
+
+    // SARASWATI: feedback — Settings, System, "Send feedback".
+    composable("settings/feedback") {
+        FeedbackScreen(navController)
     }
 
     composable("settings/about") {

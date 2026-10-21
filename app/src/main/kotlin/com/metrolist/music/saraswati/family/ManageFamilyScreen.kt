@@ -128,7 +128,8 @@ fun ManageFamilyScreen(
         if (showsOwnerSetup(isOwner, error, keyRejected)) {
             OwnerSetupContent(viewModel, keyRejected)
         } else {
-            OwnerContent(viewModel)
+            // SARASWATI: feedback — OwnerContent also needs the nav controller, for the Feedback inbox row.
+            OwnerContent(viewModel, navController)
         }
 
         TopAppBar(
@@ -252,8 +253,12 @@ private fun OwnerSetupContent(
 
 // --- Owner ------------------------------------------------------------
 
+// SARASWATI: feedback — takes the nav controller so the owner section can open the Feedback inbox.
 @Composable
-private fun OwnerContent(viewModel: FamilyViewModel) {
+private fun OwnerContent(
+    viewModel: FamilyViewModel,
+    navController: NavController,
+) {
     val pairing by viewModel.pairingState.collectAsStateWithLifecycle()
     val roster by viewModel.roster.collectAsStateWithLifecycle()
     val health by viewModel.health.collectAsStateWithLifecycle()
@@ -468,6 +473,19 @@ private fun OwnerContent(viewModel: FamilyViewModel) {
                     enabled = FamilyFeature.isEnabled(killSwitches, feature),
                     onToggle = { viewModel.toggleKillSwitch(feature.key, it) },
                 )
+            }
+        }
+
+        // SARASWATI: feedback — the owner's inbox of bug reports and ideas.
+        SectionCard {
+            Text(stringResource(R.string.feedback_inbox_title), style = MaterialTheme.typography.titleMedium)
+            Text(
+                stringResource(R.string.feedback_inbox_row_desc),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(onClick = { navController.navigate(FamilyRoutes.FEEDBACK) }, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.feedback_inbox_open_row))
             }
         }
     }

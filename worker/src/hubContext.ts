@@ -1,4 +1,5 @@
 import type { AuthResult, FamilyFeatureKey } from "./FamilyHub";
+import type { MirrorRow } from "./feedback/githubIssue";
 
 export type { AuthResult };
 
@@ -19,6 +20,8 @@ export interface HubContext {
   isApproved(deviceId: string): boolean;
   /** Epoch milliseconds. */
   now(): number;
+  /** The new GitHub issue's URL for a stored feedback item, or null. Never throws. */
+  mirrorFeedback(row: MirrorRow): Promise<string | null>;
 }
 
 /**

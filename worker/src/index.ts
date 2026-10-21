@@ -14,6 +14,10 @@ export interface Env {
   // FamilyHub.ts checks bearer tokens against it first (trimmed, like the
   // token), and treats a value shorter than 32 characters as not set at all.
   ADMIN_KEY: string;
+  // Optional GitHub mirror of feedback. The token is a secret (`wrangler secret put
+  // GITHUB_FEEDBACK_TOKEN`); with it unset nothing is mirrored. The repo is a var in wrangler.toml.
+  GITHUB_FEEDBACK_TOKEN?: string;
+  GITHUB_FEEDBACK_REPO?: string;
 }
 
 function json(body: unknown, status: number): Response {

@@ -68,6 +68,9 @@ const V3_TABLES = [
 // What v4 added: Ask Saraswati's daily counters.
 const V4_TABLES = ["ask_usage"];
 
+// What v6 added: the feedback inbox.
+const V6_TABLES = ["feedback"];
+
 let hubCounter = 0;
 
 /** A hub instance of its own, so one test's tables never leak into another's. */
@@ -86,7 +89,7 @@ function resetToV1(
 ) {
   return runInDurableObject(stub, (_instance, state) => {
     const sql = state.storage.sql;
-    for (const table of [...TABLES, ...V3_TABLES, ...V4_TABLES]) {
+    for (const table of [...TABLES, ...V3_TABLES, ...V4_TABLES, ...V6_TABLES]) {
       sql.exec(`DROP TABLE IF EXISTS ${table}`);
     }
     for (const ddl of V1_SCHEMA) {
@@ -216,10 +219,10 @@ describe("schema migrations", () => {
     const stub = freshHub();
 
     // The constructor has already run the migrations on an empty database.
-    expect(LATEST_SCHEMA_VERSION).toBe(5);
-    expect(await schemaVersion(stub)).toBe(5);
+    expect(LATEST_SCHEMA_VERSION).toBe(6);
+    expect(await schemaVersion(stub)).toBe(6);
     expect(await tableNames(stub)).toEqual(
-      [...TABLES, ...V3_TABLES, ...V4_TABLES, "schema_version"].sort(),
+      [...TABLES, ...V3_TABLES, ...V4_TABLES, ...V6_TABLES, "schema_version"].sort(),
     );
     expect(await columns(stub, "roster")).toEqual([
       "deviceId",
@@ -245,7 +248,7 @@ describe("schema migrations", () => {
             .exec<{ n: number }>("SELECT COUNT(*) AS n FROM killswitches")
             .one().n,
       ),
-    ).toBe(5);
+    ).toBe(6);
   });
 
   for (const startVersion of [0, 1] as const) {
@@ -256,9 +259,9 @@ describe("schema migrations", () => {
 
         await runMigrate(stub);
 
-        expect(await schemaVersion(stub)).toBe(5);
+        expect(await schemaVersion(stub)).toBe(6);
         expect(await tableNames(stub)).toEqual(
-          [...TABLES, ...V3_TABLES, ...V4_TABLES, "schema_version"].sort(),
+          [...TABLES, ...V3_TABLES, ...V4_TABLES, ...V6_TABLES, "schema_version"].sort(),
         );
         const tables = await dump(stub);
         const text = JSON.stringify(tables);
@@ -438,7 +441,7 @@ describe("schema migrations", () => {
         await runMigrate(stub);
 
         expect(await dump(stub)).toEqual(afterFirst);
-        expect(await schemaVersion(stub)).toBe(5);
+        expect(await schemaVersion(stub)).toBe(6);
         // Re-hashing would have made the stored value the hash of a hash.
         expect(
           (afterFirst.roster as Array<{ sessionTokenHash: string | null }>)[0]
@@ -459,7 +462,7 @@ describe("schema migrations", () => {
       const deviceTokenHash = await sha256Hex(DEVICE_TOKEN);
       await runInDurableObject(stub, (_instance, state) => {
         const sql = state.storage.sql;
-        for (const table of [...V3_TABLES, ...V4_TABLES]) {
+        for (const table of [...V3_TABLES, ...V4_TABLES, ...V6_TABLES]) {
           sql.exec(`DROP TABLE IF EXISTS ${table}`);
         }
         sql.exec(
@@ -489,9 +492,9 @@ describe("schema migrations", () => {
 
       await runMigrate(stub);
 
-      expect(await schemaVersion(stub)).toBe(5);
+      expect(await schemaVersion(stub)).toBe(6);
       expect(await tableNames(stub)).toEqual(
-        [...TABLES, ...V3_TABLES, ...V4_TABLES, "schema_version"].sort(),
+        [...TABLES, ...V3_TABLES, ...V4_TABLES, ...V6_TABLES, "schema_version"].sort(),
       );
       expect(Object.values(await v3Rows(stub)).flat()).toEqual([]);
     });
@@ -569,7 +572,7 @@ describe("schema migrations", () => {
       expect({ roster: await dump(stub), family: await v3Rows(stub) }).toEqual(
         afterFirst,
       );
-      expect(await schemaVersion(stub)).toBe(5);
+      expect(await schemaVersion(stub)).toBe(6);
     });
 
     it("rolls back completely when a table cannot be made, leaving version 2", async () => {
@@ -621,7 +624,7 @@ describe("schema migrations", () => {
 
       await runMigrate(stub);
 
-      expect(await schemaVersion(stub)).toBe(5);
+      expect(await schemaVersion(stub)).toBe(6);
       expect(await tableNames(stub)).toContain("ask_usage");
       expect({ roster: await dump(stub), family: await v3Rows(stub) }).toEqual(
         before,
@@ -648,7 +651,7 @@ describe("schema migrations", () => {
       await runMigrate(stub);
       await runMigrate(stub);
 
-      expect(await schemaVersion(stub)).toBe(5);
+      expect(await schemaVersion(stub)).toBe(6);
       expect(
         await runInDurableObject(stub, (_instance, state) =>
           state.storage.sql
@@ -673,7 +676,7 @@ describe("schema migrations", () => {
 
       await runMigrate(stub);
 
-      expect(await schemaVersion(stub)).toBe(5);
+      expect(await schemaVersion(stub)).toBe(6);
       expect(
         await runInDurableObject(stub, (_instance, state) =>
           state.storage.sql.exec("SELECT count FROM ask_usage").toArray(),
@@ -702,14 +705,14 @@ describe("schema migrations", () => {
       });
     }
 
-    it("renames sessionToken to sessionTokenHash and hashes the value in place, and records version 5", async () => {
+    it("renames sessionToken to sessionTokenHash and hashes the value in place, and reaches the latest version", async () => {
       const stub = freshHub();
       await resetToV4(stub);
       expect(await columns(stub, "sangat_members")).toContain("sessionToken");
 
       await runMigrate(stub);
 
-      expect(await schemaVersion(stub)).toBe(5);
+      expect(await schemaVersion(stub)).toBe(6);
       const cols = await columns(stub, "sangat_members");
       expect(cols).toContain("sessionTokenHash");
       expect(cols).not.toContain("sessionToken");
@@ -748,7 +751,92 @@ describe("schema migrations", () => {
           state.storage.sql.exec("SELECT * FROM sangat_members").toArray(),
         ),
       ).toEqual(after);
-      expect(await schemaVersion(stub)).toBe(5);
+      expect(await schemaVersion(stub)).toBe(6);
+    });
+  });
+
+  describe("from a v5 hub", () => {
+    /** A v5 hub: everything but the feedback table, with a roster row and a count to keep. */
+    async function resetToV5(stub: Stub) {
+      await runInDurableObject(stub, (_instance, state) => {
+        const sql = state.storage.sql;
+        sql.exec("DROP TABLE feedback");
+        sql.exec(
+          "INSERT INTO roster (deviceId, deviceName, status, role) VALUES ('dev-old', 'Old phone', 'approved', 'adult')",
+        );
+        sql.exec("INSERT INTO ask_usage (day, key, count) VALUES ('2026-10-19', 'family', 7)");
+        sql.exec("UPDATE schema_version SET version = 5");
+      });
+    }
+
+    it("adds the feedback table and index, keeps the old data, and records version 6", async () => {
+      const stub = freshHub();
+      await resetToV5(stub);
+      expect(await tableNames(stub)).not.toContain("feedback");
+
+      await runMigrate(stub);
+
+      expect(await schemaVersion(stub)).toBe(6);
+      expect(await columns(stub, "feedback")).toEqual([
+        "id",
+        "device_id",
+        "nickname",
+        "kind",
+        "text",
+        "app_version",
+        "android",
+        "device",
+        "status",
+        "created_at",
+        "updated_at",
+        "issue_url",
+      ]);
+      await runInDurableObject(stub, (_instance, state) => {
+        const sql = state.storage.sql;
+        expect(
+          sql.exec("SELECT deviceName FROM roster WHERE deviceId = 'dev-old'").toArray(),
+        ).toEqual([{ deviceName: "Old phone" }]);
+        expect(sql.exec("SELECT count FROM ask_usage").toArray()).toEqual([{ count: 7 }]);
+        expect(
+          sql
+            .exec<{ name: string }>("PRAGMA index_list(feedback)")
+            .toArray()
+            .map((row) => row.name),
+        ).toContain("feedback_status_created");
+        // The CHECK constraints are part of the schema.
+        expect(() =>
+          sql.exec(
+            "INSERT INTO feedback (id, device_id, nickname, kind, text, created_at, updated_at) VALUES ('x', 'd', 'n', 'rant', 't', 1, 1)",
+          ),
+        ).toThrow();
+        sql.exec(
+          "INSERT INTO feedback (id, device_id, nickname, kind, text, created_at, updated_at) VALUES ('x', 'd', 'n', 'bug', 't', 1, 1)",
+        );
+        expect(sql.exec("SELECT status FROM feedback WHERE id = 'x'").toArray()).toEqual([
+          { status: "new" },
+        ]);
+        expect(() => sql.exec("UPDATE feedback SET status = 'fixed' WHERE id = 'x'")).toThrow();
+      });
+    });
+
+    it("is idempotent: a second pass keeps what was stored in between", async () => {
+      const stub = freshHub();
+      await resetToV5(stub);
+      await runMigrate(stub);
+      await runInDurableObject(stub, (_instance, state) => {
+        state.storage.sql.exec(
+          "INSERT INTO feedback (id, device_id, nickname, kind, text, created_at, updated_at) VALUES ('keep', 'd', 'n', 'idea', 't', 1, 1)",
+        );
+      });
+
+      await runMigrate(stub);
+
+      expect(await schemaVersion(stub)).toBe(6);
+      expect(
+        await runInDurableObject(stub, (_instance, state) =>
+          state.storage.sql.exec("SELECT id FROM feedback").toArray(),
+        ),
+      ).toEqual([{ id: "keep" }]);
     });
   });
 

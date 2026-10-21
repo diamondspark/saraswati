@@ -442,6 +442,7 @@ describe("PUT /killswitches with sangat off", () => {
       family_playlists: true,
       cast_relay: true,
       ask_saraswati: true,
+      feedback: true,
     });
     const closed = { code: 4003, reason: "sangat disabled" };
     for (const client of [family.host.client, family.guests[0].client, other.client, waiting, lobby]) {
