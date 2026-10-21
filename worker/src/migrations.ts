@@ -28,7 +28,9 @@ import { sha256Hex } from "./secrets";
 //       plaintext value, orphaning every room live at deploy time (not just a
 //       seat that happened to be mid-reconnect-grace) until the alarm cleans
 //       it up minutes later.
-export const LATEST_SCHEMA_VERSION = 5;
+//   v6  the feedback inbox (`feedback`): bug reports and ideas the family sends from the
+//       app. Nothing else changes, so a v5 hub keeps every row.
+export const LATEST_SCHEMA_VERSION = 6;
 
 type Row = Record<string, SqlStorageValue>;
 
@@ -290,6 +292,41 @@ async function applyV5(storage: DurableObjectStorage): Promise<void> {
 }
 
 /**
+ * Idempotent, like v3 and v4. The family's feedback, newest first by (status,
+ * created_at). Column names are snake_case here, unlike the older tables, to match the
+ * hub's API contract for this feature.
+ */
+function applyV6(storage: DurableObjectStorage): void {
+  const sql = storage.sql;
+  storage.transactionSync(() => {
+    // Checked again inside the transaction that does the work.
+    if (readVersion(sql) !== 5) {
+      return;
+    }
+
+    sql.exec(`CREATE TABLE IF NOT EXISTS feedback (
+      id TEXT PRIMARY KEY,
+      device_id TEXT NOT NULL,
+      nickname TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('bug', 'idea')),
+      text TEXT NOT NULL,
+      app_version TEXT,
+      android TEXT,
+      device TEXT,
+      status TEXT NOT NULL DEFAULT 'new'
+        CHECK (status IN ('new', 'seen', 'planned', 'done', 'wontfix')),
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      issue_url TEXT
+    )`);
+    sql.exec(
+      "CREATE INDEX IF NOT EXISTS feedback_status_created ON feedback (status, created_at)",
+    );
+    writeVersion(sql, 6);
+  });
+}
+
+/**
  * Brings the database up to LATEST_SCHEMA_VERSION. Safe to call on every
  * start: a database already at (or beyond) the latest version is not touched.
  */
@@ -309,5 +346,8 @@ export async function migrate(storage: DurableObjectStorage): Promise<void> {
   }
   if (version < 5) {
     await applyV5(storage);
+  }
+  if (version < 6) {
+    applyV6(storage);
   }
 }

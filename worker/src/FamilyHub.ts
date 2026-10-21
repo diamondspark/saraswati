@@ -19,6 +19,7 @@ import {
   listFamilyPlaylists,
 } from "./routes/familyPlaylists";
 import { handleAsk } from "./routes/ask";
+import { listFeedback, postFeedback, setFeedbackStatus } from "./routes/feedback";
 import { listParivaarPlaylists, putParivaarPlaylist } from "./routes/parivaar";
 import { CLOSE_DEVICE_REVOKED, CLOSE_SANGAT_DISABLED } from "./sangat/limits";
 import { Sangat, type LiveRoom } from "./sangat/Sangat";
@@ -68,6 +69,8 @@ const FAMILY_FEATURE_KEYS = [
   "family_playlists",
   "cast_relay",
   "ask_saraswati",
+  // SARASWATI: feedback — the in-app bug/idea inbox.
+  "feedback",
 ] as const;
 export type FamilyFeatureKey = (typeof FAMILY_FEATURE_KEYS)[number];
 
@@ -1252,6 +1255,18 @@ export class FamilyHub extends DurableObject<Env> {
         return this.runRoute(request, "device", (ctx, req, auth) =>
           handleAsk(ctx, req, auth, bindingRunner(this.env.AI)),
         );
+      // SARASWATI: feedback. POST takes a device or the admin; the handlers of the other two
+      // answer 401 to a device themselves.
+      case "feedbackPost":
+        return this.runRoute(request, "any", postFeedback);
+      case "feedbackList":
+        return this.runRoute(request, "any", listFeedback);
+      case "feedbackSetStatus": {
+        const id = route.feedbackId as string;
+        return this.runRoute(request, "any", (ctx, req, auth) =>
+          setFeedbackStatus(ctx, req, auth, id),
+        );
+      }
       case "familyPlaylistsList":
         return this.runRoute(request, "any", listFamilyPlaylists);
       case "familyPlaylistsAdd":

@@ -17,6 +17,7 @@ const ALL_ENABLED = {
   family_playlists: true,
   cast_relay: true,
   ask_saraswati: true,
+  feedback: true,
 };
 
 function putKillSwitches(
@@ -67,7 +68,7 @@ async function revokedDeviceToken(stub: Stub, deviceId: string) {
 }
 
 describe("GET /killswitches", () => {
-  it("returns all five keys enabled before any PUT", async () => {
+  it("returns all six keys enabled before any PUT", async () => {
     const stub = getFamilyHubStub();
 
     const response = await getKillSwitches(stub, TEST_ADMIN_KEY);
@@ -76,7 +77,7 @@ describe("GET /killswitches", () => {
     expect(await response.json()).toEqual(ALL_ENABLED);
   });
 
-  it("GET lists five keys with ask_saraswati enabled by default", async () => {
+  it("GET lists six keys with ask_saraswati and feedback enabled by default", async () => {
     const stub = getFamilyHubStub();
     const deviceToken = await approvedDeviceToken(
       stub,
@@ -91,8 +92,10 @@ describe("GET /killswitches", () => {
         "family_playlists",
         "cast_relay",
         "ask_saraswati",
+        "feedback",
       ]);
       expect(body.ask_saraswati).toBe(true);
+      expect(body.feedback).toBe(true);
     }
   });
 
@@ -241,6 +244,7 @@ describe("PUT /killswitches", () => {
       family_playlists: true,
       cast_relay: false,
       ask_saraswati: true,
+      feedback: true,
     });
 
     expect((await putKillSwitches(stub, { sangat: true })).status).toBe(200);
@@ -250,10 +254,11 @@ describe("PUT /killswitches", () => {
       family_playlists: true,
       cast_relay: false,
       ask_saraswati: true,
+      feedback: true,
     });
   });
 
-  it("switches ask_saraswati off and on without touching the other four", async () => {
+  it("switches ask_saraswati off and on without touching the others", async () => {
     const stub = getFamilyHubStub();
     await resetAllEnabled(stub);
 

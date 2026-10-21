@@ -26,7 +26,10 @@ export type RouteName =
   | "familyPlaylistsList"
   | "familyPlaylistsAdd"
   | "familyPlaylistsDelete"
-  | "ask";
+  | "ask"
+  | "feedbackPost"
+  | "feedbackList"
+  | "feedbackSetStatus";
 
 export interface Route {
   name: RouteName;
@@ -40,6 +43,8 @@ export interface Route {
   deviceId?: string;
   /** The decoded `{id}` of a /family-playlists/{id} route. */
   familyPlaylistId?: string;
+  /** The decoded `{id}` of a /feedback/{id} route. */
+  feedbackId?: string;
 }
 
 /**
@@ -57,6 +62,7 @@ export function decodeSegment(segment: string): string | null {
 
 const ROSTER_ACTION = /^\/roster\/([^/]+)\/(approve|revoke|role)$/;
 const FAMILY_PLAYLIST = /^\/family-playlists\/([^/]+)$/;
+const FEEDBACK_ITEM = /^\/feedback\/([^/]+)$/;
 
 /** The route a request is for, or null when the hub has no such route. */
 export function matchRoute(method: string, pathname: string): Route | null {
@@ -123,6 +129,14 @@ export function matchRoute(method: string, pathname: string): Route | null {
         : null;
     case "/ask":
       return method === "POST" ? { name: "ask", needsBearer: true } : null;
+    case "/feedback":
+      if (method === "POST") {
+        return { name: "feedbackPost", needsBearer: true };
+      }
+      if (method === "GET") {
+        return { name: "feedbackList", needsBearer: true };
+      }
+      return null;
     case "/family-playlists":
       if (method === "GET") {
         return { name: "familyPlaylistsList", needsBearer: true };
@@ -146,6 +160,17 @@ export function matchRoute(method: string, pathname: string): Route | null {
           needsBearer: true,
           familyPlaylistId,
         };
+  }
+
+  const feedback = FEEDBACK_ITEM.exec(pathname);
+  if (feedback) {
+    if (method !== "PUT") {
+      return null;
+    }
+    const feedbackId = decodeSegment(feedback[1]);
+    return feedbackId === null
+      ? null
+      : { name: "feedbackSetStatus", needsBearer: true, feedbackId };
   }
 
   const action = ROSTER_ACTION.exec(pathname);
