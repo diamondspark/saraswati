@@ -1,21 +1,21 @@
 {
   "schema": 1,
   "channel": "beta",
-  "versionCode": 4137,
-  "versionName": "13.7.0-s4137",
+  "versionCode": 4139,
+  "versionName": "13.7.0-s4139",
   "apk": {
-    "url": "https://github.com/diamondspark/saraswati/releases/download/v4137/saraswati-v4137.apk",
-    "sha256": "41f2231e7cbded43a6e7fd40fdba8061c12a12bc68b8136be8c15a67af9daba4",
+    "url": "https://github.com/diamondspark/saraswati/releases/download/v4139/saraswati-v4139.apk",
+    "sha256": "bf447f9cea41eedd920d5231e0ac8808ac98057941939df061ef8c2173ff8b26",
     "size": 27020164
   },
-  "urgent": false,
-  "notes": "New: Send feedback (Settings > System) and a Feedback inbox for the owner (Manage family). Includes the sign-in fix for country Google domains.",
-  "publishedAt": "2026-10-21T22:10:07Z",
+  "urgent": true,
+  "notes": "Fixes sign-in on phones using a country Google domain and adds Send feedback (Settings > System). Please update.",
+  "publishedAt": "2026-10-21T22:56:57Z",
   "updater": {
-    "versionCode": 4137,
+    "versionCode": 4139,
     "apk": {
-      "url": "https://github.com/diamondspark/saraswati/releases/download/v4137/saraswati-updater-v4137.apk",
-      "sha256": "491b2ebe5e60af6dfcca096c5043955b44f699c4430100e88e28a027eb64144a",
+      "url": "https://github.com/diamondspark/saraswati/releases/download/v4139/saraswati-updater-v4139.apk",
+      "sha256": "5c245cdcbcaea4a1644dd744db73a36717dccb5194abadc2236ffff905f400f3",
       "size": 256152
     }
   }
