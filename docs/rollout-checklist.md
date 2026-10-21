@@ -52,6 +52,9 @@ Owner only. Do this once.
       app). Use the app build from this same branch: the approve call no longer
       returns a session token, so an older build reports an approval as failed
       even though the hub approved the phone.
+- [ ] Feedback rides on this same deploy. The optional GitHub copy of each report
+      switches on only once this deploy has run; the token, the private repo and
+      its renewal are covered in [feedback.md](feedback.md).
 - [ ] Compare the URL `wrangler deploy` printed with the app's `HUB_BASE_URL`
       (`https://saraswati-sangat.pandey-mohitk.workers.dev`). If they differ,
       **STOP**: do not go on to the admin key until the two match, because the
