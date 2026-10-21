@@ -248,10 +248,51 @@ describe("mirrorToGitHub", () => {
     }
   });
 
-  it("asks fetch to refuse redirects, and a redirect error is null", async () => {
-    const { fn, calls } = fakeFetch(() => Promise.reject(new TypeError("redirect mode is set to error")));
+  it("asks fetch not to follow redirects, and a 3xx answer is null with its body released", async () => {
+    let cancelled = false;
+    const body = new ReadableStream({
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const { fn, calls } = fakeFetch(
+      () => new Response(body, { status: 302, headers: { Location: "https://evil.example/steal" } }),
+    );
     expect(await mirrorToGitHub(ENV, row(), fn)).toBeNull();
-    expect(calls[0].init.redirect).toBe("error");
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(calls[0].init.redirect).toBe("manual");
+    await Promise.resolve();
+    expect(cancelled).toBe(true);
+  });
+
+  it("an opaque redirect (status 0) is null too", async () => {
+    const opaque = { ok: false, status: 0, body: null, json: async () => ({}) } as unknown as Response;
+    const { fn } = fakeFetch(() => opaque);
+    expect(await mirrorToGitHub(ENV, row(), fn)).toBeNull();
+  });
+
+  // An injected fake accepts any option value, which once hid redirect: "error" (workerd throws on
+  // it). This stand-in builds a real Request from the init, so the runtime's own validation of
+  // every option runs; it fails if an option value is one the runtime rejects.
+  it("sends options the Workers runtime accepts (a real Request is built from them)", async () => {
+    const requests: Request[] = [];
+    const checking = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init);
+      requests.push(request);
+      return created();
+    }) as typeof fetch;
+
+    expect(await mirrorToGitHub(ENV, row(), checking)).toBe(ISSUE_URL);
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].redirect).toBe("manual");
+    expect(requests[0].method).toBe("POST");
+    expect(requests[0].url).toBe(`https://api.github.com/repos/${REPO}/issues`);
+  });
+
+  it("the runtime really rejects redirect: 'error', which is why the mirror must not send it", () => {
+    expect(() => new Request("https://api.github.com/", { redirect: "error" })).toThrow();
+    expect(new Request("https://api.github.com/", { redirect: "manual" }).redirect).toBe("manual");
   });
 
   it("releases the body of a non-ok answer", async () => {
@@ -441,17 +482,19 @@ describe("POST /feedback with the mirror", () => {
     expect(sent.labels).toEqual(["feedback", "bug"]);
   });
 
-  it("a redirect (fetch rejects under redirect: error): still 201, issue_url null", async () => {
+  it("a redirect answer through the hub's global fetch: still 201, issue_url null", async () => {
     await setEnv({ GITHUB_FEEDBACK_TOKEN: TOKEN });
-    fetchSpy.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      expect((init as RequestInit).redirect).toBe("error");
-      throw new TypeError("redirect mode is set to error");
+    fetchSpy.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      // A real Request, so an option value the runtime rejects would throw here and fail the test.
+      expect(new Request(input, init).redirect).toBe("manual");
+      return new Response(null, { status: 302, headers: { Location: "https://evil.example/" } });
     });
     const a = await seedDevice(hubStub(), "a");
 
     const reply = await post(a.token, { kind: "bug", text: "Songs skip" });
 
     expect(reply.status).toBe(201);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect((await stored())[0].issue_url).toBeNull();
   });
 

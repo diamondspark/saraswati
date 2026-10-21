@@ -124,8 +124,9 @@ export async function mirrorToGitHub(
         },
         body: JSON.stringify(buildIssue(row)),
         signal: controller.signal,
-        // A redirect would carry the token and the text to wherever it points.
-        redirect: "error",
+        // Workers accept only "follow" and "manual"; "error" makes fetch throw. "manual" hands back
+        // the 3xx unfollowed, which is not ok, so the token and the text go nowhere else.
+        redirect: "manual",
       });
       if (!response.ok) {
         try {
