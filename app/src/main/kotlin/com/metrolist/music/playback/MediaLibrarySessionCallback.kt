@@ -1123,8 +1123,21 @@ constructor(
                             )
                         val songsByArtist =
                             artist?.let { matched -> snapshot.filter { song -> song.artists.any { it.id == matched.id } } }
-                        if (artist != null && !songsByArtist.isNullOrEmpty()) {
-                            val items = songsByArtist.map { it.toMediaItem() }
+                        // SARASWATI: a matched artist with a thin catalog (an actor or featured credit like "Aamir Khan") also gets
+                        // the songs whose title names every word of the query. A real catalog (2+ songs) is left as it was. With
+                        // no artist matched, nothing changes here and the album fallback below handles the query.
+                        val combined: List<Song> =
+                            when {
+                                artist == null -> emptyList()
+                                (songsByArtist?.size ?: 0) >= 2 -> songsByArtist.orEmpty()
+                                else -> {
+                                    val mentionTokens = titleMentionQueryTokens(searchQuery)
+                                    val titleMatches = snapshot.filter { titleMentionsAllTokens(it.song.title, mentionTokens) }
+                                    ((songsByArtist ?: emptyList()) + titleMatches).distinctBy { it.id }.take(25)
+                                }
+                            }
+                        if (artist != null && combined.isNotEmpty()) {
+                            val items = combined.map { it.toMediaItem() }
                             withContext(Dispatchers.Main) {
                                 service.adoptQueue(
                                     ListQueue(title = artist.name, items = items),
@@ -1291,6 +1304,21 @@ internal fun isBrowsableMediaId(mediaId: String): Boolean =
         mediaId.startsWith("${MusicService.ALBUM}/") ||
         mediaId.startsWith("${MusicService.PLAYLIST}/") ||
         mediaId.startsWith("${MusicService.YOUTUBE_PLAYLIST}/")
+
+// SARASWATI: strict title-mention filter for "play <name>" when the name has no real catalog; deliberately no fuzzy matching.
+internal fun titleMentionQueryTokens(query: String): Set<String> =
+    query
+        .lowercase()
+        .replace(Regex("[^\\p{L}\\p{Nd} ]"), "")
+        .split(' ')
+        .filter { it.length >= 2 }
+        .toSet()
+
+internal fun titleMentionsAllTokens(title: String, tokens: Set<String>): Boolean {
+    if (tokens.isEmpty()) return false
+    val lowered = title.lowercase()
+    return tokens.all { lowered.contains(it) }
+}
 
 internal fun <T> List<T>.paginate(
     page: Int,
