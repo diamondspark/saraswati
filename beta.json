@@ -1,21 +1,21 @@
 {
   "schema": 1,
   "channel": "beta",
-  "versionCode": 4101,
-  "versionName": "13.7.0-s4101",
+  "versionCode": 4108,
+  "versionName": "13.7.0-s4108",
   "apk": {
-    "url": "https://github.com/diamondspark/saraswati/releases/download/v4101/saraswati-v4101.apk",
-    "sha256": "ef16b307abb38ec4c8a170d723c52fb559280b1c9d9d5b48611f20d10054e96e",
-    "size": 26954628
+    "url": "https://github.com/diamondspark/saraswati/releases/download/v4108/saraswati-v4108.apk",
+    "sha256": "62c46774b019a92dec819f558181de56679f5dc2fe9b329e1f199bf9c8e8ae62",
+    "size": 26971012
   },
   "urgent": false,
-  "notes": "Security hardening: Sangat room tokens now hashed at rest, local files no longer leak into playlists when Local files is off, and Saral's voice search now shows a one-time explanation before it ever reaches Ask Saraswati.",
-  "publishedAt": "2026-10-21T03:50:01Z",
+  "notes": "Veena launcher icon, and a fix so the owner can replace the family-hub admin key from the app after rotating it (previously there was no way back in without clearing app data).",
+  "publishedAt": "2026-10-21T05:23:17Z",
   "updater": {
-    "versionCode": 4101,
+    "versionCode": 4108,
     "apk": {
-      "url": "https://github.com/diamondspark/saraswati/releases/download/v4101/saraswati-updater-v4101.apk",
-      "sha256": "da80ddcf81e96f0e50158effc2e7443fc22e0666ee87bf5a8606a42b831e580a",
+      "url": "https://github.com/diamondspark/saraswati/releases/download/v4108/saraswati-updater-v4108.apk",
+      "sha256": "a1333fd7f22ac8aec1e28f2ac815a3ed6bb473a1d759859735fb1a53a8d1456a",
       "size": 256152
     }
   }
