@@ -96,6 +96,209 @@
         </trust-anchors>
     </domain-config>
 
+    <!-- SARASWATI: Google finishes a sign-in by redirecting the browser through
+         accounts.google.<country>/accounts/SetSID, once for each country domain
+         tied to the account (one account's chain ran .ca, then .co.in, then
+         music.youtube.com), to set the session cookie on each. LoginUrlPolicy
+         allows exactly this host shape for navigation, but the TLS handshake was
+         refused here, so the page froze after the password (or the 2-step
+         approval) and sign-in never finished. This lists the same hosts: the
+         185 accounts.google.<ccTLD> hosts, from Google's own country-domain
+         list (https://www.google.com/supported_domains, 2026-10-21), minus
+         google.com (covered above) and google.cat (not a 2-letter ccTLD, so
+         LoginUrlPolicy rejects it). Exact hosts only (Ruling R20), no
+         subdomains. Regenerate from that list if Google adds a country. -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="false">accounts.google.ad</domain>
+        <domain includeSubdomains="false">accounts.google.ae</domain>
+        <domain includeSubdomains="false">accounts.google.al</domain>
+        <domain includeSubdomains="false">accounts.google.am</domain>
+        <domain includeSubdomains="false">accounts.google.as</domain>
+        <domain includeSubdomains="false">accounts.google.at</domain>
+        <domain includeSubdomains="false">accounts.google.az</domain>
+        <domain includeSubdomains="false">accounts.google.ba</domain>
+        <domain includeSubdomains="false">accounts.google.be</domain>
+        <domain includeSubdomains="false">accounts.google.bf</domain>
+        <domain includeSubdomains="false">accounts.google.bg</domain>
+        <domain includeSubdomains="false">accounts.google.bi</domain>
+        <domain includeSubdomains="false">accounts.google.bj</domain>
+        <domain includeSubdomains="false">accounts.google.bs</domain>
+        <domain includeSubdomains="false">accounts.google.bt</domain>
+        <domain includeSubdomains="false">accounts.google.by</domain>
+        <domain includeSubdomains="false">accounts.google.ca</domain>
+        <domain includeSubdomains="false">accounts.google.cd</domain>
+        <domain includeSubdomains="false">accounts.google.cf</domain>
+        <domain includeSubdomains="false">accounts.google.cg</domain>
+        <domain includeSubdomains="false">accounts.google.ch</domain>
+        <domain includeSubdomains="false">accounts.google.ci</domain>
+        <domain includeSubdomains="false">accounts.google.cl</domain>
+        <domain includeSubdomains="false">accounts.google.cm</domain>
+        <domain includeSubdomains="false">accounts.google.cn</domain>
+        <domain includeSubdomains="false">accounts.google.co.ao</domain>
+        <domain includeSubdomains="false">accounts.google.co.bw</domain>
+        <domain includeSubdomains="false">accounts.google.co.ck</domain>
+        <domain includeSubdomains="false">accounts.google.co.cr</domain>
+        <domain includeSubdomains="false">accounts.google.co.id</domain>
+        <domain includeSubdomains="false">accounts.google.co.il</domain>
+        <domain includeSubdomains="false">accounts.google.co.in</domain>
+        <domain includeSubdomains="false">accounts.google.co.jp</domain>
+        <domain includeSubdomains="false">accounts.google.co.ke</domain>
+        <domain includeSubdomains="false">accounts.google.co.kr</domain>
+        <domain includeSubdomains="false">accounts.google.co.ls</domain>
+        <domain includeSubdomains="false">accounts.google.co.ma</domain>
+        <domain includeSubdomains="false">accounts.google.co.mz</domain>
+        <domain includeSubdomains="false">accounts.google.co.nz</domain>
+        <domain includeSubdomains="false">accounts.google.co.th</domain>
+        <domain includeSubdomains="false">accounts.google.co.tz</domain>
+        <domain includeSubdomains="false">accounts.google.co.ug</domain>
+        <domain includeSubdomains="false">accounts.google.co.uk</domain>
+        <domain includeSubdomains="false">accounts.google.co.uz</domain>
+        <domain includeSubdomains="false">accounts.google.co.ve</domain>
+        <domain includeSubdomains="false">accounts.google.co.vi</domain>
+        <domain includeSubdomains="false">accounts.google.co.za</domain>
+        <domain includeSubdomains="false">accounts.google.co.zm</domain>
+        <domain includeSubdomains="false">accounts.google.co.zw</domain>
+        <domain includeSubdomains="false">accounts.google.com.af</domain>
+        <domain includeSubdomains="false">accounts.google.com.ag</domain>
+        <domain includeSubdomains="false">accounts.google.com.ar</domain>
+        <domain includeSubdomains="false">accounts.google.com.au</domain>
+        <domain includeSubdomains="false">accounts.google.com.bd</domain>
+        <domain includeSubdomains="false">accounts.google.com.bh</domain>
+        <domain includeSubdomains="false">accounts.google.com.bn</domain>
+        <domain includeSubdomains="false">accounts.google.com.bo</domain>
+        <domain includeSubdomains="false">accounts.google.com.br</domain>
+        <domain includeSubdomains="false">accounts.google.com.bz</domain>
+        <domain includeSubdomains="false">accounts.google.com.co</domain>
+        <domain includeSubdomains="false">accounts.google.com.cu</domain>
+        <domain includeSubdomains="false">accounts.google.com.cy</domain>
+        <domain includeSubdomains="false">accounts.google.com.do</domain>
+        <domain includeSubdomains="false">accounts.google.com.ec</domain>
+        <domain includeSubdomains="false">accounts.google.com.eg</domain>
+        <domain includeSubdomains="false">accounts.google.com.et</domain>
+        <domain includeSubdomains="false">accounts.google.com.fj</domain>
+        <domain includeSubdomains="false">accounts.google.com.gh</domain>
+        <domain includeSubdomains="false">accounts.google.com.gi</domain>
+        <domain includeSubdomains="false">accounts.google.com.gt</domain>
+        <domain includeSubdomains="false">accounts.google.com.hk</domain>
+        <domain includeSubdomains="false">accounts.google.com.jm</domain>
+        <domain includeSubdomains="false">accounts.google.com.kh</domain>
+        <domain includeSubdomains="false">accounts.google.com.kw</domain>
+        <domain includeSubdomains="false">accounts.google.com.lb</domain>
+        <domain includeSubdomains="false">accounts.google.com.ly</domain>
+        <domain includeSubdomains="false">accounts.google.com.mm</domain>
+        <domain includeSubdomains="false">accounts.google.com.mt</domain>
+        <domain includeSubdomains="false">accounts.google.com.mx</domain>
+        <domain includeSubdomains="false">accounts.google.com.my</domain>
+        <domain includeSubdomains="false">accounts.google.com.na</domain>
+        <domain includeSubdomains="false">accounts.google.com.ng</domain>
+        <domain includeSubdomains="false">accounts.google.com.ni</domain>
+        <domain includeSubdomains="false">accounts.google.com.np</domain>
+        <domain includeSubdomains="false">accounts.google.com.om</domain>
+        <domain includeSubdomains="false">accounts.google.com.pa</domain>
+        <domain includeSubdomains="false">accounts.google.com.pe</domain>
+        <domain includeSubdomains="false">accounts.google.com.pg</domain>
+        <domain includeSubdomains="false">accounts.google.com.ph</domain>
+        <domain includeSubdomains="false">accounts.google.com.pk</domain>
+        <domain includeSubdomains="false">accounts.google.com.pr</domain>
+        <domain includeSubdomains="false">accounts.google.com.py</domain>
+        <domain includeSubdomains="false">accounts.google.com.qa</domain>
+        <domain includeSubdomains="false">accounts.google.com.sa</domain>
+        <domain includeSubdomains="false">accounts.google.com.sb</domain>
+        <domain includeSubdomains="false">accounts.google.com.sg</domain>
+        <domain includeSubdomains="false">accounts.google.com.sl</domain>
+        <domain includeSubdomains="false">accounts.google.com.sv</domain>
+        <domain includeSubdomains="false">accounts.google.com.tj</domain>
+        <domain includeSubdomains="false">accounts.google.com.tr</domain>
+        <domain includeSubdomains="false">accounts.google.com.tw</domain>
+        <domain includeSubdomains="false">accounts.google.com.ua</domain>
+        <domain includeSubdomains="false">accounts.google.com.uy</domain>
+        <domain includeSubdomains="false">accounts.google.com.vc</domain>
+        <domain includeSubdomains="false">accounts.google.com.vn</domain>
+        <domain includeSubdomains="false">accounts.google.cv</domain>
+        <domain includeSubdomains="false">accounts.google.cz</domain>
+        <domain includeSubdomains="false">accounts.google.de</domain>
+        <domain includeSubdomains="false">accounts.google.dj</domain>
+        <domain includeSubdomains="false">accounts.google.dk</domain>
+        <domain includeSubdomains="false">accounts.google.dm</domain>
+        <domain includeSubdomains="false">accounts.google.dz</domain>
+        <domain includeSubdomains="false">accounts.google.ee</domain>
+        <domain includeSubdomains="false">accounts.google.es</domain>
+        <domain includeSubdomains="false">accounts.google.fi</domain>
+        <domain includeSubdomains="false">accounts.google.fm</domain>
+        <domain includeSubdomains="false">accounts.google.fr</domain>
+        <domain includeSubdomains="false">accounts.google.ga</domain>
+        <domain includeSubdomains="false">accounts.google.ge</domain>
+        <domain includeSubdomains="false">accounts.google.gg</domain>
+        <domain includeSubdomains="false">accounts.google.gl</domain>
+        <domain includeSubdomains="false">accounts.google.gm</domain>
+        <domain includeSubdomains="false">accounts.google.gr</domain>
+        <domain includeSubdomains="false">accounts.google.gy</domain>
+        <domain includeSubdomains="false">accounts.google.hn</domain>
+        <domain includeSubdomains="false">accounts.google.hr</domain>
+        <domain includeSubdomains="false">accounts.google.ht</domain>
+        <domain includeSubdomains="false">accounts.google.hu</domain>
+        <domain includeSubdomains="false">accounts.google.ie</domain>
+        <domain includeSubdomains="false">accounts.google.im</domain>
+        <domain includeSubdomains="false">accounts.google.iq</domain>
+        <domain includeSubdomains="false">accounts.google.is</domain>
+        <domain includeSubdomains="false">accounts.google.it</domain>
+        <domain includeSubdomains="false">accounts.google.je</domain>
+        <domain includeSubdomains="false">accounts.google.jo</domain>
+        <domain includeSubdomains="false">accounts.google.kg</domain>
+        <domain includeSubdomains="false">accounts.google.ki</domain>
+        <domain includeSubdomains="false">accounts.google.kz</domain>
+        <domain includeSubdomains="false">accounts.google.la</domain>
+        <domain includeSubdomains="false">accounts.google.li</domain>
+        <domain includeSubdomains="false">accounts.google.lk</domain>
+        <domain includeSubdomains="false">accounts.google.lt</domain>
+        <domain includeSubdomains="false">accounts.google.lu</domain>
+        <domain includeSubdomains="false">accounts.google.lv</domain>
+        <domain includeSubdomains="false">accounts.google.md</domain>
+        <domain includeSubdomains="false">accounts.google.me</domain>
+        <domain includeSubdomains="false">accounts.google.mg</domain>
+        <domain includeSubdomains="false">accounts.google.mk</domain>
+        <domain includeSubdomains="false">accounts.google.ml</domain>
+        <domain includeSubdomains="false">accounts.google.mn</domain>
+        <domain includeSubdomains="false">accounts.google.mu</domain>
+        <domain includeSubdomains="false">accounts.google.mv</domain>
+        <domain includeSubdomains="false">accounts.google.mw</domain>
+        <domain includeSubdomains="false">accounts.google.ne</domain>
+        <domain includeSubdomains="false">accounts.google.nl</domain>
+        <domain includeSubdomains="false">accounts.google.no</domain>
+        <domain includeSubdomains="false">accounts.google.nr</domain>
+        <domain includeSubdomains="false">accounts.google.nu</domain>
+        <domain includeSubdomains="false">accounts.google.pl</domain>
+        <domain includeSubdomains="false">accounts.google.pn</domain>
+        <domain includeSubdomains="false">accounts.google.ps</domain>
+        <domain includeSubdomains="false">accounts.google.pt</domain>
+        <domain includeSubdomains="false">accounts.google.ro</domain>
+        <domain includeSubdomains="false">accounts.google.rs</domain>
+        <domain includeSubdomains="false">accounts.google.ru</domain>
+        <domain includeSubdomains="false">accounts.google.rw</domain>
+        <domain includeSubdomains="false">accounts.google.sc</domain>
+        <domain includeSubdomains="false">accounts.google.se</domain>
+        <domain includeSubdomains="false">accounts.google.sh</domain>
+        <domain includeSubdomains="false">accounts.google.si</domain>
+        <domain includeSubdomains="false">accounts.google.sk</domain>
+        <domain includeSubdomains="false">accounts.google.sm</domain>
+        <domain includeSubdomains="false">accounts.google.sn</domain>
+        <domain includeSubdomains="false">accounts.google.so</domain>
+        <domain includeSubdomains="false">accounts.google.sr</domain>
+        <domain includeSubdomains="false">accounts.google.st</domain>
+        <domain includeSubdomains="false">accounts.google.td</domain>
+        <domain includeSubdomains="false">accounts.google.tg</domain>
+        <domain includeSubdomains="false">accounts.google.tl</domain>
+        <domain includeSubdomains="false">accounts.google.tm</domain>
+        <domain includeSubdomains="false">accounts.google.tn</domain>
+        <domain includeSubdomains="false">accounts.google.to</domain>
+        <domain includeSubdomains="false">accounts.google.tt</domain>
+        <domain includeSubdomains="false">accounts.google.vu</domain>
+        <domain includeSubdomains="false">accounts.google.ws</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+
     <!-- LrcLib lyrics. Exact host only (Ruling R20): the app calls the apex,
          never a subdomain. -->
     <domain-config cleartextTrafficPermitted="false">
