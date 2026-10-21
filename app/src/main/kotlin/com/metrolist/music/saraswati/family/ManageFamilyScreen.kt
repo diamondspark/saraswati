@@ -122,13 +122,13 @@ fun ManageFamilyScreen(
 ) {
     val (isOwner) = rememberPreference(IsFamilyOwnerKey, defaultValue = false)
     val error by viewModel.error.collectAsStateWithLifecycle()
+    val keyRejected by viewModel.ownerKeyRejected.collectAsStateWithLifecycle()
 
     Box(Modifier.fillMaxSize()) {
-        // An owner flag without its key (a restored backup keeps the flag, never the key) falls back to setup.
-        if (isOwner && error != FamilyError.NO_ADMIN_KEY) {
-            OwnerContent(viewModel)
+        if (showsOwnerSetup(isOwner, error, keyRejected)) {
+            OwnerSetupContent(viewModel, keyRejected)
         } else {
-            OwnerSetupContent(viewModel)
+            OwnerContent(viewModel)
         }
 
         TopAppBar(
@@ -147,6 +147,17 @@ fun ManageFamilyScreen(
         )
     }
 }
+
+/**
+ * Whether Manage family asks for the admin key instead of showing the owner's tools. That is so for a phone that
+ * is not the owner's; for an owner flag without its key (a restored backup keeps the flag, never the key); and for
+ * a stored key the hub answered 401 to, so a rotated key can be replaced without clearing the app's data.
+ */
+internal fun showsOwnerSetup(
+    isOwner: Boolean,
+    error: FamilyError?,
+    keyRejected: Boolean,
+): Boolean = !isOwner || error == FamilyError.NO_ADMIN_KEY || keyRejected
 
 @Composable
 private fun ScreenColumn(content: @Composable () -> Unit) {
@@ -186,7 +197,10 @@ private fun SectionCard(content: @Composable () -> Unit) {
 // --- Owner setup ------------------------------------------------------
 
 @Composable
-private fun OwnerSetupContent(viewModel: FamilyViewModel) {
+private fun OwnerSetupContent(
+    viewModel: FamilyViewModel,
+    keyRejected: Boolean = false,
+) {
     val clipboard = LocalContext.current.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     val setup by viewModel.setupState.collectAsStateWithLifecycle()
     var key by remember { mutableStateOf("") }
@@ -198,6 +212,13 @@ private fun OwnerSetupContent(viewModel: FamilyViewModel) {
                 text = stringResource(R.string.family_owner_setup_title),
                 style = MaterialTheme.typography.titleMedium,
             )
+            if (keyRejected) {
+                Text(
+                    text = stringResource(R.string.family_owner_key_rejected),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             Text(
                 text = stringResource(R.string.family_owner_setup_desc),
                 style = MaterialTheme.typography.bodyMedium,

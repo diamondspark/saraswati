@@ -15,7 +15,8 @@ import android.os.Build
 
 internal object ClipboardHygiene {
     /**
-     * Clears the primary clip if one of its items is exactly [secret] (ignoring surrounding whitespace).
+     * Clears the primary clip if one of its items is exactly [secret] (ignoring whitespace and invisible
+     * characters, since the key was cleaned of them by [AdminKeyInput.clean] before it was kept).
      * Only API 28 and later can clear a clip; before that nothing is touched. Never throws. Returns true
      * when it cleared the clip.
      */
@@ -27,7 +28,10 @@ internal object ClipboardHygiene {
         if (sdkInt < Build.VERSION_CODES.P || secret.isBlank()) return false
         return try {
             val clip = clipboard.primaryClip ?: return false
-            val holdsIt = (0 until clip.itemCount).any { clip.getItemAt(it).text?.toString()?.trim() == secret }
+            val holdsIt =
+                (0 until clip.itemCount).any {
+                    AdminKeyInput.clean(clip.getItemAt(it).text?.toString().orEmpty()) == secret
+                }
             if (holdsIt) clipboard.clearPrimaryClip()
             holdsIt
         } catch (e: Exception) {

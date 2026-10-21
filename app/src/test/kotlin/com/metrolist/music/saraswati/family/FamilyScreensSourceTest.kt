@@ -344,4 +344,19 @@ class FamilyScreensSourceTest {
         assertEquals("Waiting for approval · Code %1\$s", string("family_waiting_title"))
         assertEquals("Open Join", string("family_waiting_open_join"))
     }
+
+    @Test
+    fun `manage family asks for a key when the stored one is refused, with the rejected-key text, and keeps no key in saved state`() {
+        val screen = source("$familyDir/ManageFamilyScreen.kt")
+
+        assertTrue("the gate reads the view model's rejected flag", "viewModel.ownerKeyRejected" in screen)
+        assertTrue("the setup branch is chosen by showsOwnerSetup", "if (showsOwnerSetup(isOwner, error, keyRejected))" in screen)
+        assertTrue("the setup branch is told why", "OwnerSetupContent(viewModel, keyRejected)" in screen)
+        assertTrue("the paste field's copy for a refused key is shown", "R.string.family_owner_key_rejected" in screen)
+        assertEquals(
+            "The family hub no longer accepts this phone\\'s key. Paste the current key to continue.",
+            string("family_owner_key_rejected"),
+        )
+        assertTrue("the key field is plain remember state", "var key by remember { mutableStateOf(\"\") }" in screen)
+    }
 }

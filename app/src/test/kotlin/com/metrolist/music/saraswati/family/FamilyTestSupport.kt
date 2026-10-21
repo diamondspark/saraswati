@@ -41,6 +41,9 @@ data class HealthCall(
     val timezone: String,
 )
 
+private val ADMIN_FUNCTIONS =
+    setOf("createPairing", "getRoster", "approveDevice", "revokeDevice", "setRole", "setStations", "setKillSwitches", "getHealth")
+
 class FakeHub : HubApi {
     val calls = CopyOnWriteArrayList<String>()
 
@@ -68,6 +71,9 @@ class FakeHub : HubApi {
     /** While set, getStations waits on it: stands in for a hub that is slow or unreachable. */
     @Volatile var stationsGate: CompletableDeferred<Unit>? = null
 
+    /** While set, createPairing waits on it: a pairing request that is still in flight. */
+    @Volatile var pairingGate: CompletableDeferred<Unit>? = null
+
     /** While set, claimPairing waits on it: a claim that is still in flight. */
     @Volatile var claimGate: CompletableDeferred<Unit>? = null
 
@@ -91,6 +97,12 @@ class FakeHub : HubApi {
         failures.remove(function)
     }
 
+    /**
+     * While set, the hub behaves as one whose ADMIN_KEY is this value: every admin call made with another key
+     * answers 401. Stands in for a key that was rotated on the hub after the phone stored the old one.
+     */
+    @Volatile var onlyAdminKey: String? = null
+
     /** The next pairingStatus answers, in order: a [PairingStatus] succeeds, a [Throwable] fails. */
     fun scriptStatus(vararg steps: Any) {
         steps.forEach { statusScript.add(if (it is Throwable) Result.failure(it) else Result.success(it as PairingStatus)) }
@@ -105,6 +117,9 @@ class FakeHub : HubApi {
     ): Result<T> {
         calls.add("$function($args)")
         failures[function]?.let { return Result.failure(it) }
+        onlyAdminKey?.let { accepted ->
+            if (function in ADMIN_FUNCTIONS && args.substringBefore(',') != accepted) return Result.failure(hubFailure(401))
+        }
         return Result.success(ok())
     }
 
@@ -115,7 +130,10 @@ class FakeHub : HubApi {
         devices = devices.map { if (it.deviceId == deviceId) change(it) else it }
     }
 
-    override suspend fun createPairing(adminKey: String) = run("createPairing", adminKey) { pairingToken }
+    override suspend fun createPairing(adminKey: String): Result<PairingToken> {
+        pairingGate?.await()
+        return run("createPairing", adminKey) { pairingToken }
+    }
 
     override suspend fun claimPairing(
         token: String,
