@@ -21,6 +21,10 @@ object LoginUrlPolicy {
             "accounts.youtube.com",
             "myaccount.google.com",
             "consent.google.com",
+            // Google's own account-verification and recovery-options steps, which sign-in can
+            // route through after the password. Blocked in a live sign-in, it left the page
+            // stuck on a step Google considers required.
+            "gds.google.com",
             "consent.youtube.com",
             "music.youtube.com",
             "www.youtube.com",

@@ -42,6 +42,15 @@ class LoginUrlPolicyTest {
     }
 
     @Test
+    fun `accepts Google's post-password verification host but not lookalikes`() {
+        assertTrue(LoginUrlPolicy.isAllowedNavigation("https://gds.google.com/web/recoveryoptions"))
+        assertFalse(LoginUrlPolicy.isAllowedNavigation("http://gds.google.com/web/recoveryoptions"))
+        assertFalse(LoginUrlPolicy.isAllowedNavigation("https://gds.google.com.evil.example/web/recoveryoptions"))
+        assertFalse(LoginUrlPolicy.isAllowedNavigation("https://evil-gds.google.com/web/recoveryoptions"))
+        assertFalse(LoginUrlPolicy.isAllowedNavigation("https://sites.google.com/gds"))
+    }
+
+    @Test
     fun `rejects http`() {
         assertFalse(LoginUrlPolicy.isAllowedNavigation("http://accounts.google.com/ServiceLogin"))
         assertFalse(LoginUrlPolicy.isAllowedNavigation("http://music.youtube.com/"))
