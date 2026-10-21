@@ -338,4 +338,29 @@ class HubClientFeedbackTest {
 
             assertEquals(404, (hub.setFeedbackStatus("admin", "gone", FeedbackStatus.Seen).exceptionOrNull() as HubException).status)
         }
+
+    @Test
+    fun `a text naming a song on this phone is refused as invalid input before the network, without crashing`() =
+        runBlocking {
+            val guarded =
+                HubClient(
+                    server.url("/").toString(),
+                    OkHttpClient
+                        .Builder()
+                        .addInterceptor(com.metrolist.innertube.saraswati.LocalIdEgressInterceptor)
+                        .build(),
+                )
+            val text = "crashes on local:123 and LOCAL%3A9"
+
+            val failure = guarded.submitFeedback("tok", FeedbackKind.Bug, text, null).exceptionOrNull()
+
+            assertTrue(failure.toString(), failure is IllegalArgumentException)
+            assertEquals(com.metrolist.music.saraswati.family.FamilyError.INVALID_INPUT, com.metrolist.music.saraswati.family.FamilyError.from(failure!!))
+            assertFalse(failure.toString().contains("local"))
+            assertEquals(0, server.requestCount)
+
+            // The same client still works afterwards.
+            reply(201, """{"id":"ok1"}""")
+            assertEquals("ok1", guarded.submitFeedback("tok", FeedbackKind.Bug, "fine", null).getOrNull())
+        }
 }

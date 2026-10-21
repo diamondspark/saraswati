@@ -23,6 +23,7 @@
 //    a hostile roster entry cannot rewrite the path ("..", "/", "?").
 package com.metrolist.music.saraswati.family
 
+import com.metrolist.innertube.saraswati.LocalSongEgressException
 import com.metrolist.music.saraswati.ask.AskHub
 import com.metrolist.music.saraswati.ask.AskLimitReached
 import com.metrolist.music.saraswati.ask.AskReply
@@ -52,6 +53,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -62,6 +64,18 @@ import java.time.Instant
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+
+// SARASWATI: feedback — see the interceptor list in HubClient. Carries no message: the request is not quoted.
+private class LocalEgressRefused : IOException("request refused")
+
+private object LocalEgressAsRefusal : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): Response =
+        try {
+            chain.proceed(chain.request())
+        } catch (e: LocalSongEgressException) {
+            throw LocalEgressRefused()
+        }
+}
 
 class HubClient(
     private val baseUrl: String,
@@ -77,6 +91,10 @@ class HubClient(
             .newBuilder()
             .followRedirects(false)
             .followSslRedirects(false)
+            // SARASWATI: feedback — first in the chain, so it wraps the local-song egress guard: that guard's
+            // exception is not an IOException, which OkHttp rethrows on its own thread (an app crash) after the
+            // call has already failed. Free text (feedback) is the first hub body that can name a `local:<id>`.
+            .apply { interceptors().add(0, LocalEgressAsRefusal) }
             .build()
 
     override suspend fun createPairing(adminKey: String): Result<PairingToken> =
@@ -371,6 +389,9 @@ class HubClient(
                 http.newCall(request).await(readLimitBody = onLimit != null)
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: LocalEgressRefused) {
+                // INVALID_INPUT. Nothing of the request (its text) is carried in the message.
+                return Result.failure(IllegalArgumentException("request refused"))
             } catch (e: Exception) {
                 return Result.failure(e)
             }

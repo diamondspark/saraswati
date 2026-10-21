@@ -1465,7 +1465,7 @@
     <string name="feedback_info_android">Android: %1$s</string>
     <string name="feedback_info_phone">Phone: %1$s</string>
     <string name="feedback_info_off">Only your message is sent.</string>
-    <string name="feedback_privacy_note">The family owner will see your message and which phone sent it. Please don\'t include passwords or other private details.</string>
+    <string name="feedback_privacy_note">The family owner will see your message and which phone sent it. It may also be copied to a private list that an automated assistant reads to help fix the app. Please don\'t include passwords or other private details.</string>
     <string name="feedback_send">Send</string>
     <string name="feedback_thanks_title">Thank you!</string>
     <string name="feedback_thanks_body">Your feedback was sent to the family owner.</string>

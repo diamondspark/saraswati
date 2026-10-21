@@ -47,7 +47,7 @@ data class FeedbackDraft(
 }
 
 /** Why a send did not go through, in the terms a screen can word. */
-enum class FeedbackFailure { NotPaired, Offline, RateLimited, NotSwitchedOn, Invalid, Other }
+enum class FeedbackFailure { NotPaired, KeyRejected, Offline, RateLimited, NotSwitchedOn, Invalid, Other }
 
 sealed interface FeedbackUiState {
     data object Idle : FeedbackUiState
@@ -61,7 +61,10 @@ sealed interface FeedbackUiState {
     ) : FeedbackUiState
 }
 
-internal fun feedbackFailureOf(failure: Throwable): FeedbackFailure =
+internal fun feedbackFailureOf(
+    failure: Throwable,
+    usedAdminKey: Boolean = false,
+): FeedbackFailure =
     when (FamilyError.from(failure)) {
         FamilyError.OFFLINE -> FeedbackFailure.Offline
         FamilyError.RATE_LIMITED -> FeedbackFailure.RateLimited
@@ -69,7 +72,8 @@ internal fun feedbackFailureOf(failure: Throwable): FeedbackFailure =
         FamilyError.NOT_FOUND, FamilyError.SERVER -> FeedbackFailure.NotSwitchedOn
         FamilyError.INVALID_INPUT -> FeedbackFailure.Invalid
         // The hub refused this phone's session (revoked) or the owner's key; either way it has to be set up again.
-        FamilyError.UNAUTHORIZED, FamilyError.NO_ADMIN_KEY -> FeedbackFailure.NotPaired
+        FamilyError.UNAUTHORIZED -> if (usedAdminKey) FeedbackFailure.KeyRejected else FeedbackFailure.NotPaired
+        FamilyError.NO_ADMIN_KEY -> FeedbackFailure.NotPaired
         else -> FeedbackFailure.Other
     }
 
@@ -146,8 +150,8 @@ class FeedbackViewModel
             if (!draft.isValid || _state.value == FeedbackUiState.Sending) return
             _state.value = FeedbackUiState.Sending
             scope.launch {
-                val bearer = bearer()
-                if (bearer == null) {
+                val credential = credential()
+                if (credential == null) {
                     _state.value = FeedbackUiState.Error(FeedbackFailure.NotPaired)
                     return@launch
                 }
@@ -155,7 +159,7 @@ class FeedbackViewModel
                     // Leaving the screen must not cancel a report the hub may already have accepted, which would
                     // look unsent and be sent again.
                     withContext(NonCancellable) {
-                        hub.submitFeedback(bearer, draft.kind, draft.trimmed, diagnostics.takeIf { draft.includeInfo })
+                        hub.submitFeedback(credential.token, draft.kind, draft.trimmed, diagnostics.takeIf { draft.includeInfo })
                     }
                 result
                     .onSuccess {
@@ -164,7 +168,7 @@ class FeedbackViewModel
                         _state.value = FeedbackUiState.Sent
                     }.onFailure { failure ->
                         if (failure is CancellationException) throw failure
-                        _state.value = FeedbackUiState.Error(feedbackFailureOf(failure))
+                        _state.value = FeedbackUiState.Error(feedbackFailureOf(failure, credential.isAdminKey))
                     }
             }
         }
@@ -174,7 +178,15 @@ class FeedbackViewModel
         }
 
         // The owner's phone sends with the admin key; every other phone with its session token. Neither is kept.
-        private suspend fun bearer(): String? = guarded { store.adminKey() } ?: guarded { identity.sessionToken() }
+        private suspend fun credential(): Credential? =
+            guarded { store.adminKey() }?.let { Credential(it, isAdminKey = true) }
+                ?: guarded { identity.sessionToken() }?.let { Credential(it, isAdminKey = false) }
+
+        // Which kind it is decides the wording of a 401: a revoked phone is not linked, the owner's key is rejected.
+        private class Credential(
+            val token: String,
+            val isAdminKey: Boolean,
+        )
 
         private suspend fun guarded(read: suspend () -> String?): String? =
             try {

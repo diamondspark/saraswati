@@ -205,6 +205,7 @@ private fun InfoLine(text: String) {
 private fun errorMessage(reason: FeedbackFailure): Int =
     when (reason) {
         FeedbackFailure.NotPaired -> R.string.feedback_error_not_paired
+        FeedbackFailure.KeyRejected -> R.string.feedback_inbox_error_key_rejected
         FeedbackFailure.Offline -> R.string.feedback_error_offline
         FeedbackFailure.RateLimited -> R.string.feedback_error_rate_limited
         FeedbackFailure.NotSwitchedOn -> R.string.feedback_error_unavailable

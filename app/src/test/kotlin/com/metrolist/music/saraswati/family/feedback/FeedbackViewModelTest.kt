@@ -334,4 +334,42 @@ class FeedbackViewModelTest {
 
         assertEquals("owner-admin-key", hub.calls.single().bearer)
     }
+
+    @Test
+    fun `the owner's rejected admin key is its own reason, a revoked phone is not linked`() {
+        store.admin = "owner-admin-key"
+        failWith(hubFailure(401), FeedbackFailure.KeyRejected)
+
+        store.admin = null
+        failWith(hubFailure(401), FeedbackFailure.NotPaired)
+    }
+
+    @Test
+    fun `a report naming a song on this phone through the real hub client is Invalid, kept, and never crashes`() {
+        val server = mockwebserver3.MockWebServer()
+        server.start()
+        try {
+            val real =
+                com.metrolist.music.saraswati.family.HubClient(
+                    server.url("/").toString(),
+                    okhttp3.OkHttpClient
+                        .Builder()
+                        .addInterceptor(com.metrolist.innertube.saraswati.LocalIdEgressInterceptor)
+                        .build(),
+                )
+            val realVm = FeedbackViewModel(real, store, identity, { info }, scope)
+            realVm.setText("It skips when I play local:123 from my phone")
+
+            realVm.send()
+            // OkHttp answers on its own thread, so wait (bounded) for the state to leave Sending.
+            val deadline = System.currentTimeMillis() + 5_000
+            while (realVm.state.value == FeedbackUiState.Sending && System.currentTimeMillis() < deadline) Thread.sleep(10)
+
+            assertEquals(FeedbackUiState.Error(FeedbackFailure.Invalid), realVm.state.value)
+            assertEquals("It skips when I play local:123 from my phone", realVm.draft.value.text)
+            assertEquals(0, server.requestCount)
+        } finally {
+            server.close()
+        }
+    }
 }
