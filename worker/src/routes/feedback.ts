@@ -25,8 +25,8 @@ const MAX_DEVICE_LENGTH = 80;
 // streamed one. 1000 characters of text, even all escaped, fit well inside it.
 const MAX_POST_BODY_BYTES = 8192;
 const MAX_PUT_BODY_BYTES = 1024;
-// Per device: 5 an hour and 20 a day. The hour is charged first, so a day already spent
-// never charges it again.
+// Per device: 5 an hour and 20 a day. The hour window is charged before the day window, so a
+// request the day limit refuses still uses up one hour slot.
 const HOUR_SECONDS = 3600;
 const HOUR_MAX = 5;
 const DAY_SECONDS = 86400;
@@ -111,18 +111,18 @@ const isKind = (value: unknown): value is FeedbackKind =>
 const isStatus = (value: unknown): value is FeedbackStatus =>
   (FEEDBACK_STATUSES as readonly unknown[]).includes(value);
 
-/** The cleaned text (controls stripped but \n, trimmed, 1..1000 chars), else null. */
+/** The cleaned text (tabs to a space, other controls stripped but \n, trimmed, 1..1000 chars), else null. */
 function cleanFeedbackText(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
   }
-  const text = value.replace(TEXT_STRIP, "").trim();
+  const text = value.replace(/\t/g, " ").replace(TEXT_STRIP, "").trim();
   return text.length >= 1 && text.length <= MAX_TEXT_LENGTH ? text : null;
 }
 
 /**
  * One single-line diagnostics field: undefined or null is "not sent" (null result), a string is
- * cleaned and capped, anything else, or a string over the cap, is invalid (undefined result).
+ * cleaned and cut to the cap, anything else is invalid (undefined result).
  */
 function cleanDiagnostic(value: unknown, maxLength: number): string | null | undefined {
   if (value === undefined || value === null) {
@@ -131,9 +131,14 @@ function cleanDiagnostic(value: unknown, maxLength: number): string | null | und
   if (typeof value !== "string") {
     return undefined;
   }
-  const cleaned = value.replace(LINE_STRIP, "").trim();
+  let cleaned = value.replace(LINE_STRIP, "").trim();
   if (cleaned.length > maxLength) {
-    return undefined;
+    cleaned = cleaned.slice(0, maxLength);
+    // Never leave half of a surrogate pair at the cut.
+    if (/[\ud800-\udbff]$/.test(cleaned)) {
+      cleaned = cleaned.slice(0, -1);
+    }
+    cleaned = cleaned.trimEnd();
   }
   return cleaned === "" ? null : cleaned;
 }
@@ -198,7 +203,7 @@ export const postFeedback: RouteHandler = async (ctx, request, auth) => {
       cleanedAndroid === undefined ||
       cleanedDevice === undefined
     ) {
-      return invalid("diagnostics fields must be short strings");
+      return invalid("diagnostics fields must be strings");
     }
     appVersion = cleanedVersion;
     android = cleanedAndroid;

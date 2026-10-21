@@ -154,7 +154,7 @@ describe("POST /feedback", () => {
       expect((await post(a.token, { kind: "bug", text })).status).toBe(201);
     });
 
-    it("strips control characters except newlines, and turns CRLF into LF", async () => {
+    it("strips control characters except newlines, turns a tab into a space, and CRLF into LF", async () => {
       const a = await seedDevice(hubStub(), "a");
       const id = (
         await post(a.token, {
@@ -163,9 +163,9 @@ describe("POST /feedback", () => {
         })
       ).body.id;
 
-      expect((await storedRows())[0].text).toBe("line1\nline2\nline3tabbedend");
+      expect((await storedRows())[0].text).toBe("line1\nline2\nline3 tabbedend");
       const items = (await list(TEST_ADMIN_KEY)).body.items;
-      expect(items.find((i: any) => i.id === id).text).toBe("line1\nline2\nline3tabbedend");
+      expect(items.find((i: any) => i.id === id).text).toBe("line1\nline2\nline3 tabbedend");
     });
 
     it("round-trips Hindi, emoji and RTL text unchanged", async () => {
@@ -223,13 +223,44 @@ describe("POST /feedback", () => {
       ["a non-string appVersion", { kind: "bug", text: "x", diagnostics: { appVersion: 13 } }],
       ["a non-string android", { kind: "bug", text: "x", diagnostics: { android: {} } }],
       ["a non-string device", { kind: "bug", text: "x", diagnostics: { device: ["Pixel"] } }],
-      ["appVersion over 40", { kind: "bug", text: "x", diagnostics: { appVersion: "v".repeat(41) } }],
-      ["android over 40", { kind: "bug", text: "x", diagnostics: { android: "a".repeat(41) } }],
-      ["device over 80", { kind: "bug", text: "x", diagnostics: { device: "d".repeat(81) } }],
     ])("rejects %s with 400", async (_label, body) => {
       const a = await seedDevice(hubStub(), "a");
       expect((await post(a.token, body)).status).toBe(400);
       expect(await storedRows()).toEqual([]);
+    });
+
+    it("truncates diagnostics over their caps instead of rejecting, and GET returns the cut value", async () => {
+      const a = await seedDevice(hubStub(), "a");
+      const reply = await post(a.token, {
+        kind: "bug",
+        text: "x",
+        diagnostics: {
+          appVersion: "v".repeat(41),
+          android: `${"a".repeat(39)}  tail`,
+          device: "d".repeat(500),
+        },
+      });
+      expect(reply.status).toBe(201);
+      const [row] = await storedRows();
+      expect([row.app_version, row.android, row.device]).toEqual([
+        "v".repeat(40),
+        "a".repeat(39),
+        "d".repeat(80),
+      ]);
+      const [item] = (await list(TEST_ADMIN_KEY)).body.items;
+      expect([item.appVersion, item.android, item.device]).toEqual([
+        "v".repeat(40),
+        "a".repeat(39),
+        "d".repeat(80),
+      ]);
+    });
+
+    it("does not leave half a surrogate pair when the cut falls inside an emoji", async () => {
+      const a = await seedDevice(hubStub(), "a");
+      const device = `${"d".repeat(79)}\u{1F600}`;
+      expect(device.length).toBe(81);
+      expect((await post(a.token, { kind: "bug", text: "x", diagnostics: { device } })).status).toBe(201);
+      expect((await storedRows())[0].device).toBe("d".repeat(79));
     });
 
     it("accepts diagnostics at exactly their caps, and strips controls from them", async () => {
