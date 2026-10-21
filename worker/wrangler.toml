@@ -15,8 +15,10 @@ new_sqlite_classes = ["FamilyHub"]
 # fine-grained token, Issues: write on this one repo) and never commit it. Without it nothing
 # is mirrored. Keep this table above [ai]; wrangler.test.toml carries the same repo line and
 # deliberately no token.
+# The repo MUST be private: it receives the family's feedback text. The public app repo is
+# never the target. Create diamondspark/saraswati-feedback as PRIVATE before setting the token.
 [vars]
-GITHUB_FEEDBACK_REPO = "diamondspark/saraswati"
+GITHUB_FEEDBACK_REPO = "diamondspark/saraswati-feedback"
 
 # Ask Saraswati. A binding holds no key. On the Workers Free plan usage past the daily
 # allowance fails instead of being billed. vitest loads wrangler.test.toml, which is this

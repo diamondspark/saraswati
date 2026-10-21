@@ -40,8 +40,15 @@ const UNNAMED_NICKNAME = "Family member";
 
 // Every C0 and C1 control except \n, and the two Unicode line separators. \r goes, so \r\n
 // becomes \n. Bidi marks and joiners are not controls and survive, so RTL text round-trips.
-const TEXT_STRIP = /[^\P{Cc}\n]|[\u2028\u2029]/gu;
-const LINE_STRIP = /[\p{Cc}\u2028\u2029]/gu;
+// Invisible characters are stripped too: they can hide instructions from the owner reading the
+// inbox but not from an agent reading the same text. Tag characters, soft hyphen, Mongolian
+// vowel separator, zero-width space, word joiner and invisible operators, bidi embeddings,
+// overrides and isolates, the BOM and the interlinear annotation marks. U+200C/200D (ZWNJ and ZWJ,
+// needed for Hindi conjuncts and emoji sequences), U+200E/200F and U+061C (the RTL marks) stay.
+const TEXT_STRIP =
+  /[^\P{Cc}\n]|[\u2028\u2029\u{E0000}-\u{E007F}\u00AD\u180E\u200B\u2060-\u2064\u2066-\u2069\u202A-\u202E\uFEFF\uFFF9-\uFFFB]/gu;
+// Diagnostics are one line, so they lose every control, and the same invisible characters.
+const LINE_STRIP = /[\p{Cc}\u2028\u2029\u{E0000}-\u{E007F}\u00AD\u180E\u200B\u2060-\u2064\u2066-\u2069\u202A-\u202E\uFEFF\uFFF9-\uFFFB]/gu;
 
 export interface FeedbackInput {
   deviceId: string;
@@ -111,7 +118,7 @@ const isKind = (value: unknown): value is FeedbackKind =>
 const isStatus = (value: unknown): value is FeedbackStatus =>
   (FEEDBACK_STATUSES as readonly unknown[]).includes(value);
 
-/** The cleaned text (tabs to a space, other controls stripped but \n, trimmed, 1..1000 chars), else null. */
+/** The cleaned text (tabs to a space, other controls and invisible characters stripped but \n, trimmed, 1..1000 chars), else null. */
 function cleanFeedbackText(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;

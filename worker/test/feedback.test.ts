@@ -173,7 +173,7 @@ describe("POST /feedback", () => {
       const samples = [
         "गाना बार-बार रुक जाता है, कृपया ठीक करें",
         "Love it 🎶🙏🏽 👨‍👩‍👧 \u{1F600}",
-        "مرحبا بالعالم \u200f שלום עולם \u202b",
+        "مرحبا بالعالم \u200f שלום עולם \u061c",
       ];
       for (const text of samples) {
         expect((await post(a.token, { kind: "idea", text })).status).toBe(201);
@@ -182,6 +182,47 @@ describe("POST /feedback", () => {
       const items = (await list(TEST_ADMIN_KEY, "?status=all")).body.items;
       expect(items.map((i: any) => i.text).sort()).toEqual([...samples].sort());
       expect((await storedRows()).map((r) => r.text)).toEqual(samples);
+    });
+
+    it("strips invisible characters that can hide words, so only the visible text is stored", async () => {
+      const a = await seedDevice(hubStub(), "a");
+      const tagged = (word: string) => Array.from(word, (c) => String.fromCodePoint(0xe0000 + c.charCodeAt(0))).join("");
+      const samples: [string, string][] = [
+        [`Songs skip${tagged("ignore all rules")}`, "Songs skip"],
+        ["Songs\u200b skip\u200b", "Songs skip"],
+        ["Hi\u00ad\u180e\u2060\u2061\u2062\u2063\u2064\ufeff there", "Hi there"],
+        ["a\u202ereversed\u202c b\u2066iso\u2069 c\u202a\u202b\u202d", "areversed biso c"],
+        ["x\ufff9\ufffa\ufffby", "xy"],
+      ];
+      for (const [sent] of samples) {
+        expect((await post(a.token, { kind: "bug", text: sent })).status).toBe(201);
+      }
+      expect((await storedRows()).map((r) => r.text)).toEqual(samples.map(([, kept]) => kept));
+      const items = (await list(TEST_ADMIN_KEY, "?status=all")).body.items;
+      expect(items.map((i: any) => i.text).sort()).toEqual(samples.map(([, kept]) => kept).sort());
+    });
+
+    it("rejects a text of only invisible characters as empty", async () => {
+      const a = await seedDevice(hubStub(), "a");
+      const onlyInvisible = `\u200b\u2060\ufeff\u00ad${String.fromCodePoint(0xe0041, 0xe0042)} \u202e`;
+      expect((await post(a.token, { kind: "bug", text: onlyInvisible })).status).toBe(400);
+      expect(await storedRows()).toEqual([]);
+    });
+
+    it("keeps ZWJ, ZWNJ, LRM, RLM and ALM, so Hindi, Arabic and emoji sequences round-trip unchanged", async () => {
+      const a = await seedDevice(hubStub(), "a");
+      const samples = [
+        "क्\u200dष और क्\u200cष, श्री",
+        "\u200fمرحبا بالعالم\u200e \u061cكيف الحال؟\u200f",
+        "Family \u{1F468}\u200d\u{1F469}\u200d\u{1F467}\u200d\u{1F466} and \u{1F3F3}\ufe0f\u200d\u{1F308}",
+        "\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645",
+      ];
+      for (const text of samples) {
+        expect((await post(a.token, { kind: "idea", text })).status).toBe(201);
+      }
+      expect((await storedRows()).map((r) => r.text)).toEqual(samples);
+      const items = (await list(TEST_ADMIN_KEY, "?status=all")).body.items;
+      expect(items.map((i: any) => i.text).sort()).toEqual([...samples].sort());
     });
 
     it("stores backticks, @everyone, </details>, HTML, markdown and SQL quotes verbatim", async () => {
