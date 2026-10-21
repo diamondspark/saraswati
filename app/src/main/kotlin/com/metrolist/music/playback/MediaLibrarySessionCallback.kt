@@ -1037,10 +1037,10 @@ constructor(
 
                     if (isVoiceSearch) {
                         //Search if the voiceQuery is about a local playlist and play only the songs in that playlist
-                        val localPlaylists = database.searchPlaylists(searchQuery).first()
-                        val exactLocalPlaylist = localPlaylists.firstOrNull {
-                            it.playlist.name.equals(searchQuery, ignoreCase = true)
-                        }
+                        // SARASWATI: voice queries are matched to playlist names tolerantly ("road trip
+                        // playlist" finds "Road Trip"); this used to need the exact name.
+                        val exactLocalPlaylist =
+                            VoiceSearchMatcher.findBestByName(searchQuery, database.playlistsByCreateDateAsc().first()) { it.playlist.name }
                         if (exactLocalPlaylist != null) {
                             val playlistSongs = database.playlistSongs(exactLocalPlaylist.playlist.id).first()
                             if (playlistSongs.isNotEmpty()) {
@@ -1061,7 +1061,9 @@ constructor(
                     if (!isVoiceSearch && songId.isNotBlank() && searchResults.indexOfFirst { it.id == songId } == -1) {
                         database.song(songId).first()?.let { searchResults.add(it) }
                     }
-                    
+                    // SARASWATI: YouTube's own first result for the query, kept as the last resort below.
+                    var topOnline: Song? = null
+
                     try {
                         val onlineResults = YouTube.search(searchQuery, YouTube.SearchFilter.FILTER_SONG)
                             .getOrNull()
@@ -1086,6 +1088,7 @@ constructor(
                                 database.query { insert(songItem.toMediaMetadata()) }
                                 database.song(songItem.id).first()?.let { newSong ->
                                     searchResults.add(newSong)
+                                    if (topOnline == null) topOnline = newSong
                                 }
                             } catch (e: Exception) {
                             }
@@ -1098,7 +1101,7 @@ constructor(
                         return@future defaultResult
                     }
 
-                    val selectedSong =
+                    val matchedSong =
                         if (isVoiceSearch) {    //Check if the voiceQuery is about a specific song
                             val snapshot: List<Song> =
                                 synchronized(searchResults) { searchResults.toList() }
@@ -1106,6 +1109,90 @@ constructor(
                         } else {
                             searchResults.firstOrNull { it.id == songId }
                         }
+
+                    // SARASWATI: "play <artist>" is an artist query, not a song title, so findBest
+                    // scores it below its threshold and returns null — the car then gets an empty
+                    // result and says the content isn't available. Resolve the query against the
+                    // candidates' artists instead and play that artist's songs.
+                    if (isVoiceSearch && matchedSong == null) {
+                        val snapshot: List<Song> = synchronized(searchResults) { searchResults.toList() }
+                        val artist =
+                            VoiceSearchMatcher.findBestArtist(
+                                searchQuery,
+                                snapshot.flatMap { it.artists }.distinctBy { it.id },
+                            )
+                        val songsByArtist =
+                            artist?.let { matched -> snapshot.filter { song -> song.artists.any { it.id == matched.id } } }
+                        // SARASWATI: a matched artist with a thin catalog (an actor or featured credit like "Aamir Khan") also gets
+                        // the songs whose title names every word of the query. A real catalog (2+ songs) is left as it was. With
+                        // no artist matched, nothing changes here and the album fallback below handles the query.
+                        val combined: List<Song> =
+                            when {
+                                artist == null -> emptyList()
+                                (songsByArtist?.size ?: 0) >= 2 -> songsByArtist.orEmpty()
+                                else -> {
+                                    val mentionTokens = titleMentionQueryTokens(searchQuery)
+                                    val titleMatches = snapshot.filter { titleMentionsAllTokens(it.song.title, mentionTokens) }
+                                    ((songsByArtist ?: emptyList()) + titleMatches).distinctBy { it.id }.take(25)
+                                }
+                            }
+                        if (artist != null && combined.isNotEmpty()) {
+                            val items = combined.map { it.toMediaItem() }
+                            withContext(Dispatchers.Main) {
+                                service.adoptQueue(
+                                    ListQueue(title = artist.name, items = items),
+                                    title = artist.name,
+                                )
+                            }
+                            return@future MediaItemsWithStartPosition(items, 0, C.TIME_UNSET)
+                        }
+                    }
+
+                    // SARASWATI: "play <movie / album name>" — match the albums of the candidate songs, then play that
+                    // album from the top (YouTube's full track list when it answers, else the matching candidates).
+                    if (isVoiceSearch && matchedSong == null) {
+                        val snapshot: List<Song> = synchronized(searchResults) { searchResults.toList() }
+                        val album =
+                            VoiceSearchMatcher.findBestByName(
+                                searchQuery,
+                                snapshot.mapNotNull { it.album }.distinctBy { it.id },
+                            ) { VoiceSearchMatcher.cleanTitle(it.title) }
+                        if (album != null) {
+                            val remoteTracks =
+                                try {
+                                    YouTube.album(album.id).getOrNull()?.songs?.map { it.toMediaItem() }
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    reportException(e)
+                                    null
+                                }
+                            val items =
+                                remoteTracks?.takeIf { it.isNotEmpty() }
+                                    ?: snapshot.filter { it.album?.id == album.id }.map { it.toMediaItem() }
+                            if (items.isNotEmpty()) {
+                                withContext(Dispatchers.Main) {
+                                    service.adoptQueue(ListQueue(title = album.title, items = items), title = album.title)
+                                }
+                                return@future MediaItemsWithStartPosition(items, 0, C.TIME_UNSET)
+                            }
+                        }
+                    }
+
+                    // SARASWATI: last resort. Nothing matched confidently as a song, artist or album, but YouTube already
+                    // ranked results for exactly what was said: play its first one, as YouTube Music itself does, rather
+                    // than answering "content not available". With no network, the best positively-scored local song, else
+                    // the first local text match.
+                    val selectedSong =
+                        matchedSong
+                            ?: if (isVoiceSearch) {
+                                val snapshot: List<Song> = synchronized(searchResults) { searchResults.toList() }
+                                topOnline
+                                    ?: VoiceSearchMatcher.rankAll(searchQuery, snapshot).firstOrNull { it.score > 0.0 }?.song
+                                    ?: snapshot.firstOrNull()
+                            } else {
+                                null
+                            }
 
                     if(context.dataStore.get(AutoRadioQueueKey, true)) {
                         val radioQueue = YouTubeQueue.radio(selectedSong?.toMediaMetadata() ?: return@future defaultResult)
@@ -1119,14 +1206,23 @@ constructor(
                         }.getOrNull()
 
                         if (radioStatus != null && radioStatus.items.isNotEmpty()) {
-                            withContext(Dispatchers.Main) {
-                                service.adoptQueue(radioQueue, radioStatus.title, radioStatus.items.size) //Used to make the radio queue load more songs when near the end
+                            val matchedIndex = radioStatus.items.indexOfFirst { it.mediaId == selectedSong.id }
+                            // SARASWATI: a radio mix frequently does not include its own seed track, so
+                            // indexOfFirst can return -1 here. Falling back to index 0 in that case used to
+                            // start whatever song the radio put first — a silent wrong-song bug for voice
+                            // play ("Hey Google, play X" would transcribe and match X correctly, then play
+                            // something else). Only take the radio path when the matched song is actually
+                            // in it; otherwise fall through to playing the matched song directly, below.
+                            if (matchedIndex != -1) {
+                                withContext(Dispatchers.Main) {
+                                    service.adoptQueue(radioQueue, radioStatus.title, radioStatus.items.size) //Used to make the radio queue load more songs when near the end
+                                }
+                                return@future MediaItemsWithStartPosition(
+                                    radioStatus.items,
+                                    matchedIndex,
+                                    C.TIME_UNSET,
+                                )
                             }
-                            return@future MediaItemsWithStartPosition(
-                                radioStatus.items,
-                                radioStatus.items.indexOfFirst { it.mediaId == selectedSong.id }.coerceAtLeast(0),
-                                C.TIME_UNSET,
-                            )
                         }
                     }
 
@@ -1208,6 +1304,21 @@ internal fun isBrowsableMediaId(mediaId: String): Boolean =
         mediaId.startsWith("${MusicService.ALBUM}/") ||
         mediaId.startsWith("${MusicService.PLAYLIST}/") ||
         mediaId.startsWith("${MusicService.YOUTUBE_PLAYLIST}/")
+
+// SARASWATI: strict title-mention filter for "play <name>" when the name has no real catalog; deliberately no fuzzy matching.
+internal fun titleMentionQueryTokens(query: String): Set<String> =
+    query
+        .lowercase()
+        .replace(Regex("[^\\p{L}\\p{Nd} ]"), "")
+        .split(' ')
+        .filter { it.length >= 2 }
+        .toSet()
+
+internal fun titleMentionsAllTokens(title: String, tokens: Set<String>): Boolean {
+    if (tokens.isEmpty()) return false
+    val lowered = title.lowercase()
+    return tokens.all { lowered.contains(it) }
+}
 
 internal fun <T> List<T>.paginate(
     page: Int,

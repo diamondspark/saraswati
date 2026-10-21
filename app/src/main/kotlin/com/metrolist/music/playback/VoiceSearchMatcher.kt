@@ -1,26 +1,54 @@
 package com.metrolist.music.playback
 
+import com.metrolist.music.db.entities.ArtistEntity
 import com.metrolist.music.db.entities.Song
+import kotlin.math.abs
 
 object VoiceSearchMatcher {
     const val STRONG_MATCH_THRESHOLD = 0.60
     private val PUNCTUATION_REGEX = Regex("[^\\p{L}\\p{N}\\s]")
     const val FUZZY_THRESHOLD = 0.85
+    // SARASWATI: voice queries carry filler words (Google Assistant "by", "songs", Hindi "ka"), ignored on both sides
+    private val STOPWORDS = setOf(
+        "by", "from", "the", "of", "a", "an", "song", "songs", "play", "please", "movie", "film", "album",
+        "playlist", "ka", "ke", "ki", "gaane", "gane", "gaana", "gana",
+    )
+    // SARASWATI: matches the word "from" in "<title> from <movie>" voice queries
+    private val FROM_REGEX = Regex("\\s+from\\s+")
+    // SARASWATI: matches "(...)" and "[...]" segments in song titles such as "(From \"Movie\")"
+    private val BRACKET_SEGMENT_REGEX = Regex("\\s*[\\(\\[][^\\)\\]]*[\\)\\]]")
+    // SARASWATI: matches a run of one repeated letter, used to collapse vowel-length variants (aa -> a); digits are kept
+    private val REPEATED_CHAR_REGEX = Regex("(\\p{L})\\1+")
+    // SARASWATI: score for a title equal to the query only after stopwords are dropped (raw exact stays 1.0)
+    private const val STOPWORD_ONLY_SCORE = 0.99
+    // SARASWATI: discount for a match that only holds on the cleaned title, so the plain title ranks first
+    private const val CLEANED_TITLE_FACTOR = 0.99
+    // SARASWATI: cap for matches against the part of a query before " from ", so a bare title never ties the full query
+    private const val FROM_SPLIT_VARIANT_CAP = 0.95
 
     data class ScoredSong(
         val song: Song,
         val score: Double
     )
 
+    // SARASWATI: ranks candidates by their best-matching query variant, with the exact-match and stopword caps
     fun rankAll(query: String, candidates: List<Song>): List<ScoredSong> {
         val queryLower = query.lowercase().trim()
-        val queryTokens = tokenize(queryLower)
+        val queryTokens = significantTokens(queryLower, fallbackToAll = false)
         if (queryTokens.isEmpty()) return emptyList()
 
-        val isTooGeneric = (queryTokens.size == 1 && queryTokens.first().length < 4) || queryLower.length < 5
+        val variants = queryVariants(queryLower, queryTokens)
 
         return candidates
-            .map { song -> ScoredSong(song, scoreCandidate(song, queryLower, queryTokens, isTooGeneric)) }
+            .map { song ->
+                // SARASWATI: the first variant is the full query; split-off variants are capped below an exact match
+                val score = variants.withIndex().maxOf { (index, variant) ->
+                    val (text, tokens) = variant
+                    val variantScore = scoreCandidate(song, text, tokens, isQueryTooGeneric(text, tokens))
+                    if (index == 0) variantScore else minOf(variantScore, FROM_SPLIT_VARIANT_CAP)
+                }
+                ScoredSong(song, score)
+            }
             .sortedByDescending { it.score }
     }
 
@@ -29,6 +57,67 @@ object VoiceSearchMatcher {
         return ranks.firstOrNull { it.score >= STRONG_MATCH_THRESHOLD }?.song
     }
 
+    /**
+     * Resolves a voice query that is just an artist's name (e.g. "play Arijit Singh"),
+     * unlike [findBest], which matches song titles. Returns the best candidate only if it
+     * clears [STRONG_MATCH_THRESHOLD], else null.
+     */
+    // SARASWATI: fork feature — voice resolver for artist-only queries, now delegates to findBestByName
+    fun findBestArtist(query: String, candidates: List<ArtistEntity>): ArtistEntity? =
+        findBestByName(query, candidates) { it.name }
+
+    // SARASWATI: generalised from findBestArtist so playlist/album names resolve from voice queries too
+    fun <T> findBestByName(query: String, candidates: List<T>, nameOf: (T) -> String): T? {
+        val queryLower = query.lowercase().trim()
+        val queryTokens = significantTokens(queryLower, fallbackToAll = false)
+        if (queryTokens.isEmpty()) return null
+
+        val isTooGeneric = isQueryTooGeneric(queryLower, queryTokens)
+
+        var best: T? = null
+        var bestScore = 0.0
+        candidates.forEach { candidate ->
+            val nameLower = nameOf(candidate).lowercase().trim()
+            val nameTokens = significantTokens(nameLower, fallbackToAll = true)
+
+            val score = when {
+                nameLower == queryLower || tokenize(nameLower) == tokenize(queryLower) -> 1.0
+                nameTokens == queryTokens -> STOPWORD_ONLY_SCORE
+                isTooGeneric -> 0.0
+                else -> {
+                    // Reject partial-name coverage ("arijit" vs "Arijit Singh") before scoring
+                    val nameFullyMatched = nameTokens.isNotEmpty() && nameTokens.all { nameToken ->
+                        queryTokens.any { q -> q == nameToken || jaroWinkler(q, nameToken) >= FUZZY_THRESHOLD }
+                    }
+                    val base = if (nameFullyMatched) fuzzyScore(queryTokens, nameTokens) else 0.0
+                    maxOf(base, compactScore(queryTokens, nameTokens))
+                }
+            }
+            if (score > bestScore) {
+                bestScore = score
+                best = candidate
+            }
+        }
+
+        return best?.takeIf { bestScore >= STRONG_MATCH_THRESHOLD }
+    }
+
+    // SARASWATI: "<title> from <movie>" queries also try the part before " from " as a title
+    private fun queryVariants(queryLower: String, queryTokens: Set<String>): List<Pair<String, Set<String>>> {
+        val variants = mutableListOf(queryLower to queryTokens)
+        FROM_REGEX.find(queryLower)?.let { match ->
+            val beforeText = queryLower.substring(0, match.range.first).trim()
+            val beforeTokens = significantTokens(beforeText, fallbackToAll = false)
+            if (beforeTokens.isNotEmpty()) variants += beforeText to beforeTokens
+        }
+        return variants
+    }
+
+    // SARASWATI: same short-query guard findBestArtist used, shared by every query variant
+    private fun isQueryTooGeneric(queryLower: String, queryTokens: Set<String>): Boolean =
+        (queryTokens.size == 1 && queryTokens.first().length < 4) || queryLower.length < 5
+
+    // SARASWATI: scores a song against each title form (full, cleaned) and keeps the better one
     private fun scoreCandidate(
         song: Song,
         queryLower: String,
@@ -36,9 +125,27 @@ object VoiceSearchMatcher {
         isTooGeneric: Boolean,
     ): Double {
         val title = song.title.lowercase().trim()
-        val titleTokens = tokenize(title)
+        // SARASWATI: score against the full title and the cleaned title ("Song (From ...)" -> "Song"); the cleaned score is discounted so the plain title ranks first
+        val cleanedTitle = cleanTitle(title)
+        val fullScore = scoreTitle(song, title, queryLower, queryTokens, isTooGeneric)
+        if (cleanedTitle == title) return fullScore
+        val cleanedScore = scoreTitle(song, cleanedTitle, queryLower, queryTokens, isTooGeneric) * CLEANED_TITLE_FACTOR
+        return maxOf(fullScore, cleanedScore)
+    }
 
-        if (titleTokens == queryTokens || title == queryLower) return 1.0
+    // SARASWATI: the scoring rules for one form of the title, split out so scoreCandidate can apply them twice
+    private fun scoreTitle(
+        song: Song,
+        title: String,
+        queryLower: String,
+        queryTokens: Set<String>,
+        isTooGeneric: Boolean,
+    ): Double {
+        val titleTokens = significantTokens(title, fallbackToAll = true)
+
+        if (title == queryLower || tokenize(title) == tokenize(queryLower)) return 1.0
+        // SARASWATI: equal only once stopwords are dropped, so it must rank below a raw exact match
+        if (titleTokens == queryTokens) return STOPWORD_ONLY_SCORE
 
         val remaining = stripArtistTokens(queryTokens, song)
 
@@ -46,8 +153,12 @@ object VoiceSearchMatcher {
         if (titleTokens == remaining) return 0.95
         if (isTooGeneric) return 0.0
 
-        return fuzzyScore(remaining, titleTokens)
+        return maxOf(fuzzyScore(remaining, titleTokens), compactScore(remaining, titleTokens))
     }
+
+    // SARASWATI: drops "(...)"/"[...]" segments and everything after " - " (e.g. "Song - Happy" -> "Song")
+    internal fun cleanTitle(title: String): String =
+        BRACKET_SEGMENT_REGEX.replace(title, "").substringBefore(" - ").trim()
 
     private fun stripArtistTokens(queryTokens: Set<String>, song: Song): Set<String> {
         val remaining = queryTokens.toMutableSet()
@@ -80,6 +191,46 @@ object VoiceSearchMatcher {
         else 0.0
     }
 
+    // SARASWATI: whole-string match that ignores word splitting and vowel-length variants (Palan Hare vs Paalanhaare)
+    internal fun compactScore(query: Collection<String>, title: Collection<String>): Double {
+        val q = compactKey(query)
+        val t = compactKey(title)
+        if (q.length < 5 || t.length < 5) return 0.0
+        // SARASWATI: digits are significant ("Part 11" is not "Part 1"), so differing digit sequences never match
+        if (q.filter { it.isDigit() } != t.filter { it.isDigit() }) return 0.0
+        if (q == t) return 0.95
+        return if (withinEditDistance(q, t, 1)) 0.9 else 0.0
+    }
+
+    // SARASWATI: joins tokens without separators and collapses repeated letters, for compactScore
+    internal fun compactKey(tokens: Collection<String>): String =
+        REPEATED_CHAR_REGEX.replace(tokens.joinToString(""), "\$1")
+
+    // SARASWATI: bounded Levenshtein check for compactScore; exits early once a whole row exceeds the limit
+    private fun withinEditDistance(a: String, b: String, limit: Int): Boolean {
+        if (abs(a.length - b.length) > limit) return false
+        var previous = IntArray(b.length + 1) { it }
+        for (i in 1..a.length) {
+            val current = IntArray(b.length + 1)
+            current[0] = i
+            var rowMin = i
+            for (j in 1..b.length) {
+                val cost = if (a[i - 1] == b[j - 1]) 0 else 1
+                current[j] = minOf(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + cost)
+                rowMin = minOf(rowMin, current[j])
+            }
+            if (rowMin > limit) return false
+            previous = current
+        }
+        return previous[b.length] <= limit
+    }
+
+    // SARASWATI: tokens with filler stopwords removed; falls back to all tokens for titles that are only stopwords
+    internal fun significantTokens(text: String, fallbackToAll: Boolean): Set<String> {
+        val all = tokenize(text)
+        val kept = all - STOPWORDS
+        return if (kept.isEmpty() && fallbackToAll) all else kept
+    }
 
     internal fun tokenize(text: String): Set<String> =
         PUNCTUATION_REGEX.replace(text.lowercase(), " ")

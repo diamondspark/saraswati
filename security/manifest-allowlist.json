@@ -286,6 +286,7 @@
     ],
     "packages": [
       "com.google.android.gms.policy_cast_dynamite",
+      "com.google.android.googlequicksearchbox",
       "com.google.android.projection.gearhead",
       "dev.diamondspark.saraswati.updater"
     ],

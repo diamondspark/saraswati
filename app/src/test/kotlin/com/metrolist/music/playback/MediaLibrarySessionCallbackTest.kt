@@ -92,4 +92,23 @@ class MediaLibrarySessionCallbackTest {
             androidAutoPageRequest(page = 2, pageSize = 1).afterLeadingItems(2),
         )
     }
+
+    // SARASWATI: the "play <name>" title-mention fallback's two pure helpers.
+    @Test
+    fun `title mention query tokens are lowercase words of two or more letters`() {
+        assertEquals(setOf("aamir", "khan"), titleMentionQueryTokens("Aamir Khan"))
+        assertEquals(setOf("palan", "hare"), titleMentionQueryTokens("O Palan Hare"))
+    }
+
+    @Test
+    fun `a title mentions a name only when it contains every token`() {
+        assertTrue(
+            titleMentionsAllTokens(
+                "Zindagi Maut Na Ban Jaye | Aamir Khan | Sarfarosh",
+                setOf("aamir", "khan"),
+            ),
+        )
+        assertFalse(titleMentionsAllTokens("Bum Bum Bole", setOf("aamir", "khan")))
+        assertFalse(titleMentionsAllTokens("anything", emptySet()))
+    }
 }

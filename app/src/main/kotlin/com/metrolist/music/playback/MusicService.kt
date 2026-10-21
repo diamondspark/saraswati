@@ -1756,12 +1756,8 @@ class MusicService :
     private fun updateNotification(isLiked: Boolean? = currentSong.value?.song?.let { if (it.isEpisode) it.inLibrary != null else it.liked }) {
         val layout =
             listOf(
-                CommandButton
-                    .Builder()
-                    .setDisplayName(getString(if (player.shuffleModeEnabled) R.string.action_shuffle_off else R.string.action_shuffle_on))
-                    .setIconResId(if (player.shuffleModeEnabled) R.drawable.shuffle_on else R.drawable.shuffle)
-                    .setSessionCommand(CommandToggleShuffle)
-                    .build(),
+                // SARASWATI: Like (the heart) leads the layout so Android Auto gives it its first
+                // custom-action slot; where that slot is drawn (e.g. on the 2x2 card) is Android Auto's call.
                 CommandButton
                     .Builder()
                     .setDisplayName(
@@ -1775,6 +1771,12 @@ class MusicService :
                     ).setIconResId(if (isLiked == true) R.drawable.ic_heart else R.drawable.ic_heart_outline)
                     .setSessionCommand(CommandToggleLike)
                     .setEnabled(currentSong.value != null)
+                    .build(),
+                CommandButton
+                    .Builder()
+                    .setDisplayName(getString(if (player.shuffleModeEnabled) R.string.action_shuffle_off else R.string.action_shuffle_on))
+                    .setIconResId(if (player.shuffleModeEnabled) R.drawable.shuffle_on else R.drawable.shuffle)
+                    .setSessionCommand(CommandToggleShuffle)
                     .build(),
                 CommandButton
                     .Builder()
