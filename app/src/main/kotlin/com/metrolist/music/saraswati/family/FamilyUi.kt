@@ -33,6 +33,9 @@ object FamilyRoutes {
     const val MANAGE = "family/manage"
     const val JOIN = "family/join"
 
+    // SARASWATI: feedback — the owner's Feedback inbox, opened from Manage family.
+    const val FEEDBACK = "family/feedback"
+
     // SARASWATI: Phase 4 Task 20 — one family playlist, by its YouTube playlist id.
     const val PLAYLIST = "family/playlist/{playlistId}"
 
