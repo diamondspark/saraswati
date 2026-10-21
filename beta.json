@@ -1,21 +1,21 @@
 {
   "schema": 1,
   "channel": "beta",
-  "versionCode": 4119,
-  "versionName": "13.7.0-s4119",
+  "versionCode": 4137,
+  "versionName": "13.7.0-s4137",
   "apk": {
-    "url": "https://github.com/diamondspark/saraswati/releases/download/v4119/saraswati-v4119.apk",
-    "sha256": "267eadd00ccb9dee900e987b57eb39d1dde67499ecae3230bc50daa9f0af85c4",
-    "size": 26979204
+    "url": "https://github.com/diamondspark/saraswati/releases/download/v4137/saraswati-v4137.apk",
+    "sha256": "41f2231e7cbded43a6e7fd40fdba8061c12a12bc68b8136be8c15a67af9daba4",
+    "size": 27020164
   },
   "urgent": false,
-  "notes": "Fixes sign-in freezing after the password or the 2-step approval, for Google accounts linked to other countries.",
-  "publishedAt": "2026-10-21T18:50:20Z",
+  "notes": "New: Send feedback (Settings > System) and a Feedback inbox for the owner (Manage family). Includes the sign-in fix for country Google domains.",
+  "publishedAt": "2026-10-21T22:10:07Z",
   "updater": {
-    "versionCode": 4119,
+    "versionCode": 4137,
     "apk": {
-      "url": "https://github.com/diamondspark/saraswati/releases/download/v4119/saraswati-updater-v4119.apk",
-      "sha256": "f298301e694f94159582324ae99d367cf27382d39ce27769382781539ffb56fe",
+      "url": "https://github.com/diamondspark/saraswati/releases/download/v4137/saraswati-updater-v4137.apk",
+      "sha256": "491b2ebe5e60af6dfcca096c5043955b44f699c4430100e88e28a027eb64144a",
       "size": 256152
     }
   }
