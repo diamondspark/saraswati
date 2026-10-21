@@ -1453,4 +1453,27 @@
         <item quantity="one">Last night: %d song</item>
         <item quantity="other">Last night: %d songs</item>
     </plurals>
+    <!-- SARASWATI: feedback -->
+    <string name="feedback_title">Send feedback</string>
+    <string name="feedback_kind_bug">Bug</string>
+    <string name="feedback_kind_idea">Idea</string>
+    <string name="feedback_label_bug">What went wrong?</string>
+    <string name="feedback_label_idea">What would make Saraswati better?</string>
+    <string name="feedback_counter">%1$d / %2$d</string>
+    <string name="feedback_include_info">Include app and phone info</string>
+    <string name="feedback_info_app">App version: %1$s</string>
+    <string name="feedback_info_android">Android: %1$s</string>
+    <string name="feedback_info_phone">Phone: %1$s</string>
+    <string name="feedback_info_off">Only your message is sent.</string>
+    <string name="feedback_privacy_note">The family owner will see your message and which phone sent it. Please don\'t include passwords or other private details.</string>
+    <string name="feedback_send">Send</string>
+    <string name="feedback_thanks_title">Thank you!</string>
+    <string name="feedback_thanks_body">Your feedback was sent to the family owner.</string>
+    <string name="feedback_send_another">Send another</string>
+    <string name="feedback_error_not_paired">This phone isn\'t linked to your family yet. Open Family, set it up, then try again.</string>
+    <string name="feedback_error_offline">No connection. Check your internet and try again.</string>
+    <string name="feedback_error_rate_limited">You\'ve sent a lot of feedback lately. Please try again in a while.</string>
+    <string name="feedback_error_unavailable">Feedback isn\'t available right now. Please try again later.</string>
+    <string name="feedback_error_invalid">That message couldn\'t be sent. Please check it and try again.</string>
+    <string name="feedback_error_other">Something went wrong. Please try again.</string>
 </resources>

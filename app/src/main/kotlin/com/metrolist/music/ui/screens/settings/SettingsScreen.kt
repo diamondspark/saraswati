@@ -229,6 +229,14 @@ fun SettingsScreen(
                         )
                     )
                 }
+                // SARASWATI: feedback — a bug or an idea to the family owner, just before Changelog and About.
+                add(
+                    Material3SettingsItem(
+                        icon = painterResource(R.drawable.bug_report),
+                        title = { Text(stringResource(R.string.feedback_title)) },
+                        onClick = { navController.navigate("settings/feedback") }
+                    )
+                )
                 val showChangelog = com.metrolist.music.LocalChangelogState.current
                 add(
                     Material3SettingsItem(
