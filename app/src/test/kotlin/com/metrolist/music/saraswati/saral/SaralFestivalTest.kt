@@ -92,7 +92,7 @@ class SaralFestivalTest {
 
     @Test
     fun `on an ordinary day there is no festival`() {
-        assertNull(newVm(onDay("2026-12-25")).festival.value)
+        assertNull(newVm(onDay("2026-12-31")).festival.value)
     }
 
     @Test
@@ -171,7 +171,7 @@ class SaralFestivalTest {
 
     @Test
     fun `with no festival today a tap does nothing`() {
-        val vm = newVm(onDay("2026-12-25")).ready()
+        val vm = newVm(onDay("2026-12-31")).ready()
 
         vm.onFestivalTapped()
 
@@ -483,14 +483,14 @@ class SaralFestivalTest {
 
     @Test
     fun `every festival in the table has its own Hindi name for the status line`() {
-        val generic = SaralFestivalNames.hindiNameFor(Festival("Unknown", diwali.startDate, diwali.endDate, "", "", ""))
+        val generic = SaralFestivalNames.hindiNameFor(Festival("Unknown", diwali.startDate, diwali.endDate, "", "", "", ""))
 
         for (f in FestivalCalendar.all) {
             assertTrue("${f.name} needs its own Hindi name", SaralFestivalNames.hindiNameFor(f) != generic)
         }
         assertEquals(
-            "five festivals, five names",
-            5,
+            "twenty-three festivals, twenty-three names",
+            23,
             FestivalCalendar.all.map { SaralFestivalNames.hindiNameFor(it) }.toSet().size,
         )
     }

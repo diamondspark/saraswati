@@ -34,7 +34,7 @@ class FestivalRadio(
     private val search: SaralSearch,
 ) {
     suspend fun seedFor(festival: Festival): FestivalSeed {
-        val answer = search.firstSong(festival.radioQuery)
+        val answer = search.firstSong(festival.radioQueryHi)
         answer.exceptionOrNull()?.let { return FestivalSeed.Failed(PlaybackFailures.isOffline(it)) }
         val song = answer.getOrNull() ?: return FestivalSeed.NotFound
         return FestivalSeed.Found(song.id)
