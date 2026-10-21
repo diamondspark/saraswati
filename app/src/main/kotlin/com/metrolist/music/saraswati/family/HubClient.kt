@@ -27,6 +27,17 @@ import com.metrolist.music.saraswati.ask.AskHub
 import com.metrolist.music.saraswati.ask.AskLimitReached
 import com.metrolist.music.saraswati.ask.AskReply
 import com.metrolist.music.saraswati.ask.AskWire
+import com.metrolist.music.saraswati.family.feedback.FeedbackCreatedWire
+import com.metrolist.music.saraswati.family.feedback.FeedbackDiagnostics
+import com.metrolist.music.saraswati.family.feedback.FeedbackDiagnosticsWire
+import com.metrolist.music.saraswati.family.feedback.FeedbackHub
+import com.metrolist.music.saraswati.family.feedback.FeedbackItem
+import com.metrolist.music.saraswati.family.feedback.FeedbackItemWire
+import com.metrolist.music.saraswati.family.feedback.FeedbackKind
+import com.metrolist.music.saraswati.family.feedback.FeedbackListWire
+import com.metrolist.music.saraswati.family.feedback.FeedbackStatus
+import com.metrolist.music.saraswati.family.feedback.FeedbackStatusWire
+import com.metrolist.music.saraswati.family.feedback.FeedbackSubmitWire
 import com.metrolist.music.saraswati.family.sangat.SangatHubApi
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.SerializationException
@@ -36,6 +47,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Call
 import okhttp3.Callback
@@ -56,7 +68,8 @@ class HubClient(
     client: OkHttpClient,
 ) : HubApi,
     SangatHubApi,
-    AskHub {
+    AskHub,
+    FeedbackHub { // SARASWATI: feedback — the feedback routes below
     // Shares the caller's connection pool, dispatcher and timeouts; only the
     // redirect policy is pinned here.
     private val http: OkHttpClient =
@@ -216,6 +229,45 @@ class HubClient(
             AskWire.reply(json.decodeFromString<AskWireReply>(it), question)
         }
 
+    // SARASWATI: feedback — report a bug or idea (phone or owner), and the owner's inbox. The text is untrusted
+    // and private: it travels only as a JSON string body, and no failure here carries it.
+    override suspend fun submitFeedback(
+        bearer: String,
+        kind: FeedbackKind,
+        text: String,
+        diagnostics: FeedbackDiagnostics?,
+    ): Result<String> {
+        val wire = FeedbackSubmitWire(kind.wire, text, diagnostics?.let { FeedbackDiagnosticsWire(it.appVersion, it.android, it.device) })
+        return send("POST", listOf("feedback"), bearer, json.encodeToString(wire)) {
+            json.decodeFromString<FeedbackCreatedWire>(it).id.takeIf { id -> id.isNotEmpty() }
+                ?: throw SerializationException("feedback created without an id")
+        }
+    }
+
+    override suspend fun listFeedback(
+        adminKey: String,
+        status: String,
+    ): Result<List<FeedbackItem>> =
+        send("GET", listOf("feedback"), adminKey, null, query = listOf("status" to status)) {
+            json.decodeFromString<FeedbackListWire>(it).items.mapNotNull { element ->
+                try {
+                    json.decodeFromJsonElement<FeedbackItemWire>(element).toItemOrNull()
+                } catch (e: SerializationException) {
+                    null
+                }
+            }
+        }
+
+    override suspend fun setFeedbackStatus(
+        adminKey: String,
+        id: String,
+        status: FeedbackStatus,
+    ): Result<Unit> {
+        // OkHttp resolves "." and ".." as dot segments instead of encoding them, which would aim the PUT elsewhere.
+        if (id.isEmpty() || id == "." || id == "..") return Result.failure(IllegalArgumentException("invalid feedback id"))
+        return send("PUT", listOf("feedback", id), adminKey, json.encodeToString(FeedbackStatusWire(status.wire))) { }
+    }
+
     // SARASWATI: Phase 4 Task 8 — the Sangat, Parivaar Mix and family-playlist routes. They are on HubClient
     // alone, not on HubApi: only the Phase 4 packages call them, and the Phase 3 view models and their
     // fakes stay as they were. Same contract as above: a Result, never a throw.
@@ -286,6 +338,7 @@ class HubClient(
         bearer: String?,
         body: String?,
         onLimit: ((String) -> Throwable?)? = null,
+        query: List<Pair<String, String>> = emptyList(), // SARASWATI: feedback — GET /feedback?status=
         parse: (String) -> T,
     ): Result<T> {
         val base =
@@ -302,6 +355,7 @@ class HubClient(
                             .query(null)
                             .fragment(null)
                             .apply { path.forEach { addPathSegment(it) } }
+                            .apply { query.forEach { (name, value) -> addQueryParameter(name, value) } } // SARASWATI: feedback
                             .build(),
                     ).method(method, body?.toRequestBody(JSON_MEDIA_TYPE))
                     .header("Accept", "application/json")

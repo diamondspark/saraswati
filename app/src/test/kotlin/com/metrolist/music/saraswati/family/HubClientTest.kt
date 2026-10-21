@@ -11,6 +11,8 @@
 // added later without them is the one that stands out.
 package com.metrolist.music.saraswati.family
 
+import com.metrolist.music.saraswati.family.feedback.FeedbackKind
+import com.metrolist.music.saraswati.family.feedback.FeedbackStatus
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
@@ -95,6 +97,10 @@ class HubClientTest {
             call("setKillSwitches") { hub.setKillSwitches("admin", mapOf("sangat" to false)) },
             call("reportHealth") { hub.reportHealth("sess", "dev-1", 160, "13.7.0-s160", "Asia/Kolkata") },
             call("getHealth") { hub.getHealth("admin") },
+            // SARASWATI: feedback — the three feedback calls ride the same mapping tests.
+            call("submitFeedback") { hub.submitFeedback("sess", FeedbackKind.Bug, "It stops", null) },
+            call("listFeedback") { hub.listFeedback("admin") },
+            call("setFeedbackStatus") { hub.setFeedbackStatus("admin", "fb-1", FeedbackStatus.Seen) },
         )
 
     private fun call(
