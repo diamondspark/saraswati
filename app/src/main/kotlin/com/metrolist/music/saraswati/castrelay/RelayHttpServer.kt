@@ -41,6 +41,7 @@ class RelayHttpServer(
     private var server: ServerSocket? = null
     private var workers: ExecutorService? = null
     private var port: Int = 0
+    private var acceptThread: Thread? = null
 
     /** Binds and starts accepting. Returns the ephemeral port. */
     fun start(): Int =
@@ -54,16 +55,21 @@ class RelayHttpServer(
             server = socket
             workers = pool
             port = socket.localPort
-            Thread({ acceptLoop(socket, pool) }, "saraswati-cast-relay-accept").apply {
-                isDaemon = true
-                start()
-            }
+            acceptThread =
+                Thread({ acceptLoop(socket, pool) }, "saraswati-cast-relay-accept").apply {
+                    isDaemon = true
+                    start()
+                }
             port
         }
 
     fun stop() {
         synchronized(lock) {
             server?.runCatching { close() }
+            val acceptor = acceptThread
+            acceptThread = null
+            // close() only wakes a blocked accept(); the kernel listener lives until the thread leaves it.
+            acceptor?.runCatching { join(2_000) }
             workers?.shutdownNow()
             openSockets.forEach { socket -> socket.runCatching { close() } }
             openSockets.clear()
