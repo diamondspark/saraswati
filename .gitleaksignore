@@ -80,3 +80,8 @@ cf5639c2699ba920df393de140fed708097127ed:worker/vitest.config.ts:generic-api-key
 1c8e07002cde3e0b411011a8bab4abc4f78a33b1:worker/test/health.test.ts:generic-api-key:5
 53351555484bae5e0e365c7d84ed0484c895b5d8:worker/test/pairingstatus.test.ts:generic-api-key:5
 cf5639c2699ba920df393de140fed708097127ed:worker/test/roster.test.ts:generic-api-key:5
+
+# Feedback feature: the GitHub-mirror unit test uses an obviously fake token
+# ("ghp_FAKEfake...") to prove the token never appears in a response. Not a credential;
+# the real fine-grained token was only ever uploaded with `wrangler secret put`.
+7ed3919a1e976ce3565d8df99774868e137e0f2b:worker/test/feedbackMirror.test.ts:github-pat:9
