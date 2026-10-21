@@ -133,4 +133,68 @@ class VoiceSearchMatcherTest {
         )
         assertEquals("not-first: correct winner", "Bohemian Rhapsody", best?.title)
     }
+
+    // findBestArtist: resolving a voice query that is just an artist's name
+    @Test
+    fun `artist-only query resolves the exact artist`() {
+        val candidates = listOf(
+            ArtistEntity(id = "ar1", name = "Arijit Singh"),
+            ArtistEntity(id = "ar2", name = "Shreya Ghoshal"),
+            ArtistEntity(id = "ar3", name = "Queen"),
+        )
+        val best = VoiceSearchMatcher.findBestArtist("Arijit Singh", candidates)
+        assertEquals("artist: exact name", "Arijit Singh", best?.name)
+
+        val reversed = VoiceSearchMatcher.findBestArtist("ghoshal shreya", candidates)
+        assertEquals("artist: token order-independent exact", "Shreya Ghoshal", reversed?.name)
+    }
+
+    @Test
+    fun `artist-only query with typo still resolves via fuzzy matching`() {
+        val candidates = listOf(
+            ArtistEntity(id = "ar1", name = "Arijit Singh"),
+            ArtistEntity(id = "ar2", name = "Shreya Ghoshal"),
+        )
+        val typo = VoiceSearchMatcher.findBestArtist("Arjith Singh", candidates)
+        assertEquals("artist-fuzzy: one token typo", "Arijit Singh", typo?.name)
+    }
+
+    @Test
+    fun `song-title-only query does not falsely match an artist`() {
+        val candidates = listOf(
+            ArtistEntity(id = "ar1", name = "Arijit Singh"),
+            ArtistEntity(id = "ar2", name = "Shreya Ghoshal"),
+        )
+        assertNull("artist-false: unrelated title", VoiceSearchMatcher.findBestArtist("Bohemian Rhapsody", candidates))
+        assertNull("artist-false: partial token set", VoiceSearchMatcher.findBestArtist("Arijit", candidates))
+    }
+
+    @Test
+    fun `artist-only query edge cases return null`() {
+        val candidates = listOf(ArtistEntity(id = "ar1", name = "Arijit Singh"))
+
+        assertNull("artist-edge: blank query", VoiceSearchMatcher.findBestArtist("   ", candidates))
+        assertNull(
+            "artist-edge: generic short query (no exact artist)",
+            VoiceSearchMatcher.findBestArtist("Go", candidates),
+        )
+        assertNull("artist-edge: empty candidate list", VoiceSearchMatcher.findBestArtist("Arijit Singh", emptyList()))
+    }
+
+    // Regression: song-title matching must be completely unaffected by the artist resolver
+    @Test
+    fun `regression - findBest song matching is untouched by artist resolver`() {
+        val candidates = listOf(
+            song("Blinding Lights", "The Weeknd"),
+            song("Lights", "Ellie Goulding"),
+        )
+        val best = VoiceSearchMatcher.findBest("The Weeknd Blinding Lights", candidates)
+        assertEquals("regression: artist-prefixed title", "Blinding Lights", best?.title)
+
+        val pureArtist = VoiceSearchMatcher.findBest("Queen", listOf(song("Song A", "Queen"), song("Wrong", "Who")))
+        assertNull("regression: pure artist query still below song threshold", pureArtist)
+
+        val typo = VoiceSearchMatcher.findBest("Bohemian Rapsody", listOf(song("Bohemian Rhapsody", "Queen")))
+        assertEquals("regression: fuzzy title still resolves", "Bohemian Rhapsody", typo?.title)
+    }
 }

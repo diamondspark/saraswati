@@ -1,5 +1,6 @@
 package com.metrolist.music.playback
 
+import com.metrolist.music.db.entities.ArtistEntity
 import com.metrolist.music.db.entities.Song
 
 object VoiceSearchMatcher {
@@ -27,6 +28,44 @@ object VoiceSearchMatcher {
     fun findBest(query: String, candidates: List<Song>): Song? {
         val ranks = rankAll(query, candidates)
         return ranks.firstOrNull { it.score >= STRONG_MATCH_THRESHOLD }?.song
+    }
+
+    /**
+     * Resolves a voice query that is just an artist's name (e.g. "play Arijit Singh"),
+     * unlike [findBest], which matches song titles. Returns the best candidate only if it
+     * clears [STRONG_MATCH_THRESHOLD], else null.
+     */
+    fun findBestArtist(query: String, candidates: List<ArtistEntity>): ArtistEntity? {   // SARASWATI: fork feature — voice resolver for artist-only queries
+        val queryLower = query.lowercase().trim()
+        val queryTokens = tokenize(queryLower)
+        if (queryTokens.isEmpty()) return null
+
+        val isTooGeneric = (queryTokens.size == 1 && queryTokens.first().length < 4) || queryLower.length < 5
+
+        var best: ArtistEntity? = null
+        var bestScore = 0.0
+        candidates.forEach { artist ->
+            val nameLower = artist.name.lowercase().trim()
+            val nameTokens = tokenize(nameLower)
+
+            val score = when {
+                nameTokens == queryTokens || nameLower == queryLower -> 1.0
+                isTooGeneric -> 0.0
+                else -> {
+                    // Reject partial-name coverage ("arijit" vs "Arijit Singh") before scoring
+                    val nameFullyMatched = nameTokens.isNotEmpty() && nameTokens.all { nameToken ->
+                        queryTokens.any { q -> q == nameToken || jaroWinkler(q, nameToken) >= FUZZY_THRESHOLD }
+                    }
+                    if (nameFullyMatched) fuzzyScore(queryTokens, nameTokens) else 0.0
+                }
+            }
+            if (score > bestScore) {
+                bestScore = score
+                best = artist
+            }
+        }
+
+        return best?.takeIf { bestScore >= STRONG_MATCH_THRESHOLD }
     }
 
     private fun scoreCandidate(
