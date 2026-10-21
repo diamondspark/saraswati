@@ -41,6 +41,9 @@ data class HealthCall(
     val timezone: String,
 )
 
+private val ADMIN_FUNCTIONS =
+    setOf("createPairing", "getRoster", "approveDevice", "revokeDevice", "setRole", "setStations", "setKillSwitches", "getHealth")
+
 class FakeHub : HubApi {
     val calls = CopyOnWriteArrayList<String>()
 
@@ -91,6 +94,12 @@ class FakeHub : HubApi {
         failures.remove(function)
     }
 
+    /**
+     * While set, the hub behaves as one whose ADMIN_KEY is this value: every admin call made with another key
+     * answers 401. Stands in for a key that was rotated on the hub after the phone stored the old one.
+     */
+    @Volatile var onlyAdminKey: String? = null
+
     /** The next pairingStatus answers, in order: a [PairingStatus] succeeds, a [Throwable] fails. */
     fun scriptStatus(vararg steps: Any) {
         steps.forEach { statusScript.add(if (it is Throwable) Result.failure(it) else Result.success(it as PairingStatus)) }
@@ -105,6 +114,9 @@ class FakeHub : HubApi {
     ): Result<T> {
         calls.add("$function($args)")
         failures[function]?.let { return Result.failure(it) }
+        onlyAdminKey?.let { accepted ->
+            if (function in ADMIN_FUNCTIONS && args.substringBefore(',') != accepted) return Result.failure(hubFailure(401))
+        }
         return Result.success(ok())
     }
 

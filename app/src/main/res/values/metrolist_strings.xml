@@ -964,6 +964,7 @@
     <string name="family_owner_setup_link">Family owner? Set up this phone</string>
     <string name="family_owner_setup_title">Owner setup</string>
     <string name="family_owner_setup_desc">Paste the admin key you saved when you set up the family hub. The hub checks it, then it is kept encrypted on this phone only.</string>
+    <string name="family_owner_key_rejected">The family hub no longer accepts this phone\'s key. Paste the current key to continue.</string>
     <string name="family_admin_key_label">Admin key</string>
     <string name="family_admin_key_save">Check and save</string>
     <string name="family_admin_key_checking">Checking…</string>

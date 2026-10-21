@@ -429,6 +429,138 @@ class FamilyViewModelTest {
         assertEquals("the-admin-key", store.admin)
     }
 
+    // SARASWATI: the hub's key was rotated after this phone stored the old one. The owner screen must offer a
+    // paste, a refused replacement must leave the old key alone, and an accepted one must replace it.
+    @Test
+    fun `a stored key the hub refuses exposes the paste path`() {
+        store.admin = "old-admin-key"
+        store.owner = true
+        hub.onlyAdminKey = "rotated-admin-key"
+        assertFalse(vm.ownerKeyRejected.value)
+        assertFalse(showsOwnerSetup(isOwner = true, error = vm.error.value, keyRejected = vm.ownerKeyRejected.value))
+
+        vm.refreshRoster()
+
+        assertEquals(FamilyError.UNAUTHORIZED, vm.error.value)
+        assertTrue(vm.ownerKeyRejected.value)
+        assertTrue(showsOwnerSetup(isOwner = true, error = vm.error.value, keyRejected = vm.ownerKeyRejected.value))
+        // Nothing was wiped: the key is still there, and so is the owner flag.
+        assertEquals("old-admin-key", store.admin)
+        assertTrue(store.owner)
+    }
+
+    @Test
+    fun `the paste path stays up when the error is cleared or replaced by a later call`() {
+        store.admin = "old-admin-key"
+        store.owner = true
+        hub.onlyAdminKey = "rotated-admin-key"
+        vm.refreshRoster()
+
+        vm.clearError()
+        assertNull(vm.error.value)
+        assertTrue(showsOwnerSetup(isOwner = true, error = vm.error.value, keyRejected = vm.ownerKeyRejected.value))
+
+        hub.failWith("getHealth", OFFLINE)
+        vm.refreshHealth()
+        assertEquals(FamilyError.OFFLINE, vm.error.value)
+        assertTrue(showsOwnerSetup(isOwner = true, error = vm.error.value, keyRejected = vm.ownerKeyRejected.value))
+    }
+
+    @Test
+    fun `a 401 from approving or from creating a pairing also exposes the paste path`() {
+        store.admin = "old-admin-key"
+        hub.onlyAdminKey = "rotated-admin-key"
+        vm.startPairing()
+        assertTrue(vm.ownerKeyRejected.value)
+
+        val other = FamilyViewModel(hub, store, HubConfig(TEST_HUB_URL), cache, scope)
+        other.approve("d1")
+        assertEquals(FamilyError.UNAUTHORIZED, other.error.value)
+        assertTrue(other.ownerKeyRejected.value)
+    }
+
+    @Test
+    fun `failures that are not a refused key keep the owner tools up`() {
+        store.owner = true
+        for (failure in listOf(OFFLINE, hubFailure(500), hubFailure(429), hubFailure(404))) {
+            hub.failWith("getRoster", failure)
+            vm.refreshRoster()
+
+            assertFalse(failure.toString(), vm.ownerKeyRejected.value)
+            assertFalse(failure.toString(), showsOwnerSetup(isOwner = true, error = vm.error.value, keyRejected = vm.ownerKeyRejected.value))
+        }
+    }
+
+    @Test
+    fun `setup is shown for a phone that is not the owner's, and for an owner flag with no key`() {
+        assertTrue(showsOwnerSetup(isOwner = false, error = null, keyRejected = false))
+        assertTrue(showsOwnerSetup(isOwner = true, error = FamilyError.NO_ADMIN_KEY, keyRejected = false))
+        assertFalse(showsOwnerSetup(isOwner = true, error = null, keyRejected = false))
+        assertFalse(showsOwnerSetup(isOwner = true, error = FamilyError.OFFLINE, keyRejected = false))
+    }
+
+    @Test
+    fun `a replacement key the hub refuses leaves the old key and everything else untouched`() {
+        store.admin = "old-admin-key"
+        store.owner = true
+        store.session = FamilySession("d9", "tok")
+        hub.onlyAdminKey = "rotated-admin-key"
+        vm.refreshRoster()
+        val saved = mutableListOf<String>()
+
+        vm.saveAdminKey("another-wrong-key") { saved.add(it) }
+
+        assertEquals(OwnerSetupState.Failed(FamilyError.UNAUTHORIZED), vm.setupState.value)
+        assertEquals("old-admin-key", store.admin)
+        assertTrue(store.owner)
+        assertEquals(FamilySession("d9", "tok"), store.session)
+        assertTrue(saved.isEmpty())
+        // Still asking for a key.
+        assertTrue(vm.ownerKeyRejected.value)
+        assertTrue(showsOwnerSetup(isOwner = true, error = vm.error.value, keyRejected = vm.ownerKeyRejected.value))
+        assertEquals(listOf("getRoster(old-admin-key)", "getRoster(another-wrong-key)"), hub.callsTo("getRoster"))
+    }
+
+    @Test
+    fun `a replacement key the hub accepts overwrites the old one and brings the owner tools back`() {
+        store.admin = "old-admin-key"
+        store.owner = true
+        hub.onlyAdminKey = "rotated-admin-key"
+        vm.refreshRoster()
+        vm.saveAdminKey("another-wrong-key")
+        val saved = mutableListOf<String>()
+
+        vm.saveAdminKey(" rotated-admin\u200B-key\n") { saved.add(it) }
+
+        assertEquals(OwnerSetupState.Done, vm.setupState.value)
+        assertEquals("rotated-admin-key", store.admin)
+        assertTrue(store.owner)
+        assertEquals(listOf("rotated-admin-key"), saved)
+        assertFalse(vm.ownerKeyRejected.value)
+        assertNull(vm.error.value)
+        assertFalse(showsOwnerSetup(isOwner = true, error = vm.error.value, keyRejected = vm.ownerKeyRejected.value))
+
+        // The next owner call uses the new key and works.
+        vm.refreshRoster()
+        assertNull(vm.error.value)
+        assertEquals("getRoster(rotated-admin-key)", hub.callsTo("getRoster").last())
+    }
+
+    @Test
+    fun `a replacement the hub accepts but this phone cannot store keeps the old key and the paste path`() {
+        store.admin = "old-admin-key"
+        store.owner = true
+        hub.onlyAdminKey = "rotated-admin-key"
+        vm.refreshRoster()
+        store.failWrites = java.io.IOException("disk full")
+
+        vm.saveAdminKey("rotated-admin-key")
+
+        assertEquals(OwnerSetupState.Failed(FamilyError.UNKNOWN), vm.setupState.value)
+        assertEquals("old-admin-key", store.admin)
+        assertTrue(vm.ownerKeyRejected.value)
+    }
+
     @Test
     fun `saveAdminKey with a blank key is rejected without calling the hub`() {
         store.admin = null

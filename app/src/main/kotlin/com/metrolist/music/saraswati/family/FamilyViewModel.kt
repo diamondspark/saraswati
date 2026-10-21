@@ -119,6 +119,15 @@ class FamilyViewModel
         /** The last failure of a roster, health or device action; null once something succeeds or [clearError] runs. */
         val error: StateFlow<FamilyError?> = _error.asStateFlow()
 
+        private val _ownerKeyRejected = MutableStateFlow(false)
+
+        /**
+         * True once the hub answered 401 to this phone's stored admin key. It stays true, however [error] changes
+         * after, until a replacement key the hub accepts is saved by [saveAdminKey]: the screen asks for a new key
+         * while it is. Holds no key, only the fact.
+         */
+        val ownerKeyRejected: StateFlow<Boolean> = _ownerKeyRejected.asStateFlow()
+
         private val _stations = MutableStateFlow<List<Station>>(emptyList())
 
         /** The station list being edited: the hub's, or the four starting defaults on a first run. */
@@ -267,7 +276,7 @@ class FamilyViewModel
                                 PairingUiState.Ready(created.token, link, created.expiresAt)
                             }
                         },
-                        onFailure = { PairingUiState.Error(FamilyError.from(it)) },
+                        onFailure = { PairingUiState.Error(FamilyError.from(it).also(::noteKeyRejected)) },
                     )
             }
         }
@@ -297,6 +306,7 @@ class FamilyViewModel
                     .onFailure { failure ->
                         val error = FamilyError.fromApproval(failure)
                         _error.value = error
+                        noteKeyRejected(error)
                         // The hub's clock decided the request was too old: read the roster again so the
                         // row shows as expired, without letting a failed read replace that message.
                         if (error == FamilyError.EXPIRED) hub.getRoster(key).onSuccess { _roster.value = it }
@@ -392,9 +402,10 @@ class FamilyViewModel
         }
 
         /**
-         * First-time owner setup: the pasted admin key is kept only if the hub
-         * accepts it, so a typo is never stored. [onSaved] runs once, with the
-         * cleaned key (see [AdminKeyInput.clean]), after it was kept and not otherwise.
+         * Owner setup, first time or to replace a key the hub stopped accepting: the pasted admin key is kept
+         * only if the hub accepts it, so a typo is never stored and a refused attempt leaves the old key as it
+         * was. [onSaved] runs once, with the cleaned key (see [AdminKeyInput.clean]), after it was kept and
+         * not otherwise.
          */
         fun saveAdminKey(
             pasted: String,
@@ -415,6 +426,7 @@ class FamilyViewModel
                                 store.saveOwner(key)
                                 _roster.value = devices
                                 _error.value = null
+                                _ownerKeyRejected.value = false
                                 // The caller's chance to tidy up after the key was kept (the screen clears the clipboard).
                                 runCatching { onSaved(key) }
                                 OwnerSetupState.Done
@@ -550,7 +562,14 @@ class FamilyViewModel
             }
 
         private fun fail(failure: Throwable) {
-            _error.value = FamilyError.from(failure)
+            val error = FamilyError.from(failure)
+            _error.value = error
+            noteKeyRejected(error)
+        }
+
+        // Every call that fails here was made with the stored admin key, so a 401 is the hub refusing that key.
+        private fun noteKeyRejected(error: FamilyError) {
+            if (error == FamilyError.UNAUTHORIZED) _ownerKeyRejected.value = true
         }
 
         private suspend fun adminKey(): String? =
