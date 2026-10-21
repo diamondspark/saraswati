@@ -1,21 +1,21 @@
 {
   "schema": 1,
   "channel": "beta",
-  "versionCode": 4079,
-  "versionName": "13.7.0-s4079",
+  "versionCode": 4101,
+  "versionName": "13.7.0-s4101",
   "apk": {
-    "url": "https://github.com/diamondspark/saraswati/releases/download/v4079/saraswati-v4079.apk",
-    "sha256": "e20f61d3766aa789e2a73c83b897231051defc7457000f90eac53e3c5a558d20",
-    "size": 26950532
+    "url": "https://github.com/diamondspark/saraswati/releases/download/v4101/saraswati-v4101.apk",
+    "sha256": "ef16b307abb38ec4c8a170d723c52fb559280b1c9d9d5b48611f20d10054e96e",
+    "size": 26954628
   },
   "urgent": false,
-  "notes": "Phases 3-6: family hub, Saral, car tabs, Sangat, Parivaar Mix, family playlists, local files, smart downloads, Prahar, Ask, snooze and more.",
-  "publishedAt": "2026-10-20T15:35:08Z",
+  "notes": "Security hardening: Sangat room tokens now hashed at rest, local files no longer leak into playlists when Local files is off, and Saral's voice search now shows a one-time explanation before it ever reaches Ask Saraswati.",
+  "publishedAt": "2026-10-21T03:50:01Z",
   "updater": {
-    "versionCode": 4079,
+    "versionCode": 4101,
     "apk": {
-      "url": "https://github.com/diamondspark/saraswati/releases/download/v4079/saraswati-updater-v4079.apk",
-      "sha256": "fc97c4d91b13a82aea6f3eb54547a586c0bb109d7aa6aa58a28271608e27261c",
+      "url": "https://github.com/diamondspark/saraswati/releases/download/v4101/saraswati-updater-v4101.apk",
+      "sha256": "da80ddcf81e96f0e50158effc2e7443fc22e0666ee87bf5a8606a42b831e580a",
       "size": 256152
     }
   }
