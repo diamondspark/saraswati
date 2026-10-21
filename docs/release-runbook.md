@@ -357,6 +357,38 @@ entirely in the owner's hands.
 4. On success, `stable.json` on `gh-pages` becomes `beta.json` with
    `"channel"` rewritten to `"stable"`.
 
+**The first promotion must happen before a phone is onboarded through
+Saraswati Updates.** Until `stable.json` exists, a freshly installed Updates
+app (it defaults to `stable`, and has no channel picker) shows "can't reach the
+update server" and installs nothing. This is what happened on the first family
+phone. After the first promotion every later release just replaces the file.
+
+## Sign-in network hosts (keep LoginUrlPolicy and the network config in step)
+
+Google ends a sign-in by redirecting through
+`accounts.google.<country>/accounts/SetSID`, once for each country domain tied
+to the account (one account's chain ran `.ca`, then `.co.in`, then
+music.youtube.com). Two files must agree on those hosts:
+
+- `LoginUrlPolicy` decides which pages the sign-in WebView may navigate to. It
+  allows `accounts.google.<ccTLD>`, `.co.<cc>` and `.com.<cc>`.
+- `app/src/main/res/xml/network_security_config.xml` (and its twin
+  `security/egress-allowlist.json`) decides which hosts the TLS handshake will
+  trust. It lists the same 185 `accounts.google.<ccTLD>` hosts, exact hosts only.
+
+If the two drift apart, sign-in freezes after the password or the 2-step
+approval: the navigation is allowed but the handshake is refused, and the page
+just sits there. To refresh the list, take Google's country domains from
+`https://www.google.com/supported_domains`, keep those whose
+`accounts.<domain>` matches the `LoginUrlPolicy` pattern (this drops
+`google.com`, already covered, and `google.cat`), and update both files.
+
+To see which host a stuck sign-in is waiting on, install a debug build, forward
+the WebView's debug socket
+(`adb forward tcp:9333 localabstract:webview_devtools_remote_<app pid>`), and
+listen for `Network.requestWillBeSent` redirects and `Network.loadingFailed`
+events over the Chrome DevTools protocol.
+
 ## Developer verification (Task 13)
 
 Full detail (what Google's pages actually say, the registration sheet, and
