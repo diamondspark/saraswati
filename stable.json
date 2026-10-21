@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "channel": "stable",
+  "versionCode": 4139,
+  "versionName": "13.7.0-s4139",
+  "apk": {
+    "url": "https://github.com/diamondspark/saraswati/releases/download/v4139/saraswati-v4139.apk",
+    "sha256": "bf447f9cea41eedd920d5231e0ac8808ac98057941939df061ef8c2173ff8b26",
+    "size": 27020164
+  },
+  "urgent": true,
+  "notes": "Fixes sign-in on phones using a country Google domain and adds Send feedback (Settings > System). Please update.",
+  "publishedAt": "2026-10-21T22:56:57Z",
+  "updater": {
+    "versionCode": 4139,
+    "apk": {
+      "url": "https://github.com/diamondspark/saraswati/releases/download/v4139/saraswati-updater-v4139.apk",
+      "sha256": "5c245cdcbcaea4a1644dd744db73a36717dccb5194abadc2236ffff905f400f3",
+      "size": 256152
+    }
+  }
+}
