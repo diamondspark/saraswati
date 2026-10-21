@@ -54,7 +54,7 @@ class AskRepository(
     ): AskOutcome {
         val text = question.trim().take(ASK_QUESTION_MAX)
         // SARASWATI: Phase 6 fix (C-I1) — the question leaves the phone, so the switch must be known to be on (fail closed).
-        if (text.isEmpty() || !gate.allows(FamilyFeature.ASK_SARASWATI)) return AskOutcome.Unavailable
+        if (text.isEmpty() || !willReachHub()) return AskOutcome.Unavailable
         val token = identity.sessionToken() ?: return AskOutcome.Unavailable
         val answer =
             withTimeoutOrNull(timeoutMs) { hub.ask(token, text, appLocale(Locale.getDefault())) }
@@ -64,6 +64,12 @@ class AskRepository(
         // A reset time that is not in the future cannot be shown as "ask again tomorrow", so it is not a limit.
         return if (limit.resetAt.isAfter(clock.instant())) AskOutcome.LimitReached(limit.resetAt) else AskOutcome.Unavailable
     }
+
+    // SARASWATI: security-ask-explanation (third-round audit fix 1) — the same two checks [ask] itself fails
+    // closed on above, exposed so a caller can know in advance whether a question would even leave the phone:
+    // the ask-voice explanation must not claim words are sent to a hub that will never be called (Ask Saraswati
+    // off, or no session).
+    suspend fun willReachHub(): Boolean = gate.allows(FamilyFeature.ASK_SARASWATI) && identity.sessionToken() != null
 }
 
 /** The phone's language as the Worker takes it: xx or xx-YY; English when the language is not two letters. */

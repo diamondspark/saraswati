@@ -30,6 +30,7 @@ import com.metrolist.music.constants.SangatCarRoomCodeKey
 import com.metrolist.music.constants.FamilyPlaylistsCacheKey
 import com.metrolist.music.constants.FamilyStationsCacheKey
 import com.metrolist.music.constants.GrandparentRoleKey
+import com.metrolist.music.constants.HasSeenAskVoiceExplanationKey
 import com.metrolist.music.constants.IsFamilyOwnerKey
 import com.metrolist.music.constants.InnerTubeCookieKey
 import com.metrolist.music.constants.LastFMSessionKey
@@ -410,5 +411,15 @@ class BackupPolicyTest {
         val planted = mutablePreferencesOf(SangatCarRoomCodeKey to "ABCD1234", SongSortTypeKey to "NAME").toPreferences()
 
         assertNull(BackupPolicy.sanitize(planted)[SangatCarRoomCodeKey])
+    }
+
+    // SARASWATI: security-ask-explanation (branch audit fix 5) — restoring another phone's backup onto this one
+    // must not mark the ask-voice explanation "seen" here too, or the one-time disclosure never actually shows.
+    @Test
+    fun `a backup cannot plant the ask-voice explanation as seen`() {
+        assertTrue(HasSeenAskVoiceExplanationKey in BackupPolicy.NEVER_EXPORT_OR_RESTORE)
+        val planted = mutablePreferencesOf(HasSeenAskVoiceExplanationKey to true, SongSortTypeKey to "NAME").toPreferences()
+
+        assertNull(BackupPolicy.sanitize(planted)[HasSeenAskVoiceExplanationKey])
     }
 }

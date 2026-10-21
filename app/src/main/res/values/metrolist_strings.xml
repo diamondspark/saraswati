@@ -1086,6 +1086,31 @@
     <string name="ask_disclaimer">Saraswati can get things wrong</string>
     <!-- SARASWATI: Phase 6 Task 11 strings end -->
 
+    <!-- SARASWATI: security-ask-explanation — the EXPLANATION SCREEN is shown once, but what it describes is not:
+         every voice search is routed through Ask Saraswati (SaralAsk resolves the spoken words on the family
+         hub) for as long as it is configured, not just the first time. The copy must say so plainly, the way
+         local_files_explain_body is explicit about scope, name the two facts that matter to this audience (a
+         computer reads the words, and they are never saved — see worker/src/routes/ask.ts: "The question is
+         never stored and never logged"), and avoid "Saral"/"family hub" jargon. Short sentences on purpose
+         (second-round review fix): the "not a recording of your voice" claim is scoped to what is sent, not a
+         blanket claim about the phone's own speech recognizer, which may still reach Google
+         (EXTRA_PREFER_OFFLINE is a preference, not a guarantee). Third-round copy nits: cut the meaningless
+         "the same as before" for a first-time reader; "never saved" is scoped to the hub helper itself, since
+         a fallback also means a plain YouTube search on the signed-in account, which is not private. Fourth-
+         round fix 4: "If it can't tell what you meant, they are searched on YouTube instead" undersold how
+         often that happens — a YouTube search also follows any AskIntent.Search/Answer/Sangat reply, so nearly
+         every request that isn't a station or the family mix ends up there regardless of whether the helper
+         understood; the copy now says so plainly instead of implying YouTube is only a rare fallback. Mirrors
+         local_files_explain_* in shape only; still pending the owner's final wording. The Hindi line
+         is a placeholder only: TODO, needs a native Hindi speaker's copy — do not translate this
+         programmatically or invent Devanagari text, and AskVoiceExplanationCard must never show it verbatim
+         on screen (isAskVoiceExplanationPlaceholder). -->
+    <string name="ask_voice_explanation_body">Each time you speak a request, Saraswati sends the words — not a recording of your voice — to a computer helper. It picks a family station, or looks the song up on YouTube like any other search here. The helper itself never saves your words.</string>
+    <string name="ask_voice_explanation_continue">Okay</string>
+    <string name="ask_voice_explanation_decline">Not now</string>
+    <!-- TODO(hi): placeholder — needs a native Hindi speaker's review and real Hindi copy before this ships. -->
+    <string name="ask_voice_explanation_body_hi" translatable="false">TODO: Hindi translation needed for ask_voice_explanation_body</string>
+
     <!-- SARASWATI: Task 9 — Saral, the grandparents' screen. Hindi on purpose: the one screen built only for them,
          so none of it is translatable. The copy is the approved mockup's, except the lines marked NEW, which
          need a native-speaker read. -->

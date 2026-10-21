@@ -803,3 +803,7 @@ val SmartDownloadLedgerKey = stringPreferencesKey("saraswatiSmartDownloadLedger"
 
 // SARASWATI: Phase 5 Task 11 — the "Raat ke Gaane" (smart downloads) switch in Storage settings. On unless turned off.
 val SmartDownloadsEnabledKey = booleanPreferencesKey("saraswatiSmartDownloads")
+
+// SARASWATI: security-ask-explanation — whether the one-time explanation (Saral's voice search now reaches
+// Ask Saraswati on the family hub) has been shown. Set the first time it is acknowledged; never cleared.
+val HasSeenAskVoiceExplanationKey = booleanPreferencesKey("saraswatiHasSeenAskVoiceExplanation")
