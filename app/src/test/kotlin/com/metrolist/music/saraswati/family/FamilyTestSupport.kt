@@ -71,6 +71,9 @@ class FakeHub : HubApi {
     /** While set, getStations waits on it: stands in for a hub that is slow or unreachable. */
     @Volatile var stationsGate: CompletableDeferred<Unit>? = null
 
+    /** While set, createPairing waits on it: a pairing request that is still in flight. */
+    @Volatile var pairingGate: CompletableDeferred<Unit>? = null
+
     /** While set, claimPairing waits on it: a claim that is still in flight. */
     @Volatile var claimGate: CompletableDeferred<Unit>? = null
 
@@ -127,7 +130,10 @@ class FakeHub : HubApi {
         devices = devices.map { if (it.deviceId == deviceId) change(it) else it }
     }
 
-    override suspend fun createPairing(adminKey: String) = run("createPairing", adminKey) { pairingToken }
+    override suspend fun createPairing(adminKey: String): Result<PairingToken> {
+        pairingGate?.await()
+        return run("createPairing", adminKey) { pairingToken }
+    }
 
     override suspend fun claimPairing(
         token: String,

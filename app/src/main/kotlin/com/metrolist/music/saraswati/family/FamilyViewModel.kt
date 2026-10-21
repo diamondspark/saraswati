@@ -44,8 +44,12 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.coroutines.coroutineContext
 
 sealed interface PairingUiState {
     data object Idle : PairingUiState
@@ -68,6 +72,17 @@ sealed interface PairingUiState {
 
 /** [DRAFT] is a station list that is not on the hub yet: the starting defaults, or edits still missing a video. */
 enum class StationsState { NOT_LOADED, SYNCED, DRAFT }
+
+/**
+ * The count of replacement keys kept (see [FamilyViewModel.saveAdminKey]) when an admin call began, carried in
+ * the call's coroutine context. A 401 that comes back after the count moved was the answer to a key that has
+ * since been replaced, and says nothing about the new one.
+ */
+private class KeyGeneration(
+    val value: Int,
+) : AbstractCoroutineContextElement(Key) {
+    companion object Key : CoroutineContext.Key<KeyGeneration>
+}
 
 sealed interface OwnerSetupState {
     data object Idle : OwnerSetupState
@@ -118,6 +133,8 @@ class FamilyViewModel
 
         /** The last failure of a roster, health or device action; null once something succeeds or [clearError] runs. */
         val error: StateFlow<FamilyError?> = _error.asStateFlow()
+
+        private val keyGeneration = AtomicInteger(0)
 
         private val _ownerKeyRejected = MutableStateFlow(false)
 
@@ -261,6 +278,7 @@ class FamilyViewModel
         fun startPairing() {
             viewModelScope.launch {
                 _pairingState.value = PairingUiState.Creating
+                val generation = keyGeneration.get()
                 val key = adminKey()
                 if (key == null) {
                     _pairingState.value = PairingUiState.Error(FamilyError.NO_ADMIN_KEY)
@@ -276,7 +294,13 @@ class FamilyViewModel
                                 PairingUiState.Ready(created.token, link, created.expiresAt)
                             }
                         },
-                        onFailure = { PairingUiState.Error(FamilyError.from(it).also(::noteKeyRejected)) },
+                        onFailure = {
+                            val error = FamilyError.from(it)
+                            // A refusal of a key that was replaced meanwhile: the screen was already reset.
+                            if (isStaleRefusal(error, generation)) return@launch
+                            noteKeyRejected(error)
+                            PairingUiState.Error(error)
+                        },
                     )
             }
         }
@@ -305,8 +329,7 @@ class FamilyViewModel
                     .onSuccess { loadRoster(key) }
                     .onFailure { failure ->
                         val error = FamilyError.fromApproval(failure)
-                        _error.value = error
-                        noteKeyRejected(error)
+                        report(error)
                         // The hub's clock decided the request was too old: read the roster again so the
                         // row shows as expired, without letting a failed read replace that message.
                         if (error == FamilyError.EXPIRED) hub.getRoster(key).onSuccess { _roster.value = it }
@@ -412,7 +435,7 @@ class FamilyViewModel
             onSaved: (key: String) -> Unit = {},
         ) {
             val key = AdminKeyInput.clean(pasted)
-            if (key.isEmpty()) {
+            if (key.isEmpty() || key.length > AdminKeyInput.MAX_LENGTH) {
                 _setupState.value = OwnerSetupState.Failed(FamilyError.INVALID_INPUT)
                 return
             }
@@ -426,7 +449,11 @@ class FamilyViewModel
                                 store.saveOwner(key)
                                 _roster.value = devices
                                 _error.value = null
+                                // From here on a 401 to a call that began with the old key is not about this one,
+                                // and a pairing error (or a pairing still in flight) belonged to the old key.
+                                keyGeneration.incrementAndGet()
                                 _ownerKeyRejected.value = false
+                                _pairingState.value = PairingUiState.Idle
                                 // The caller's chance to tidy up after the key was kept (the screen clears the clipboard).
                                 runCatching { onSaved(key) }
                                 OwnerSetupState.Done
@@ -442,12 +469,13 @@ class FamilyViewModel
         private fun ownerAction(block: suspend (adminKey: String) -> Unit) {
             viewModelScope.launch {
                 _error.value = null
+                val generation = keyGeneration.get()
                 val key = adminKey()
                 if (key == null) {
                     _error.value = FamilyError.NO_ADMIN_KEY
                     return@launch
                 }
-                block(key)
+                withContext(KeyGeneration(generation)) { block(key) }
             }
         }
 
@@ -505,25 +533,28 @@ class FamilyViewModel
                 _stationsState.value = StationsState.DRAFT
                 return
             }
+            val generation = keyGeneration.get()
             val key = adminKey()
             if (key == null) {
                 _error.value = FamilyError.NO_ADMIN_KEY
                 return
             }
-            hub
-                .setStations(key, next)
-                .onSuccess { saved ->
-                    _stations.value = saved
-                    _stationsState.value = StationsState.SYNCED
-                    cacheStations(saved)
-                    try {
-                        store.markStationsSaved()
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        // The hub now holds the list, so an empty answer later cannot be mistaken for a first run.
-                    }
-                }.onFailure { fail(it) }
+            withContext(KeyGeneration(generation)) {
+                hub
+                    .setStations(key, next)
+                    .onSuccess { saved ->
+                        _stations.value = saved
+                        _stationsState.value = StationsState.SYNCED
+                        cacheStations(saved)
+                        try {
+                            store.markStationsSaved()
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            // The hub now holds the list, so an empty answer later cannot be mistaken for a first run.
+                        }
+                    }.onFailure { fail(it) }
+            }
         }
 
         private fun buildStation(
@@ -561,13 +592,24 @@ class FamilyViewModel
                 false
             }
 
-        private fun fail(failure: Throwable) {
-            val error = FamilyError.from(failure)
+        private suspend fun fail(failure: Throwable) = report(FamilyError.from(failure))
+
+        /**
+         * Shows [error] as the last failure of an admin call. Every such call was made with the stored admin key, so a
+         * 401 is the hub refusing that key, and the screen asks for a new one. Unless the key was replaced after the
+         * call began: that 401 is dropped, so a late answer cannot undo a replacement the hub accepted.
+         */
+        private suspend fun report(error: FamilyError) {
+            if (isStaleRefusal(error, coroutineContext[KeyGeneration]?.value)) return
             _error.value = error
             noteKeyRejected(error)
         }
 
-        // Every call that fails here was made with the stored admin key, so a 401 is the hub refusing that key.
+        private fun isStaleRefusal(
+            error: FamilyError,
+            startedUnder: Int?,
+        ): Boolean = error == FamilyError.UNAUTHORIZED && startedUnder != null && startedUnder != keyGeneration.get()
+
         private fun noteKeyRejected(error: FamilyError) {
             if (error == FamilyError.UNAUTHORIZED) _ownerKeyRejected.value = true
         }

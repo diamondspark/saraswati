@@ -561,6 +561,135 @@ class FamilyViewModelTest {
         assertTrue(vm.ownerKeyRejected.value)
     }
 
+    // SARASWATI: a call that began with the old key can be answered after the replacement was kept. Its 401 is
+    // about the old key and must not raise the flag, or the error, again.
+    @Test
+    fun `a late 401 to a call made with the replaced key is dropped`() {
+        store.admin = "old-admin-key"
+        store.owner = true
+        val gate = CompletableDeferred<Unit>()
+        hub.stationsGate = gate
+        hub.failWith("getStations", hubFailure(401))
+        vm.loadSettings()
+        assertEquals(listOf("getStations(old-admin-key)"), hub.callsTo("getStations"))
+
+        vm.saveAdminKey("new-admin-key")
+        assertEquals(OwnerSetupState.Done, vm.setupState.value)
+        gate.complete(Unit)
+
+        assertFalse(vm.ownerKeyRejected.value)
+        assertNull(vm.error.value)
+        assertEquals("new-admin-key", store.admin)
+        assertFalse(showsOwnerSetup(isOwner = true, error = vm.error.value, keyRejected = vm.ownerKeyRejected.value))
+    }
+
+    @Test
+    fun `the same 401 with no replacement in between still raises the flag`() {
+        store.admin = "old-admin-key"
+        store.owner = true
+        val gate = CompletableDeferred<Unit>()
+        hub.stationsGate = gate
+        hub.failWith("getStations", hubFailure(401))
+        vm.loadSettings()
+        assertFalse(vm.ownerKeyRejected.value)
+
+        gate.complete(Unit)
+
+        assertEquals(FamilyError.UNAUTHORIZED, vm.error.value)
+        assertTrue(vm.ownerKeyRejected.value)
+    }
+
+    @Test
+    fun `a call that begins after the replacement and is refused raises the flag`() {
+        store.admin = "old-admin-key"
+        store.owner = true
+        vm.saveAdminKey("new-admin-key")
+        hub.onlyAdminKey = "some-third-key"
+
+        vm.refreshRoster()
+
+        assertEquals(FamilyError.UNAUTHORIZED, vm.error.value)
+        assertTrue(vm.ownerKeyRejected.value)
+    }
+
+    @Test
+    fun `a late 401 to a pairing request made with the replaced key is dropped, and the screen stays reset`() {
+        store.admin = "old-admin-key"
+        store.owner = true
+        val gate = CompletableDeferred<Unit>()
+        hub.pairingGate = gate
+        hub.failWith("createPairing", hubFailure(401))
+        vm.startPairing()
+        assertEquals(PairingUiState.Creating, vm.pairingState.value)
+
+        vm.saveAdminKey("new-admin-key")
+        gate.complete(Unit)
+
+        assertEquals(PairingUiState.Idle, vm.pairingState.value)
+        assertFalse(vm.ownerKeyRejected.value)
+    }
+
+    @Test
+    fun `a pairing error from the old key is cleared when a replacement is kept`() {
+        store.admin = "old-admin-key"
+        store.owner = true
+        hub.onlyAdminKey = "rotated-admin-key"
+        vm.startPairing()
+        assertEquals(PairingUiState.Error(FamilyError.UNAUTHORIZED), vm.pairingState.value)
+
+        vm.saveAdminKey("rotated-admin-key")
+
+        assertEquals(OwnerSetupState.Done, vm.setupState.value)
+        assertEquals(PairingUiState.Idle, vm.pairingState.value)
+    }
+
+    @Test
+    fun `a pairing error survives a replacement the hub refuses`() {
+        store.admin = "old-admin-key"
+        store.owner = true
+        hub.onlyAdminKey = "rotated-admin-key"
+        vm.startPairing()
+
+        vm.saveAdminKey("another-wrong-key")
+
+        assertEquals(PairingUiState.Error(FamilyError.UNAUTHORIZED), vm.pairingState.value)
+    }
+
+    @Test
+    fun `a 64-character hex key and one at the 128-character limit are sent`() {
+        store.admin = null
+        val hex64 = "0123456789abcdef".repeat(4)
+
+        vm.saveAdminKey(hex64)
+
+        assertEquals(OwnerSetupState.Done, vm.setupState.value)
+        assertEquals(hex64, store.admin)
+        assertEquals(listOf("getRoster($hex64)"), hub.calls)
+
+        val limit = "k".repeat(AdminKeyInput.MAX_LENGTH)
+        vm.saveAdminKey(limit)
+        assertEquals(limit, store.admin)
+    }
+
+    @Test
+    fun `input longer than 128 characters once cleaned is refused and nothing is sent`() {
+        store.admin = "old-admin-key"
+        val saved = mutableListOf<String>()
+        val tooLong = "k".repeat(AdminKeyInput.MAX_LENGTH + 1)
+        // Unrelated text: spaces and line breaks vanish in cleaning, leaving one long string.
+        val paragraph = "Remember to buy milk, bread and eggs on the way home. ".repeat(4)
+
+        for (pasted in listOf(tooLong, paragraph, "  $tooLong\n")) {
+            vm.saveAdminKey(pasted) { saved.add(it) }
+
+            assertEquals(pasted, OwnerSetupState.Failed(FamilyError.INVALID_INPUT), vm.setupState.value)
+        }
+
+        assertTrue(hub.calls.isEmpty())
+        assertEquals("old-admin-key", store.admin)
+        assertTrue(saved.isEmpty())
+    }
+
     @Test
     fun `saveAdminKey with a blank key is rejected without calling the hub`() {
         store.admin = null
