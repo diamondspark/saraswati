@@ -1,21 +1,21 @@
 {
   "schema": 1,
   "channel": "beta",
-  "versionCode": 4114,
-  "versionName": "13.7.0-s4114",
+  "versionCode": 4119,
+  "versionName": "13.7.0-s4119",
   "apk": {
-    "url": "https://github.com/diamondspark/saraswati/releases/download/v4114/saraswati-v4114.apk",
-    "sha256": "24fda8f3ad71a530c295db889329c39150ba52ef5645eb654805aaaa7edf4bf0",
+    "url": "https://github.com/diamondspark/saraswati/releases/download/v4119/saraswati-v4119.apk",
+    "sha256": "267eadd00ccb9dee900e987b57eb39d1dde67499ecae3230bc50daa9f0af85c4",
     "size": 26979204
   },
   "urgent": false,
-  "notes": "Voice-play fixes (wrong-song bug, Assistant routing, transliteration/artist/title matching), Like-first car layout, and an expanded festival calendar (68 entries incl. Valentine's Day) through 2028.",
-  "publishedAt": "2026-10-21T09:05:33Z",
+  "notes": "Fixes sign-in freezing after the password or the 2-step approval, for Google accounts linked to other countries.",
+  "publishedAt": "2026-10-21T18:50:20Z",
   "updater": {
-    "versionCode": 4114,
+    "versionCode": 4119,
     "apk": {
-      "url": "https://github.com/diamondspark/saraswati/releases/download/v4114/saraswati-updater-v4114.apk",
-      "sha256": "ab0ce8c4756c550c259337c064f54446174bc3ff02161f43b1e83954bf57e235",
+      "url": "https://github.com/diamondspark/saraswati/releases/download/v4119/saraswati-updater-v4119.apk",
+      "sha256": "f298301e694f94159582324ae99d367cf27382d39ce27769382781539ffb56fe",
       "size": 256152
     }
   }
