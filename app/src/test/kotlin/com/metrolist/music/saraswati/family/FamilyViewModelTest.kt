@@ -346,6 +346,28 @@ class FamilyViewModelTest {
     }
 
     @Test
+    fun `saveAdminKey sends the key without invisible characters or wrapped lines`() {
+        store.admin = null
+
+        vm.saveAdminKey("\uFEFF\u00A0new-admin\u200B-\nkey \r\n")
+
+        assertEquals(OwnerSetupState.Done, vm.setupState.value)
+        assertEquals(listOf("getRoster(new-admin-key)"), hub.calls)
+        assertEquals("new-admin-key", store.admin)
+    }
+
+    @Test
+    fun `saveAdminKey with only invisible characters is rejected without calling the hub`() {
+        store.admin = null
+
+        vm.saveAdminKey("\u200B\uFEFF")
+
+        assertEquals(OwnerSetupState.Failed(FamilyError.INVALID_INPUT), vm.setupState.value)
+        assertTrue(hub.calls.isEmpty())
+        assertNull(store.admin)
+    }
+
+    @Test
     fun `saving a working key clears the missing-key error that sent the screen to setup`() {
         store.admin = null
         vm.refreshRoster()

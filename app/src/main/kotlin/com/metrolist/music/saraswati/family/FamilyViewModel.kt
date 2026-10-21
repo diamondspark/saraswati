@@ -394,13 +394,13 @@ class FamilyViewModel
         /**
          * First-time owner setup: the pasted admin key is kept only if the hub
          * accepts it, so a typo is never stored. [onSaved] runs once, with the
-         * trimmed key, after it was kept and not otherwise.
+         * cleaned key (see [AdminKeyInput.clean]), after it was kept and not otherwise.
          */
         fun saveAdminKey(
             pasted: String,
             onSaved: (key: String) -> Unit = {},
         ) {
-            val key = pasted.trim()
+            val key = AdminKeyInput.clean(pasted)
             if (key.isEmpty()) {
                 _setupState.value = OwnerSetupState.Failed(FamilyError.INVALID_INPUT)
                 return

@@ -29,7 +29,7 @@ const PAIRING_TOKEN_TTL_MS = 15 * 60 * 1000;
 // A claimed phone waits for the owner's approval. Past this it can no longer be
 // approved, so a request nobody noticed cannot be waved through hours later.
 const PENDING_APPROVAL_TTL_MS = 60 * 60 * 1000;
-// A configured ADMIN_KEY shorter than this is treated as not set at all, so a
+// A configured ADMIN_KEY shorter than this (after trimming) is treated as not set at all, so a
 // weak or truncated secret fails closed instead of being brute-forceable.
 const MIN_ADMIN_KEY_LENGTH = 32;
 // Names are shown to the owner when approving. Cap them, and strip anything
@@ -335,9 +335,13 @@ export class FamilyHub extends DurableObject<Env> {
     // digests and says nothing about the length of either secret.
     const presented = await sha256Hex(token);
 
-    const adminKey: unknown = env.ADMIN_KEY;
+    // The configured key is trimmed the way bearerToken() trims the presented
+    // one, so stray whitespace around the stored secret (a leading space
+    // from a terminal paste; `wrangler secret put` only trims the end) cannot
+    // make the two differ for good. The length floor applies to what is left.
+    const configured: unknown = env.ADMIN_KEY;
+    const adminKey = typeof configured === "string" ? configured.trim() : "";
     if (
-      typeof adminKey === "string" &&
       adminKey.length >= MIN_ADMIN_KEY_LENGTH &&
       secretsMatch(presented, await sha256Hex(adminKey))
     ) {

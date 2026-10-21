@@ -55,6 +55,14 @@ class ClipboardHygieneTest {
     }
 
     @Test
+    fun `invisible characters and a wrapped line on the clip do not hide the key`() {
+        copy("\uFEFFthe-admin\u200B-key\r\n")
+
+        assertTrue(ClipboardHygiene.clearIfHolds(clipboard, "the-admin-key"))
+        assertNull(clipboard.primaryClip)
+    }
+
+    @Test
     fun `anything else on the clipboard is left alone`() {
         copy("a recipe the person copied")
 

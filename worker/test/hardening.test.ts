@@ -205,6 +205,53 @@ describe("the admin key", () => {
     }
   });
 
+  // A fake key, never a real one. The stored secret can pick up whitespace the owner cannot see at
+  // a hidden prompt (`wrangler secret put` trims only the end of what it reads), while the presented
+  // bearer is always trimmed, so the hub trims the stored side the same way.
+  it.each([
+    ["a trailing newline", "", "\n"],
+    ["a trailing CRLF", "", "\r\n"],
+    ["trailing spaces", "", "  "],
+    ["a leading space", " ", ""],
+    ["a leading tab and a trailing newline", "\t", "\n"],
+    ["a leading no-break space", "\u00a0", ""],
+  ])("is accepted when the configured secret has %s around it", async (_label, before, after) => {
+    const stub = getFamilyHubStub();
+    const key = "a".repeat(64);
+    const padded = `${before}${key}${after}`;
+
+    expect(await authenticateWith(stub, padded, key)).toEqual({ role: "admin" });
+  });
+
+  it("is accepted when the presented bearer has extra spaces around it", async () => {
+    const stub = getFamilyHubStub();
+    const key = "b".repeat(64);
+
+    expect(await authenticateWith(stub, key, `  ${key}  `)).toEqual({ role: "admin" });
+  });
+
+  it("still rejects a wrong key when the configured secret is padded", async () => {
+    const stub = getFamilyHubStub();
+    const key = "a".repeat(64);
+
+    expect(await authenticateWith(stub, `${key}\n`, "a".repeat(63) + "b")).toBeNull();
+    expect(await authenticateWith(stub, ` ${key} `, `${key}x`)).toBeNull();
+  });
+
+  it("measures the length floor after trimming the configured secret", async () => {
+    const stub = getFamilyHubStub();
+    const short = "k".repeat(31);
+
+    // 31 characters of key plus padding is 36 characters raw, but it is still a 31-character key.
+    expect(await authenticateWith(stub, `  ${short}  \n`, short)).toBeNull();
+    // Whitespace alone is never a key, however long.
+    expect(await authenticateWith(stub, " ".repeat(40), " ".repeat(40))).toBeNull();
+    expect(await authenticateWith(stub, " ".repeat(40), "anything")).toBeNull();
+    // Exactly 32 characters once trimmed is enough.
+    const exact = "k".repeat(32);
+    expect(await authenticateWith(stub, `${exact}\n`, exact)).toEqual({ role: "admin" });
+  });
+
   it("fails every admin route closed with 401 while the configured key is too short", async () => {
     const stub = getFamilyHubStub();
     const shortKey = "short-key";

@@ -11,8 +11,8 @@ export interface Env {
   AI: Ai;
   // Worker secret, set with `wrangler secret put ADMIN_KEY`; the owner's own
   // 64-hex-character value, which no agent ever sees. `authenticate()` in
-  // FamilyHub.ts checks bearer tokens against it first, and treats a value
-  // shorter than 32 characters as not set at all.
+  // FamilyHub.ts checks bearer tokens against it first (trimmed, like the
+  // token), and treats a value shorter than 32 characters as not set at all.
   ADMIN_KEY: string;
 }
 
