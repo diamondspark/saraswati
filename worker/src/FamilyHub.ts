@@ -10,6 +10,7 @@ import {
   readJsonBody,
   readStrictJsonObject,
 } from "./http";
+import { mirrorToGitHub } from "./feedback/githubIssue";
 import { migrate } from "./migrations";
 import { bearerToken, matchRoute } from "./routes";
 import { tooLarge } from "./routes/common";
@@ -294,6 +295,7 @@ export class FamilyHub extends DurableObject<Env> {
           .exec("SELECT 1 FROM roster WHERE deviceId = ? AND status = 'approved'", deviceId)
           .toArray().length > 0,
       now: () => Date.now(),
+      mirrorFeedback: (row) => mirrorToGitHub(this.env, row),
     };
 
     // Nothing is served until the schema is current. A migration that throws

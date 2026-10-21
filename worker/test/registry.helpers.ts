@@ -131,6 +131,7 @@ export function stubContext(
       opts.approved ??
       db.exec("SELECT 1 FROM roster WHERE deviceId = ? AND status = 'approved'", deviceId).toArray().length > 0,
     now: () => opts.now ?? Date.now(),
+    mirrorFeedback: async () => null,
     rateCalls,
   };
 }

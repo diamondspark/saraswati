@@ -5,6 +5,8 @@ declare namespace Cloudflare {
   interface Env {
     FAMILY_HUB: DurableObjectNamespace<import("./FamilyHub").FamilyHub>;
     ADMIN_KEY: string;
+    GITHUB_FEEDBACK_TOKEN?: string;
+    GITHUB_FEEDBACK_REPO?: string;
     // Declared in wrangler.toml but not in wrangler.test.toml, so tests see it undefined.
     AI: Ai;
   }

@@ -2,7 +2,9 @@
 // POST /feedback takes a device or the admin; GET /feedback and PUT /feedback/{id} are the
 // admin's. The text is untrusted: it only ever reaches SQL as a bound parameter and leaves as
 // JSON data. Checks on POST run in this order: auth (401), kill switch (503), body size (413),
-// body (400), rate limit (429). A device revoked while its body was arriving is 401.
+// body (400), rate limit (429). A device revoked while its body was arriving is 401. A stored
+// item is mirrored to GitHub when that is switched on (feedback/githubIssue.ts); the mirror
+// never changes the answer.
 
 import { json, parseJsonObject, readBoundedBody } from "../http";
 import type { AuthResult, HubContext, RouteHandler } from "../hubContext";
@@ -222,6 +224,13 @@ export const postFeedback: RouteHandler = async (ctx, request, auth) => {
     android,
     device,
   });
+
+  // The row is already stored, so nothing below can change the answer. mirrorFeedback never
+  // throws and gives up after 5 s. A Durable Object has no waitUntil, so the 201 waits for it.
+  const issueUrl = await ctx.mirrorFeedback(row);
+  if (issueUrl !== null) {
+    ctx.sql.exec("UPDATE feedback SET issue_url = ? WHERE id = ?", issueUrl, row.id);
+  }
   return json({ id: row.id }, 201);
 };
 

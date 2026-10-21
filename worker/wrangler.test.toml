@@ -14,3 +14,11 @@ class_name = "FamilyHub"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["FamilyHub"]
+
+# Optional GitHub mirror of feedback (the Worker posts one issue per item). The repo is not a
+# secret. The token is: set it with `npx wrangler secret put GITHUB_FEEDBACK_TOKEN` (a
+# fine-grained token, Issues: write on this one repo) and never commit it. Without it nothing
+# is mirrored. Keep this table above [ai]; wrangler.test.toml carries the same repo line and
+# deliberately no token.
+[vars]
+GITHUB_FEEDBACK_REPO = "diamondspark/saraswati"
