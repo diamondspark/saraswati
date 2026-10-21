@@ -304,6 +304,10 @@ entirely in the owner's hands.
    release), `urgent` (only for a fix that must skip promotion's
    48-hour wait), and `notes` (shown to users, ≤1000 chars — the
    `publish` job's manifest build fails if this is exceeded).
+   The versionCode is the commit count, so a release of a commit that
+   already has a tag (for example a beta you now want marked `urgent`)
+   cannot be redone: merge one new commit to `main` first (a docs
+   change is enough), then release again.
 2. `verify` re-runs the full `ci` gate (including `release-dry-run`)
    against the dispatched ref; `build` assembles both unsigned APKs.
    Both run unattended.
