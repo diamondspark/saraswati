@@ -26,6 +26,15 @@
             <action android:name="android.media.action.DISPLAY_AUDIO_EFFECT_CONTROL_PANEL" />
         </intent>
         <package android:name="com.google.android.projection.gearhead" />
+        <!-- SARASWATI: Task 1 live-debug fix — without this, PackageManager can't see
+             com.google.android.googlequicksearchbox under Android's package-visibility
+             rules (we deliberately don't hold QUERY_ALL_PACKAGES), so CallerInfoFactory
+             can never verify a voice "play X" connection that comes directly from
+             Assistant's own app rather than through Android Auto, and ControllerPolicy
+             denies it as unverified even though Assistant is a real system app. This
+             only grants visibility (so the uid->package check can run); isSystemApp
+             still decides whether ControllerPolicy actually allows it. -->
+        <package android:name="com.google.android.googlequicksearchbox" />
     </queries>
     <application
         android:name=".App"
