@@ -248,7 +248,7 @@ class HubClient(
         adminKey: String,
         status: String,
     ): Result<List<FeedbackItem>> =
-        send("GET", listOf("feedback"), adminKey, null, query = listOf("status" to status)) {
+        send("GET", listOf("feedback"), adminKey, null, query = listOf("status" to status, "limit" to "100")) {
             json.decodeFromString<FeedbackListWire>(it).items.mapNotNull { element ->
                 try {
                     json.decodeFromJsonElement<FeedbackItemWire>(element).toItemOrNull()

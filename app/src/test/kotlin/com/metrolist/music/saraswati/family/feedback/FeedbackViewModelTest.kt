@@ -35,6 +35,7 @@ private class SubmitCall(
 
 private class FakeFeedbackHub : FeedbackHub {
     val calls = mutableListOf<SubmitCall>()
+    var finished = 0
     var failure: Throwable? = null
     var gate: CompletableDeferred<Unit>? = null
 
@@ -46,6 +47,7 @@ private class FakeFeedbackHub : FeedbackHub {
     ): Result<String> {
         calls += SubmitCall(bearer, kind, text, diagnostics)
         gate?.await()
+        finished++
         return failure?.let { Result.failure(it) } ?: Result.success("fb-1")
     }
 
@@ -168,6 +170,18 @@ class FeedbackViewModelTest {
         val call = hub.calls.single()
         assertEquals(FeedbackKind.Idea, call.kind)
         assertEquals("Add a sleep timer", call.text)
+    }
+
+    @Test
+    fun `leaving the screen mid-send does not cancel the hub call`() {
+        hub.gate = CompletableDeferred()
+        vm.setText("one")
+        vm.send()
+
+        scope.cancel() // what clearing the view model does
+
+        hub.gate!!.complete(Unit)
+        assertEquals(1, hub.finished)
     }
 
     @Test

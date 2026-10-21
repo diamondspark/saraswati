@@ -20,12 +20,14 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.net.URI
 import javax.inject.Inject
 
@@ -69,13 +71,15 @@ internal fun inboxFailureOf(
         else -> InboxFailure.Other
     }
 
+private val ISSUE_URL = Regex("""https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/issues/[0-9]+""")
+
 /**
  * The GitHub issue link to offer, or null. The hub's value is data from outside the app's control, so only a plain
- * `https://github.com/...` address is ever opened: no other scheme or host, no user-info trick like
- * `https://github.com@elsewhere/`, no port.
+ * `https://github.com/<owner>/<repo>/issues/<number>` address is ever opened: no other page, scheme or host, no
+ * user-info trick like `https://github.com@elsewhere/`, no port, no query or fragment.
  */
 internal fun safeIssueUrl(url: String?): String? {
-    if (url == null || !url.startsWith("https://github.com/")) return null
+    if (url == null || !ISSUE_URL.matches(url)) return null
     val uri = runCatching { URI(url) }.getOrNull() ?: return null
     val plain = uri.scheme == "https" && uri.host == "github.com" && uri.userInfo == null && uri.port == -1
     return url.takeIf { plain }
@@ -169,6 +173,9 @@ class FeedbackInboxViewModel
                         },
                     )
                 }
+                // A list asked for before this change was confirmed may still be on its way with the old status; it
+                // is dropped and asked for again, so it cannot undo what the hub has just accepted.
+                if (outcome.isSuccess && loadJob?.isActive == true) refresh()
             }
         }
 
@@ -199,7 +206,8 @@ class FeedbackInboxViewModel
             status: FeedbackStatus,
         ): Result<Unit> {
             val key = adminKey() ?: return Result.failure(NoKeyException())
-            return guardedCall { hub.setFeedbackStatus(key, id, status) }
+            // Leaving the screen must not cancel a change the hub may already have accepted.
+            return guardedCall { withContext(NonCancellable) { hub.setFeedbackStatus(key, id, status) } }
         }
 
         private suspend fun <T> guardedCall(call: suspend () -> Result<T>): Result<T> =

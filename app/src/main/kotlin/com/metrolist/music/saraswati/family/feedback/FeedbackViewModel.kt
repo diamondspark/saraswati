@@ -22,12 +22,14 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 /** The hub counts UTF-16 code units, which is what [String.length] is, so the two ends agree on the cap. */
@@ -150,7 +152,11 @@ class FeedbackViewModel
                     return@launch
                 }
                 val result =
-                    hub.submitFeedback(bearer, draft.kind, draft.trimmed, diagnostics.takeIf { draft.includeInfo })
+                    // Leaving the screen must not cancel a report the hub may already have accepted, which would
+                    // look unsent and be sent again.
+                    withContext(NonCancellable) {
+                        hub.submitFeedback(bearer, draft.kind, draft.trimmed, diagnostics.takeIf { draft.includeInfo })
+                    }
                 result
                     .onSuccess {
                         // Only what was sent is cleared: text typed while the send was in flight stays.

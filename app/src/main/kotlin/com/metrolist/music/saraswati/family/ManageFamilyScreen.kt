@@ -128,6 +128,7 @@ fun ManageFamilyScreen(
         if (showsOwnerSetup(isOwner, error, keyRejected)) {
             OwnerSetupContent(viewModel, keyRejected)
         } else {
+            // SARASWATI: feedback — OwnerContent also needs the nav controller, for the Feedback inbox row.
             OwnerContent(viewModel, navController)
         }
 
@@ -252,6 +253,7 @@ private fun OwnerSetupContent(
 
 // --- Owner ------------------------------------------------------------
 
+// SARASWATI: feedback — takes the nav controller so the owner section can open the Feedback inbox.
 @Composable
 private fun OwnerContent(
     viewModel: FamilyViewModel,

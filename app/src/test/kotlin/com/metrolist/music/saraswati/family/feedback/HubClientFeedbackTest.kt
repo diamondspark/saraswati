@@ -213,7 +213,7 @@ class HubClientFeedbackTest {
             val request = takeRequest()
             assertEquals("GET", request.method)
             assertEquals("/feedback", request.url.encodedPath)
-            assertEquals("status=open", request.url.encodedQuery)
+            assertEquals("status=open&limit=100", request.url.encodedQuery)
             assertEquals("Bearer admin-key", request.headers["Authorization"])
             assertNull(request.body)
         }
@@ -225,7 +225,7 @@ class HubClientFeedbackTest {
 
             assertEquals(emptyList<FeedbackItem>(), hub.listFeedback("admin", FeedbackStatus.WontFix.wire).getOrNull())
 
-            assertEquals("status=wontfix", takeRequest().url.encodedQuery)
+            assertEquals("status=wontfix&limit=100", takeRequest().url.encodedQuery)
         }
 
     @Test

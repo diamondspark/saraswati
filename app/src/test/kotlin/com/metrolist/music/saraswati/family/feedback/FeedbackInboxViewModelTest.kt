@@ -31,6 +31,8 @@ private class InboxHub : FeedbackHub {
     var changeResult: Result<Unit> = Result.success(Unit)
     var listThrows: Throwable? = null
     var changeGate: CompletableDeferred<Unit>? = null
+    var listGate: CompletableDeferred<Unit>? = null
+    var changesFinished = 0
 
     override suspend fun submitFeedback(
         bearer: String,
@@ -45,7 +47,9 @@ private class InboxHub : FeedbackHub {
     ): Result<List<FeedbackItem>> {
         listCalls += adminKey to status
         listThrows?.let { throw it }
-        return listResult
+        val answer = listResult // the answer is fixed when the request is sent, as on the wire
+        listGate?.await()
+        return answer
     }
 
     override suspend fun setFeedbackStatus(
@@ -55,6 +59,7 @@ private class InboxHub : FeedbackHub {
     ): Result<Unit> {
         changeCalls += Triple(adminKey, id, status)
         changeGate?.await()
+        changesFinished++
         return changeResult
     }
 }
@@ -349,6 +354,38 @@ class FeedbackInboxViewModelTest {
         assertEquals(FeedbackStatus.Done, statuses().getValue("a"))
     }
 
+    @Test
+    fun `a slow list sent before a confirmed change cannot undo it when it lands late`() {
+        hub.listResult = Result.success(listOf(item("a")))
+        vm.start()
+        // A refresh is sent while the hub still says New, and answers only after the change is confirmed.
+        hub.listGate = CompletableDeferred()
+        vm.refresh()
+        hub.listResult = Result.success(listOf(item("a", FeedbackStatus.Done)))
+
+        vm.setStatus("a", FeedbackStatus.Done)
+        assertTrue(vm.state.value.pendingChanges.isEmpty())
+
+        hub.listGate!!.complete(Unit)
+
+        assertEquals(FeedbackStatus.Done, statuses().getValue("a"))
+        assertFalse(vm.state.value.loading)
+        assertNull(vm.state.value.error)
+    }
+
+    @Test
+    fun `leaving the screen mid-change does not cancel the hub call`() {
+        hub.listResult = Result.success(listOf(item("a")))
+        vm.start()
+        hub.changeGate = CompletableDeferred()
+        vm.setStatus("a", FeedbackStatus.Done)
+
+        scope.cancel() // what clearing the view model does
+
+        hub.changeGate!!.complete(Unit)
+        assertEquals(1, hub.changesFinished)
+    }
+
     // --- expanding ---
 
     @Test
@@ -386,7 +423,7 @@ class FeedbackInboxViewModelTest {
     fun `only a plain github dot com https address is ever offered as the issue link`() {
         val good = "https://github.com/diamondspark/saraswati-feedback/issues/12"
         assertEquals(good, safeIssueUrl(good))
-        assertEquals("https://github.com/x", safeIssueUrl("https://github.com/x"))
+        assertEquals("https://github.com/a_b/c-d.e/issues/7", safeIssueUrl("https://github.com/a_b/c-d.e/issues/7"))
 
         listOf(
             null,
@@ -403,6 +440,20 @@ class FeedbackInboxViewModelTest {
             "HTTPS://github.com/x",
             "https://github.com/ x",
             "https://github.com/x\u0000",
+            "https://github.com/x",
+            "https://github.com/diamondspark",
+            "https://github.com/diamondspark/saraswati-feedback",
+            "https://github.com/o/r/releases/download/v1/app.apk",
+            "https://github.com/o/r/pull/1",
+            "https://github.com/o/r/issues/",
+            "https://github.com/o/r/issues/abc",
+            "https://github.com/o/r/issues/1/",
+            "https://github.com/o/r/issues/1/extra",
+            "https://github.com/o/r/issues/1?x=1",
+            "https://github.com/o/r/issues/1#c",
+            "https://github.com/o/r/issues/1\n",
+            "https://GITHUB.com/o/r/issues/1",
+            "https://Github.com/o/r/issues/1",
             " https://github.com/x",
             "https://gist.github.com/x",
             "https://api.github.com/x",
