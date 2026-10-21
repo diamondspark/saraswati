@@ -1,21 +1,21 @@
 {
   "schema": 1,
   "channel": "beta",
-  "versionCode": 4108,
-  "versionName": "13.7.0-s4108",
+  "versionCode": 4114,
+  "versionName": "13.7.0-s4114",
   "apk": {
-    "url": "https://github.com/diamondspark/saraswati/releases/download/v4108/saraswati-v4108.apk",
-    "sha256": "62c46774b019a92dec819f558181de56679f5dc2fe9b329e1f199bf9c8e8ae62",
-    "size": 26971012
+    "url": "https://github.com/diamondspark/saraswati/releases/download/v4114/saraswati-v4114.apk",
+    "sha256": "24fda8f3ad71a530c295db889329c39150ba52ef5645eb654805aaaa7edf4bf0",
+    "size": 26979204
   },
   "urgent": false,
-  "notes": "Veena launcher icon, and a fix so the owner can replace the family-hub admin key from the app after rotating it (previously there was no way back in without clearing app data).",
-  "publishedAt": "2026-10-21T05:23:17Z",
+  "notes": "Voice-play fixes (wrong-song bug, Assistant routing, transliteration/artist/title matching), Like-first car layout, and an expanded festival calendar (68 entries incl. Valentine's Day) through 2028.",
+  "publishedAt": "2026-10-21T09:05:33Z",
   "updater": {
-    "versionCode": 4108,
+    "versionCode": 4114,
     "apk": {
-      "url": "https://github.com/diamondspark/saraswati/releases/download/v4108/saraswati-updater-v4108.apk",
-      "sha256": "a1333fd7f22ac8aec1e28f2ac815a3ed6bb473a1d759859735fb1a53a8d1456a",
+      "url": "https://github.com/diamondspark/saraswati/releases/download/v4114/saraswati-updater-v4114.apk",
+      "sha256": "ab0ce8c4756c550c259337c064f54446174bc3ff02161f43b1e83954bf57e235",
       "size": 256152
     }
   }
