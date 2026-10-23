@@ -1,21 +1,21 @@
 {
   "schema": 1,
   "channel": "stable",
-  "versionCode": 4139,
-  "versionName": "13.7.0-s4139",
+  "versionCode": 4141,
+  "versionName": "13.7.0-s4141",
   "apk": {
-    "url": "https://github.com/diamondspark/saraswati/releases/download/v4139/saraswati-v4139.apk",
-    "sha256": "bf447f9cea41eedd920d5231e0ac8808ac98057941939df061ef8c2173ff8b26",
+    "url": "https://github.com/diamondspark/saraswati/releases/download/v4141/saraswati-v4141.apk",
+    "sha256": "447ed467f36f42f75c3d7bd2309270c19399731baf988bac528a094bd29d50ff",
     "size": 27020164
   },
   "urgent": true,
-  "notes": "Fixes sign-in on phones using a country Google domain and adds Send feedback (Settings > System). Please update.",
-  "publishedAt": "2026-10-21T22:56:57Z",
+  "notes": "Fixes the Sudhaar update banner, which could wrongly say the Updates app wasn't installed when it was.",
+  "publishedAt": "2026-10-23T18:36:56Z",
   "updater": {
-    "versionCode": 4139,
+    "versionCode": 4141,
     "apk": {
-      "url": "https://github.com/diamondspark/saraswati/releases/download/v4139/saraswati-updater-v4139.apk",
-      "sha256": "5c245cdcbcaea4a1644dd744db73a36717dccb5194abadc2236ffff905f400f3",
+      "url": "https://github.com/diamondspark/saraswati/releases/download/v4141/saraswati-updater-v4141.apk",
+      "sha256": "029a983a3328fcd1383b0d6cf2bd358859923e86072c0b7506faedc9774174bf",
       "size": 256152
     }
   }
