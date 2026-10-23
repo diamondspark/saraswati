@@ -884,7 +884,13 @@ class ListenTogetherManager
 
                 is ListenTogetherEvent.HostChanged -> {
                     Timber.tag(TAG).d("Host changed: new host is ${event.newHostName} (${event.newHostId})")
-                    val wasHost = isHost
+                    // SARASWATI: Sangat resync fix — `event.wasHost`, not a live `isHost` read.
+                    // ListenTogetherClient writes _role.value = HOST BEFORE emitting this event
+                    // (ListenTogetherClient.kt's HOST_CHANGED handler), so by the time this
+                    // branch runs, a live isHost read is already the NEW role: `wasHost && !
+                    // nowIsHost` and `!wasHost && nowIsHost` below would both be unreachable,
+                    // silently dropping the host-transfer resync this file depends on.
+                    val wasHost = event.wasHost
                     val nowIsHost = event.newHostId == userId.value
 
                     if (wasHost && !nowIsHost) {

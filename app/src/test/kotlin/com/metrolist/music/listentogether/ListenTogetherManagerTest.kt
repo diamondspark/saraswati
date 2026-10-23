@@ -85,9 +85,23 @@ class HostReconnectResyncTest {
 // regression back to the old `if (isPlaying)`-gated one-sided send, because they assert on
 // what's actually invoked, not just on hostReconnectResync's return value.
 class PerformHostReconnectResyncTest {
+    // SARASWATI: Sangat resync fix — both effects record into ONE ordered list. The hub resets a
+    // room to position-0-paused on a track change and rejects a PLAY/PAUSE whose track id doesn't
+    // match the room's current track as stale_track (worker/src/sangat/playback.ts), so when a
+    // resync needs both, the track change must reach the server before the play/pause — order
+    // matters, not just that both happened.
+    private sealed interface Effect {
+        data object TrackChange : Effect
+
+        data class SentAction(
+            val action: String,
+            val trackId: String?,
+            val position: Long,
+        ) : Effect
+    }
+
     private class Recorder {
-        var trackChangeCalls = 0
-        val sentActions = mutableListOf<Triple<String, String?, Long>>()
+        val effects = mutableListOf<Effect>()
 
         fun run(
             localTrackId: String?,
@@ -100,8 +114,8 @@ class PerformHostReconnectResyncTest {
                 serverTrackId = serverTrackId,
                 isPlaying = isPlaying,
                 position = position,
-                sendTrackChange = { trackChangeCalls++ },
-                sendPlaybackAction = { action, trackId, pos -> sentActions += Triple(action, trackId, pos) },
+                sendTrackChange = { effects += Effect.TrackChange },
+                sendPlaybackAction = { action, trackId, pos -> effects += Effect.SentAction(action, trackId, pos) },
             )
         }
     }
@@ -112,8 +126,7 @@ class PerformHostReconnectResyncTest {
 
         recorder.run(localTrackId = "track-1", serverTrackId = "track-1", isPlaying = false, position = 42_000L)
 
-        assertEquals(listOf(Triple(PlaybackActions.PAUSE, "track-1", 42_000L)), recorder.sentActions)
-        assertEquals(0, recorder.trackChangeCalls)
+        assertEquals(listOf(Effect.SentAction(PlaybackActions.PAUSE, "track-1", 42_000L)), recorder.effects)
     }
 
     @Test
@@ -122,17 +135,21 @@ class PerformHostReconnectResyncTest {
 
         recorder.run(localTrackId = "track-1", serverTrackId = "track-1", isPlaying = true, position = 10_000L)
 
-        assertEquals(listOf(Triple(PlaybackActions.PLAY, "track-1", 10_000L)), recorder.sentActions)
+        assertEquals(listOf(Effect.SentAction(PlaybackActions.PLAY, "track-1", 10_000L)), recorder.effects)
     }
 
     @Test
-    fun `a stale server track actually triggers a track change before the PAUSE is sent`() {
+    fun `a stale server track sends the track change before the PAUSE, not just both`() {
         val recorder = Recorder()
 
         recorder.run(localTrackId = "new-track", serverTrackId = "stale-track", isPlaying = false, position = 0L)
 
-        assertEquals(1, recorder.trackChangeCalls)
-        assertEquals(listOf(Triple(PlaybackActions.PAUSE, "new-track", 0L)), recorder.sentActions)
+        // Order matters: the hub would reject a PAUSE naming "new-track" as stale_track if it
+        // arrived before the hub had already applied the track change.
+        assertEquals(
+            listOf(Effect.TrackChange, Effect.SentAction(PlaybackActions.PAUSE, "new-track", 0L)),
+            recorder.effects,
+        )
     }
 
     @Test
@@ -141,7 +158,6 @@ class PerformHostReconnectResyncTest {
 
         recorder.run(localTrackId = null, serverTrackId = "whatever-the-server-has", isPlaying = true, position = 99_000L)
 
-        assertEquals(0, recorder.trackChangeCalls)
-        assertTrue("nothing should be sent when there's no local track to resync", recorder.sentActions.isEmpty())
+        assertTrue("nothing should be sent when there's no local track to resync", recorder.effects.isEmpty())
     }
 }
