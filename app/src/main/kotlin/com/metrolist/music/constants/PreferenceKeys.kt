@@ -807,3 +807,7 @@ val SmartDownloadsEnabledKey = booleanPreferencesKey("saraswatiSmartDownloads")
 // SARASWATI: security-ask-explanation — whether the one-time explanation (Saral's voice search now reaches
 // Ask Saraswati on the family hub) has been shown. Set the first time it is acknowledged; never cleared.
 val HasSeenAskVoiceExplanationKey = booleanPreferencesKey("saraswatiHasSeenAskVoiceExplanation")
+
+// SARASWATI: battery-optimization nudge — set once the one-time "keep playing with the screen off" prompt has been
+// acknowledged (any dismissal counts). Describes this phone's own battery settings, so it is never backed up.
+val BatteryOptimizationNudgeDismissedKey = booleanPreferencesKey("saraswatiBatteryOptimizationNudgeDismissed")

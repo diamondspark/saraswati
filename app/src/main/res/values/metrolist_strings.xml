@@ -336,6 +336,11 @@
     <string name="alarm_exact_permission_desc">Grants permission for precise alarm timing, improving reliability when the app is in the background</string>
     <string name="alarm_battery_optimization_title">Battery optimization</string>
     <string name="alarm_battery_optimization_desc">Disable battery optimization for more reliable alarm behavior in the background</string>
+    <!-- SARASWATI: battery-optimization nudge -->
+    <string name="battery_nudge_title">Keep music playing with the screen off</string>
+    <string name="battery_nudge_message">Some phones, such as Samsung and Xiaomi, pause background apps to save battery, which can stop music when the screen is locked. Open app settings and set Battery to Unrestricted. On Xiaomi, also turn on Autostart.</string>
+    <string name="battery_nudge_open_settings">Open settings</string>
+    <string name="battery_nudge_not_now">Not now</string>
 
     <!-- Player Settings -->
     <string name="disable_load_more_when_repeat_all">Disable auto-load in repeat all mode</string>
