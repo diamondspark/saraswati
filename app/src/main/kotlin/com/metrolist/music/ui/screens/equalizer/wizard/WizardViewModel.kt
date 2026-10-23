@@ -43,13 +43,14 @@ class WizardViewModel @Inject constructor(
 
     fun downloadDatabase() {
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true, error = null) }
+            // SARASWATI: failure is reported through isDatabaseUnavailable, not the generic error snackbar
+            _state.update { it.copy(isLoading = true, error = null, isDatabaseUnavailable = false) }
             val success = autoEqSearch.buildIndex()
             if (!success) {
                 _state.update {
                     it.copy(
                         isLoading = false,
-                        error = "Failed to load AutoEQ database"
+                        isDatabaseUnavailable = true
                     )
                 }
             } else {
