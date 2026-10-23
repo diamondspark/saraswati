@@ -71,6 +71,9 @@ class FakeHub : HubApi {
     /** While set, getStations waits on it: stands in for a hub that is slow or unreachable. */
     @Volatile var stationsGate: CompletableDeferred<Unit>? = null
 
+    /** While set, getKillSwitches waits on it: stands in for a refresh that is still in flight. */
+    @Volatile var killSwitchesGate: CompletableDeferred<Unit>? = null
+
     /** While set, createPairing waits on it: a pairing request that is still in flight. */
     @Volatile var pairingGate: CompletableDeferred<Unit>? = null
 
@@ -203,7 +206,12 @@ class FakeHub : HubApi {
         stations
     }
 
-    override suspend fun getKillSwitches(auth: String) = run("getKillSwitches", auth) { killSwitches }
+    override suspend fun getKillSwitches(auth: String): Result<Map<String, Boolean>> {
+        calls.add("getKillSwitches($auth)")
+        killSwitchesGate?.await()
+        failures["getKillSwitches"]?.let { return Result.failure(it) }
+        return Result.success(killSwitches)
+    }
 
     override suspend fun setKillSwitches(
         adminKey: String,
@@ -416,6 +424,17 @@ class TestClock(
  * microseconds and cannot flake. kotlinx-coroutines-test is not a dependency of this project (and a new
  * dependency means a new entry in the verification metadata), so this is the small part of it these tests
  * need: [delay] waits on [currentTime], and [advanceBy] runs everything that falls due.
+ *
+ * // SARASWATI: the scope that runs on this dispatcher is pure virtual time, but a real hub/datastore call
+ * // made from it can suspend through a genuinely different, real-threaded dispatcher (e.g. Dispatchers.IO)
+ * // and then resume back here from that real thread. That resumption calls [dispatch] concurrently with
+ * // whatever the test thread is doing to [queue] inside [advanceBy]/[runCurrent] at that moment.
+ * // java.util.PriorityQueue is not thread-safe under concurrent mutation; unsynchronized access here
+ * // corrupted it (observed locally as a NullPointerException out of PriorityQueue's internal comparator,
+ * // and — the shape seen flaking on CI — a Task surviving a failed queue.remove() to run a second time,
+ * // double-resuming its continuation as kotlinx.coroutines' "Already resumed"). Every access to the queue
+ * // and the clock is now behind [lock]; task execution itself stays outside it so a task that re-enters
+ * // this dispatcher (e.g. by dispatching more work) cannot hold the lock across arbitrary continuation code.
  */
 @OptIn(InternalCoroutinesApi::class)
 class VirtualTimeDispatcher :
@@ -427,26 +446,30 @@ class VirtualTimeDispatcher :
         val block: Runnable,
     )
 
+    private val lock = Any()
     private val queue = PriorityQueue<Task>(compareBy<Task>({ it.time }, { it.order }))
     private var counter = 0L
 
-    var currentTime = 0L
+    @Volatile var currentTime = 0L
         private set
 
     override fun dispatch(
         context: CoroutineContext,
         block: Runnable,
     ) {
-        queue.add(Task(currentTime, counter++, block))
+        synchronized(lock) { queue.add(Task(currentTime, counter++, block)) }
     }
 
     override fun scheduleResumeAfterDelay(
         timeMillis: Long,
         continuation: CancellableContinuation<Unit>,
     ) {
-        val task = Task(currentTime + timeMillis.coerceAtLeast(0), counter++) { continuation.resume(Unit) }
-        queue.add(task)
-        continuation.invokeOnCancellation { queue.remove(task) }
+        val task =
+            synchronized(lock) {
+                Task(currentTime + timeMillis.coerceAtLeast(0), counter++) { continuation.resume(Unit) }
+                    .also { queue.add(it) }
+            }
+        continuation.invokeOnCancellation { synchronized(lock) { queue.remove(task) } }
     }
 
     override fun invokeOnTimeout(
@@ -454,9 +477,11 @@ class VirtualTimeDispatcher :
         block: Runnable,
         context: CoroutineContext,
     ): DisposableHandle {
-        val task = Task(currentTime + timeMillis.coerceAtLeast(0), counter++, block)
-        queue.add(task)
-        return DisposableHandle { queue.remove(task) }
+        val task =
+            synchronized(lock) {
+                Task(currentTime + timeMillis.coerceAtLeast(0), counter++, block).also { queue.add(it) }
+            }
+        return DisposableHandle { synchronized(lock) { queue.remove(task) } }
     }
 
     /** Runs what is due now (and what that makes due), without moving the clock. */
@@ -464,13 +489,17 @@ class VirtualTimeDispatcher :
 
     /** Moves the clock forward by [ms], running every task that falls due on the way, in time order. */
     fun advanceBy(ms: Long) {
-        val target = currentTime + ms
+        val target = synchronized(lock) { currentTime + ms }
         while (true) {
-            val next = queue.peek()?.takeIf { it.time <= target } ?: break
-            queue.remove(next)
-            currentTime = maxOf(currentTime, next.time)
+            val next =
+                synchronized(lock) {
+                    val candidate = queue.peek()?.takeIf { it.time <= target } ?: return@synchronized null
+                    queue.remove(candidate)
+                    currentTime = maxOf(currentTime, candidate.time)
+                    candidate
+                } ?: break
             next.block.run()
         }
-        currentTime = target
+        synchronized(lock) { currentTime = target }
     }
 }

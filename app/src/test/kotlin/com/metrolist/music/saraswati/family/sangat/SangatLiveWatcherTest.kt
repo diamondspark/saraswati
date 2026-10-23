@@ -13,6 +13,7 @@ import com.metrolist.music.saraswati.family.HubException
 import com.metrolist.music.saraswati.family.HubIdentity
 import com.metrolist.music.saraswati.family.LiveSangatRoom
 import com.metrolist.music.saraswati.family.VirtualTimeDispatcher
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -255,5 +256,37 @@ class SangatLiveWatcherTest {
 
         assertEquals(1, killSwitchHub.callsTo("getKillSwitches").size)
         awaitGate(com.metrolist.music.saraswati.family.FamilyFeature.SANGAT, false)
+    }
+
+    // SARASWATI: regression test for an "Already resumed" flake. The 503-triggered refresh (pollOnce) and
+    // the periodic "every GATE_REFRESH_EVERY_POLLS polls" refresh both call gate.refresh() around the same
+    // virtual-time instant; killSwitchesGate pins that overlap down instead of leaving it to real-thread
+    // timing luck, by holding the first refresh's hub call open (inside refreshLock) until the second has
+    // queued up behind it. Releasing the gate then lets a cascade of real gate.refresh() calls each do a
+    // real dataStore.edit() write on Dispatchers.IO while virtual time keeps advancing on the test thread —
+    // the exact two-clock overlap that corrupted VirtualTimeDispatcher's unsynchronized queue (reproduced
+    // locally as a NullPointerException out of java.util.PriorityQueue's comparator, and on CI as
+    // kotlinx.coroutines' "Already resumed" from a Task run twice off the back of that corruption).
+    @Test
+    fun `overlapping 503 and periodic gate refreshes do not corrupt virtual time`() {
+        hub.rooms = Result.failure(HubException(503, "off"))
+        killSwitchHub.killSwitchesGate = CompletableDeferred()
+        val watcher = watcher()
+
+        watcher.start(scope)
+        time.runCurrent() // poll #1: 503 -> refreshGateAsync -> gate.refresh() blocks in getKillSwitches,
+        // holding refreshLock.
+
+        // Poll #2..#10 each see the same 503 and queue up their own refreshGateAsync behind refreshLock;
+        // poll #10 also fires the periodic refresh, so both triggers are now pending at once.
+        time.advanceBy(SangatLiveWatcher.POLL_INTERVAL_MS * (SangatLiveWatcher.GATE_REFRESH_EVERY_POLLS - 1))
+
+        killSwitchHub.killSwitchesGate?.complete(Unit)
+        val deadline = System.nanoTime() + 2_000_000_000L
+        while (System.nanoTime() < deadline) {
+            time.advanceBy(SangatLiveWatcher.POLL_INTERVAL_MS)
+        }
+
+        assertTrue(watcher.liveRooms.value.isEmpty())
     }
 }
