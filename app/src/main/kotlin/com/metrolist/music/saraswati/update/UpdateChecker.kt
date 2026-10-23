@@ -66,6 +66,18 @@ sealed interface UpdateStatus {
 
 private const val THROTTLE_MILLIS = 12 * 60 * 60 * 1000L
 
+// SARASWATI: a failed check still spends a throttle slot, so an unreachable manifest host is not hit on
+// every Home screen open, but only for this retry window instead of the full 12h. Otherwise a channel
+// toggle made while offline would stay throttled for 12h after its forced check failed.
+private const val FAILED_RETRY_MILLIS = 60 * 60 * 1000L
+
+/** The value to persist as lastCheckMillis after a check returning [status] at [now]; null leaves the record untouched. */
+fun lastCheckMillisAfter(status: UpdateStatus, now: Long): Long? = when (status) {
+    UpdateStatus.Throttled -> null
+    UpdateStatus.Failed -> now - THROTTLE_MILLIS + FAILED_RETRY_MILLIS
+    else -> now
+}
+
 class UpdateChecker(
     private val http: HttpFetcher,
     private val clock: () -> Long = System::currentTimeMillis,

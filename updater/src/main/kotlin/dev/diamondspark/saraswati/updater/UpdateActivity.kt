@@ -136,7 +136,12 @@ class UpdateActivity : Activity() {
                 // consumer must clear it, or a stale status could otherwise
                 // leak into a completely unrelated, later install attempt.
                 PendingInstall.consumeTerminalStatus(prefs)
-                dispatch(Event.InstallStatus(code))
+                if (isAlive) {
+                    dispatch(Event.InstallStatus(code))
+                } else {
+                    // dispatch would delete the verified APK via runSideEffects; do that directly instead.
+                    (checkpoint as? UiState.ReadyToInstall)?.let { downloadTargetFile(it.manifest.versionCode).delete() }
+                }
             }
         }
 
@@ -356,7 +361,10 @@ class UpdateActivity : Activity() {
             if (verifyResult is VerifyResult.Failed) {
                 target.delete()
             }
-            postToMain { dispatch(Event.DownloadFinished(verifyResult)) }
+            mainHandler.post {
+                // A dropped, successfully verified APK would otherwise be left on disk.
+                if (isAlive) dispatch(Event.DownloadFinished(verifyResult)) else target.delete()
+            }
         }
     }
 
@@ -373,7 +381,10 @@ class UpdateActivity : Activity() {
             try {
                 installSession.install(target, expectedPackage)
             } catch (e: Exception) {
-                postToMain { dispatch(Event.InstallStatus(INSTALL_STATUS_EXCEPTION)) }
+                mainHandler.post {
+                    // A dropped install result would otherwise leave the APK on disk.
+                    if (isAlive) dispatch(Event.InstallStatus(INSTALL_STATUS_EXCEPTION)) else target.delete()
+                }
             }
         }
     }
@@ -412,12 +423,13 @@ class UpdateActivity : Activity() {
 
     // ---- small helpers ----------------------------------------------------
 
-    // Background callbacks can land after the user has backed out (finishing)
-    // or after the Activity is gone; dropping them there avoids touching a dead
-    // Activity's views. A dropped install result is not lost: PendingInstall
-    // persists it and onResume recovers it on the next launch.
+    /** False once the user has backed out of, or the system has destroyed, this Activity. */
+    private val isAlive: Boolean get() = !isFinishing && !isDestroyed
+
+    // For UI/state-only updates. A callback that also owns cleanup (APK deletion,
+    // PendingInstall bookkeeping) checks isAlive itself so its cleanup still runs.
     private fun postToMain(block: () -> Unit) {
-        mainHandler.post { if (!isFinishing && !isDestroyed) block() }
+        mainHandler.post { if (isAlive) block() }
     }
 
     private fun currentChannel(): String {

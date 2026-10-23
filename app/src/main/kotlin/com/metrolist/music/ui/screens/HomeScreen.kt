@@ -143,6 +143,7 @@ import com.metrolist.music.saraswati.craft.resume.ResumeBadge
 import com.metrolist.music.saraswati.craft.resume.ResumePolicy
 import com.metrolist.music.saraswati.craft.resume.SpeedDialResumeViewModel
 import com.metrolist.music.saraswati.update.UpdateChecker
+import com.metrolist.music.saraswati.update.lastCheckMillisAfter
 import com.metrolist.music.saraswati.update.UpdateStatus
 import com.metrolist.music.constants.AutoRadioQueueKey
 import com.metrolist.music.constants.GridItemSize
@@ -766,9 +767,9 @@ fun HomeScreen(
             channel = updateChannel,
             lastCheckMillis = lastUpdateCheckMillis,
         )
-        if (status != UpdateStatus.Throttled) {
-            lastUpdateCheckMillis = now
-        }
+        // SARASWATI: the stamp rule lives in lastCheckMillisAfter so a failed check gets a short retry window
+        // rather than overwriting AboutScreen's channel-switch reset with a full 12h throttle.
+        lastCheckMillisAfter(status, now)?.let { lastUpdateCheckMillis = it }
         updateStatus = status
     }
 
