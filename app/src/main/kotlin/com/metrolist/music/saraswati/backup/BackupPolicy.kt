@@ -36,6 +36,7 @@ import androidx.datastore.preferences.core.Preferences
 import com.metrolist.music.constants.AccountChannelHandleKey
 import com.metrolist.music.constants.AccountEmailKey
 import com.metrolist.music.constants.AccountNameKey
+import com.metrolist.music.constants.BatteryOptimizationNudgeDismissedKey
 import com.metrolist.music.constants.DataSyncIdKey
 import com.metrolist.music.constants.FamilyDeviceIdKey
 import com.metrolist.music.constants.FamilyFeaturesDisabledKey
@@ -166,6 +167,9 @@ object BackupPolicy {
                 // one must not mark it seen here too: that would suppress the one-time disclosure for someone
                 // who has genuinely never seen it.
                 HasSeenAskVoiceExplanationKey,
+                // SARASWATI: battery-optimization nudge — a restored backup must not hide the nudge on a phone whose own
+                // battery settings have never been checked.
+                BatteryOptimizationNudgeDismissedKey,
             )
 
     // Preference keys the coverage test's wider regex flags as
