@@ -697,10 +697,8 @@ private fun RoomStatusCard(
 
             if (isHost) {
                 Spacer(modifier = Modifier.height(16.dp))
-                val inviteLink =
-                    remember(roomCode) {
-                        "https://metrolist.cc/listen?code=$roomCode"
-                    }
+                // SARASWATI: metrolist.cc belongs to upstream, so the invite shares the room code with join instructions instead of a link.
+                val inviteMessage = stringResource(R.string.listen_together_invite_message, roomCode)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
@@ -709,7 +707,7 @@ private fun RoomStatusCard(
                     FilledTonalButton(
                         onClick = {
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                            val clip = android.content.ClipData.newPlainText("Listen Together Link", inviteLink)
+                            val clip = android.content.ClipData.newPlainText("Listen Together Invite", inviteMessage)
                             clipboard.setPrimaryClip(clip)
                             Toast.makeText(context, R.string.copied_to_clipboard, Toast.LENGTH_SHORT).show()
                         },
@@ -717,11 +715,11 @@ private fun RoomStatusCard(
                     ) {
                         Icon(
                             painter = painterResource(R.drawable.link),
-                            contentDescription = stringResource(R.string.copy_link),
+                            contentDescription = stringResource(R.string.listen_together_copy_invite),
                             modifier = Modifier.size(18.dp),
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(stringResource(R.string.copy_link))
+                        Text(stringResource(R.string.listen_together_copy_invite))
                     }
 
                     FilledTonalButton(
