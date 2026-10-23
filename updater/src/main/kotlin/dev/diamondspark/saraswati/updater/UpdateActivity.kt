@@ -130,7 +130,7 @@ class UpdateActivity : Activity() {
     override fun onResume() {
         super.onResume()
         InstallEvents.listener = { code ->
-            mainHandler.post {
+            postToMain {
                 // Purge the persisted copy too: whichever path "wins" the
                 // race against a later resume's recovery check, exactly one
                 // consumer must clear it, or a stale status could otherwise
@@ -315,15 +315,15 @@ class UpdateActivity : Activity() {
                 val json = httpFetcher.fetchText("$MANIFEST_BASE_URL$channel.json")
                 val manifest = ManifestParser.parse(json).getOrThrow()
                 val installed = installedVersionCode(TARGET_PACKAGE_SARASWATI)
-                mainHandler.post {
-                    if (generation != checkGeneration) return@post
+                postToMain {
+                    if (generation != checkGeneration) return@postToMain
                     checkInFlight = false
                     lastFetchedManifest = manifest
                     dispatch(Event.ManifestLoaded(manifest, installed))
                 }
             } catch (e: Exception) {
-                mainHandler.post {
-                    if (generation != checkGeneration) return@post
+                postToMain {
+                    if (generation != checkGeneration) return@postToMain
                     checkInFlight = false
                     dispatch(Event.ManifestFailed(getString(R.string.cant_reach_update_server)))
                 }
@@ -337,11 +337,11 @@ class UpdateActivity : Activity() {
             try {
                 httpFetcher.download(manifest.apk.url, target) { bytesSoFar ->
                     val percent = percentOf(bytesSoFar, manifest.apk.size)
-                    mainHandler.post { dispatch(Event.DownloadProgress(percent)) }
+                    postToMain { dispatch(Event.DownloadProgress(percent)) }
                 }
             } catch (e: Exception) {
                 target.delete()
-                mainHandler.post { dispatch(Event.ManifestFailed(getString(R.string.cant_reach_update_server))) }
+                postToMain { dispatch(Event.ManifestFailed(getString(R.string.cant_reach_update_server))) }
                 return@execute
             }
 
@@ -356,7 +356,7 @@ class UpdateActivity : Activity() {
             if (verifyResult is VerifyResult.Failed) {
                 target.delete()
             }
-            mainHandler.post { dispatch(Event.DownloadFinished(verifyResult)) }
+            postToMain { dispatch(Event.DownloadFinished(verifyResult)) }
         }
     }
 
@@ -373,7 +373,7 @@ class UpdateActivity : Activity() {
             try {
                 installSession.install(target, expectedPackage)
             } catch (e: Exception) {
-                mainHandler.post { dispatch(Event.InstallStatus(INSTALL_STATUS_EXCEPTION)) }
+                postToMain { dispatch(Event.InstallStatus(INSTALL_STATUS_EXCEPTION)) }
             }
         }
     }
@@ -411,6 +411,14 @@ class UpdateActivity : Activity() {
     private fun targetPackageName(): String = if (updatingSelf) BuildConfig.APPLICATION_ID else TARGET_PACKAGE_SARASWATI
 
     // ---- small helpers ----------------------------------------------------
+
+    // Background callbacks can land after the user has backed out (finishing)
+    // or after the Activity is gone; dropping them there avoids touching a dead
+    // Activity's views. A dropped install result is not lost: PendingInstall
+    // persists it and onResume recovers it on the next launch.
+    private fun postToMain(block: () -> Unit) {
+        mainHandler.post { if (!isFinishing && !isDestroyed) block() }
+    }
 
     private fun currentChannel(): String {
         val fromIntent = intent?.getStringExtra(EXTRA_CHANNEL)?.lowercase()
