@@ -75,3 +75,73 @@ class HostReconnectResyncTest {
         assertEquals(PlaybackActions.PLAY, resync.action)
     }
 }
+
+// SARASWATI: Sangat resync fix — these drive performHostReconnectResync itself, the function
+// ListenTogetherManager's Reconnected and HostChanged handlers actually call, by capturing its
+// two real effects (sendTrackChange, sendPlaybackAction) as plain lambdas. A real
+// ListenTogetherClient/Player isn't available to a JVM unit test (ListenTogetherClient is a
+// concrete Hilt-injected class with no test seam), so this is the closest thing to driving the
+// actual handler wiring: unlike HostReconnectResyncTest above, these tests would catch a
+// regression back to the old `if (isPlaying)`-gated one-sided send, because they assert on
+// what's actually invoked, not just on hostReconnectResync's return value.
+class PerformHostReconnectResyncTest {
+    private class Recorder {
+        var trackChangeCalls = 0
+        val sentActions = mutableListOf<Triple<String, String?, Long>>()
+
+        fun run(
+            localTrackId: String?,
+            serverTrackId: String?,
+            isPlaying: Boolean,
+            position: Long,
+        ) {
+            performHostReconnectResync(
+                localTrackId = localTrackId,
+                serverTrackId = serverTrackId,
+                isPlaying = isPlaying,
+                position = position,
+                sendTrackChange = { trackChangeCalls++ },
+                sendPlaybackAction = { action, trackId, pos -> sentActions += Triple(action, trackId, pos) },
+            )
+        }
+    }
+
+    @Test
+    fun `a paused host reconnecting actually sends a PAUSE action, not nothing`() {
+        val recorder = Recorder()
+
+        recorder.run(localTrackId = "track-1", serverTrackId = "track-1", isPlaying = false, position = 42_000L)
+
+        assertEquals(listOf(Triple(PlaybackActions.PAUSE, "track-1", 42_000L)), recorder.sentActions)
+        assertEquals(0, recorder.trackChangeCalls)
+    }
+
+    @Test
+    fun `a playing host reconnecting actually sends a PLAY action`() {
+        val recorder = Recorder()
+
+        recorder.run(localTrackId = "track-1", serverTrackId = "track-1", isPlaying = true, position = 10_000L)
+
+        assertEquals(listOf(Triple(PlaybackActions.PLAY, "track-1", 10_000L)), recorder.sentActions)
+    }
+
+    @Test
+    fun `a stale server track actually triggers a track change before the PAUSE is sent`() {
+        val recorder = Recorder()
+
+        recorder.run(localTrackId = "new-track", serverTrackId = "stale-track", isPlaying = false, position = 0L)
+
+        assertEquals(1, recorder.trackChangeCalls)
+        assertEquals(listOf(Triple(PlaybackActions.PAUSE, "new-track", 0L)), recorder.sentActions)
+    }
+
+    @Test
+    fun `no player or no current track sends nothing at all, not a crash or a bogus action`() {
+        val recorder = Recorder()
+
+        recorder.run(localTrackId = null, serverTrackId = "whatever-the-server-has", isPlaying = true, position = 99_000L)
+
+        assertEquals(0, recorder.trackChangeCalls)
+        assertTrue("nothing should be sent when there's no local track to resync", recorder.sentActions.isEmpty())
+    }
+}
