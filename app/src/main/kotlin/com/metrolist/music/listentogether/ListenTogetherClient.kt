@@ -177,9 +177,16 @@ sealed class ListenTogetherEvent {
         val username: String,
     ) : ListenTogetherEvent()
 
+    // SARASWATI: Sangat resync fix — [wasHost] is this client's role immediately BEFORE this
+    // event's own role write below (ListenTogetherClient's HOST_CHANGED handler), not read live
+    // off _role afterward: by the time ListenTogetherManager's handler runs, _role already
+    // reflects the new role, so a live read of isHost there is always stale for this transition.
+    // Defaults to false only so the existing positional two-arg call sites in
+    // RemoteControllerTest (which never read this field) keep compiling unchanged.
     data class HostChanged(
         val newHostId: String,
         val newHostName: String,
+        val wasHost: Boolean = false,
     ) : ListenTogetherEvent()
 
     data class Kicked(
@@ -1363,6 +1370,9 @@ class ListenTogetherClient
 
                     MessageTypes.HOST_CHANGED -> {
                         val payload = codec.decodePayload(msgType, payloadBytes) as? HostChangedPayload ?: return
+                        // SARASWATI: Sangat resync fix — captured BEFORE the _role write below;
+                        // see HostChanged's own doc comment for why this can't be read afterward.
+                        val wasHostBeforeChange = _role.value == RoomRole.HOST
                         _roomState.value =
                             _roomState.value?.copy(
                                 hostId = payload.newHostId,
@@ -1378,7 +1388,7 @@ class ListenTogetherClient
                             _role.value = RoomRole.GUEST
                         }
                         log(LogLevel.INFO, "Host changed", "New host: ${payload.newHostName}")
-                        emitEvent(ListenTogetherEvent.HostChanged(payload.newHostId, payload.newHostName))
+                        emitEvent(ListenTogetherEvent.HostChanged(payload.newHostId, payload.newHostName, wasHost = wasHostBeforeChange))
                     }
 
                     MessageTypes.KICKED -> {

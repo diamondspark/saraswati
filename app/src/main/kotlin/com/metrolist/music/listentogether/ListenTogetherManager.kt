@@ -129,6 +129,60 @@ internal fun shouldSeekDuringActivePlayback(
 ): Boolean = playbackReady && positionDifferenceMs > ACTIVE_PLAYBACK_SYNC_TOLERANCE_MS
 
 /**
+ * What a reconnecting host must send to correct whatever the server's room state could have
+ * missed while this phone was disconnected — track mismatch, or a play/pause state the server
+ * never heard about. Always produces an action (SARASWATI: Sangat resync fix): the previous
+ * inline logic only sent anything when the host happened to be playing at the exact moment it
+ * reconnected, so a reconnect that landed while paused sent nothing at all, leaving any drift or
+ * staleness in the server's state uncorrected until the next real play/pause/seek — exactly the
+ * window a joiner could connect into and see a wrong or stale broadcast.
+ */
+internal data class HostReconnectResync(
+    val trackChangeNeeded: Boolean,
+    val action: String,
+    val trackId: String?,
+    val position: Long,
+)
+
+internal fun hostReconnectResync(
+    localTrackId: String?,
+    serverTrackId: String?,
+    isPlaying: Boolean,
+    position: Long,
+): HostReconnectResync =
+    HostReconnectResync(
+        trackChangeNeeded = serverTrackId != localTrackId,
+        action = if (isPlaying) PlaybackActions.PLAY else PlaybackActions.PAUSE,
+        trackId = localTrackId,
+        position = position,
+    )
+
+/**
+ * Drives [hostReconnectResync] against the two real effects a host resync can have, so a test
+ * can exercise the actual wiring — the "no player yet" null-guard, and that a PAUSE really gets
+ * sent when paused — without a real [ListenTogetherClient] or [Player]. [ListenTogetherManager]'s
+ * Reconnected and HostChanged ("gained host role") handlers both call this; it's where the
+ * one-sided `if (isPlaying)` gate used to live in each of them separately.
+ *
+ * [localTrackId] is null when there's no player or no current track — both collapse to "nothing
+ * to resync yet," matching the pre-existing guard. [sendTrackChange] and [sendPlaybackAction] are
+ * the real `sendTrackChangeInternal`/`client.sendPlaybackAction` calls at each call site.
+ */
+internal fun performHostReconnectResync(
+    localTrackId: String?,
+    serverTrackId: String?,
+    isPlaying: Boolean,
+    position: Long,
+    sendTrackChange: () -> Unit,
+    sendPlaybackAction: (action: String, trackId: String?, position: Long) -> Unit,
+) {
+    if (localTrackId == null) return
+    val resync = hostReconnectResync(localTrackId, serverTrackId, isPlaying, position)
+    if (resync.trackChangeNeeded) sendTrackChange()
+    sendPlaybackAction(resync.action, resync.trackId, resync.position)
+}
+
+/**
  * Manager that bridges the Listen Together WebSocket client with the music player.
  * Handles syncing playback actions between connected users.
  */
@@ -520,6 +574,20 @@ class ListenTogetherManager
                     stopHeartbeat()
                     stopVolumeSyncObservation()
                 }
+                // SARASWATI: Sangat resync — KNOWN GAP, deliberately not fixed here. A host whose
+                // connection had gone null (e.g. after setPlayerConnection(null) on unbind, or the
+                // car-mode path above, while the service kept the room alive) and then gets a real
+                // connection back requests no resync, because `oldConnection != null` is required
+                // for a host below. An earlier attempt to fix this by just dropping that
+                // requirement was wrong: requestSync() is PULL-based (it asks the server to send
+                // ITS last snapshot back via SyncStateReceived/handleSyncState(forceFullState=true)
+                // /applyPlaybackState), so removing the guard made a rebinding host's own
+                // actively-playing track get overwritten by the server's possibly-stale state —
+                // backwards, and worse than the gap it tried to close. A correct fix needs a
+                // PUSH in the other direction (the host sending ITS real state), the same shape as
+                // performHostReconnectResync already used for the Reconnected and HostChanged
+                // paths — not requestSync(). That's a larger change than this pass warrants; left
+                // as a known, documented limitation.
                 if (resync && connection != null && oldConnection !== connection && isInRoom && (!isHost || oldConnection != null)) {
                     applyNextHostSnapshot = isHost
                     client.requestSync()
@@ -760,33 +828,31 @@ class ListenTogetherManager
 
                         // Sync state based on role
                         if (event.isHost) {
-                            // Host: only send sync if necessary
+                            // Host: always resync (SARASWATI: Sangat resync fix — see
+                            // hostReconnectResync's doc comment for why this can no longer be
+                            // conditional on playWhenReady).
                             lastSyncedIsPlaying = player?.playWhenReady
                             lastSyncedTrackId = player?.currentMediaItem?.mediaId
 
                             val currentMetadata = player?.currentMetadata
-                            if (currentMetadata != null) {
-                                // Check if server already has the right track (from event.state)
-                                val serverTrackId = event.state.currentTrackOrNull?.id
-                                if (serverTrackId != currentMetadata.id) {
+                            performHostReconnectResync(
+                                localTrackId = currentMetadata?.id,
+                                serverTrackId = event.state.currentTrackOrNull?.id,
+                                isPlaying = player?.playWhenReady ?: false,
+                                position = player?.currentPosition ?: 0L,
+                                sendTrackChange = {
                                     Timber
-                                        .tag(
-                                            TAG,
-                                        ).d(
-                                            "Reconnected as host, server track ($serverTrackId) differs from local (${currentMetadata.id}), syncing",
+                                        .tag(TAG)
+                                        .d(
+                                            "Reconnected as host, server track (${event.state.currentTrackOrNull?.id}) differs from local (${currentMetadata?.id}), syncing",
                                         )
-                                    sendTrackChangeInternal(currentMetadata)
-                                } else {
-                                    Timber.tag(TAG).d("Reconnected as host, server already has current track $serverTrackId")
-                                }
-
-                                if (player.playWhenReady) {
-                                    val pos = player.currentPosition
-                                    val trackId = player.currentMediaItem?.mediaId
-                                    Timber.tag(TAG).d("Reconnected host is playing, sending PLAY at $pos (track: $trackId)")
-                                    client.sendPlaybackAction(PlaybackActions.PLAY, trackId = trackId, position = pos)
-                                }
-                            }
+                                    currentMetadata?.let(::sendTrackChangeInternal)
+                                },
+                                sendPlaybackAction = { action, trackId, position ->
+                                    Timber.tag(TAG).d("Reconnected host resyncing $action at $position (track: $trackId)")
+                                    client.sendPlaybackAction(action, trackId = trackId, position = position)
+                                },
+                            )
                         } else {
                             // Guest: ALWAYS sync to host's state after reconnection
                             Timber.tag(TAG).d("Reconnected as guest, syncing to host's current state")
@@ -818,7 +884,13 @@ class ListenTogetherManager
 
                 is ListenTogetherEvent.HostChanged -> {
                     Timber.tag(TAG).d("Host changed: new host is ${event.newHostName} (${event.newHostId})")
-                    val wasHost = isHost
+                    // SARASWATI: Sangat resync fix — `event.wasHost`, not a live `isHost` read.
+                    // ListenTogetherClient writes _role.value = HOST BEFORE emitting this event
+                    // (ListenTogetherClient.kt's HOST_CHANGED handler), so by the time this
+                    // branch runs, a live isHost read is already the NEW role: `wasHost && !
+                    // nowIsHost` and `!wasHost && nowIsHost` below would both be unreachable,
+                    // silently dropping the host-transfer resync this file depends on.
+                    val wasHost = event.wasHost
                     val nowIsHost = event.newHostId == userId.value
 
                     if (wasHost && !nowIsHost) {
@@ -854,21 +926,29 @@ class ListenTogetherManager
                         startQueueSyncObservation()
                         startVolumeSyncObservation()
 
-                        // Send current player state to guests
+                        // Send current player state to guests. SARASWATI: Sangat resync fix —
+                        // this used to only send PLAY when playWhenReady was true, the same
+                        // one-sided gap already fixed for Reconnected: a host transfer landing
+                        // while the new host is paused left the server broadcasting whatever
+                        // play-state the previous host last sent. HostChanged carries no server
+                        // track id to compare against, so serverTrackId is always null here —
+                        // trackChangeNeeded is then always true, matching this branch's prior
+                        // unconditional sendTrackChangeInternal call.
                         val metadata = player?.currentMetadata
-                        if (metadata != null) {
-                            Timber.tag(TAG).d("New host sending current track: ${metadata.title}")
-                            sendTrackChangeInternal(metadata)
-
-                            if (player.playWhenReady) {
-                                Timber.tag(TAG).d("New host is playing, sending PLAY")
-                                client.sendPlaybackAction(
-                                    PlaybackActions.PLAY,
-                                    trackId = metadata.id,
-                                    position = player.currentPosition,
-                                )
-                            }
-                        }
+                        performHostReconnectResync(
+                            localTrackId = metadata?.id,
+                            serverTrackId = null,
+                            isPlaying = player?.playWhenReady ?: false,
+                            position = player?.currentPosition ?: 0L,
+                            sendTrackChange = {
+                                Timber.tag(TAG).d("New host sending current track: ${metadata?.title}")
+                                metadata?.let(::sendTrackChangeInternal)
+                            },
+                            sendPlaybackAction = { action, trackId, position ->
+                                Timber.tag(TAG).d("New host resyncing $action at $position")
+                                client.sendPlaybackAction(action, trackId = trackId, position = position)
+                            },
+                        )
                     }
                 }
 
