@@ -606,6 +606,9 @@
     <string name="listen_together_notification_channel_name">Listen Together</string>
     <string name="listen_together_notification_channel_desc">Notifications for Listen Together events</string>
     <string name="listen_together_room_created">Room created: %s</string>
+    <!-- SARASWATI: Sangat invite shares the room code with instructions; the old link pointed at an upstream domain this build cannot open. -->
+    <string name="listen_together_copy_invite">Copy invite</string>
+    <string name="listen_together_invite_message">Open Saraswati, go to Listen Together, and enter this code: %1$s</string>
     <string name="listen_together_cannot_edit_username_in_room">The username cannot be changed while in a room</string>
     <string name="waiting_for_approval">Waiting for host approval…</string>
     <string name="invalid_room_code">Invalid room code</string>
