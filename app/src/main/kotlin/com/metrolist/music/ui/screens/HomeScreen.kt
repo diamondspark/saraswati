@@ -1367,7 +1367,19 @@ fun HomeScreen(
                         UpdateBanner(
                             status = readyStatus,
                             onClick = {
-                                val updaterPackage = "dev.diamondspark.saraswati.updater"
+                                // SARASWATI: the debug build's applicationId carries a ".debug" suffix
+                                // (app/build.gradle.kts), and the Updater is built the same way, so a
+                                // debug phone's own Updater is installed as
+                                // dev.diamondspark.saraswati.updater.debug, not the release package —
+                                // hardcoding the release name here made this dialog claim a
+                                // correctly-installed debug Updater was missing. The suffix only
+                                // changes the installed package, not UpdateActivity's own class name
+                                // (updater/src/main/kotlin/.../UpdateActivity.kt keeps the unsuffixed
+                                // dev.diamondspark.saraswati.updater package, same as how this app's own
+                                // MainActivity stays under com.metrolist.music in the debug build).
+                                val updaterBasePackage = "dev.diamondspark.saraswati.updater"
+                                val updaterPackage =
+                                    updaterBasePackage + if (BuildConfig.APPLICATION_ID.endsWith(".debug")) ".debug" else ""
                                 val updaterInstalled = try {
                                     context.packageManager.getPackageInfo(updaterPackage, 0)
                                     true
@@ -1377,7 +1389,7 @@ fun HomeScreen(
                                 if (updaterInstalled) {
                                     context.startActivity(
                                         Intent("dev.diamondspark.saraswati.updater.CHECK").apply {
-                                            setClassName(updaterPackage, "$updaterPackage.UpdateActivity")
+                                            setClassName(updaterPackage, "$updaterBasePackage.UpdateActivity")
                                             // SARASWATI: the Updater falls back to its own
                                             // persisted channel (default "stable") without
                                             // this extra, so a beta tester would see this

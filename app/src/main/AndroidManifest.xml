@@ -35,6 +35,13 @@
              only grants visibility (so the uid->package check can run); isSystemApp
              still decides whether ControllerPolicy actually allows it. -->
         <package android:name="com.google.android.googlequicksearchbox" />
+        <!-- SARASWATI: without this, the Sudhaar banner's "is the Updater installed?" check
+             (HomeScreen.kt) can't see dev.diamondspark.saraswati.updater under Android's
+             package-visibility rules unless that app happens to be this one's installer of
+             record — which breaks whenever a phone's install chain doesn't go through the
+             Updater (a sideload, a restore, this dev phone's adb installs). Already listed in
+             security/manifest-allowlist.json; this was the missing line. -->
+        <package android:name="dev.diamondspark.saraswati.updater" />
     </queries>
     <application
         android:name=".App"
