@@ -491,15 +491,23 @@ class VirtualTimeDispatcher :
     fun advanceBy(ms: Long) {
         val target = synchronized(lock) { currentTime + ms }
         while (true) {
+            // SARASWATI: the "nothing left due" check and the currentTime = target jump that ends this
+            // call must happen in the SAME critical section. Split across two, a real thread's dispatch()
+            // landing in the gap between them would be stamped with the stale pre-jump currentTime instead
+            // of target, sit in the queue un-run until the next advanceBy/runCurrent, and be delayed by one
+            // step in a way that depends on real IO timing rather than virtual time.
             val next =
                 synchronized(lock) {
-                    val candidate = queue.peek()?.takeIf { it.time <= target } ?: return@synchronized null
+                    val candidate = queue.peek()?.takeIf { it.time <= target }
+                    if (candidate == null) {
+                        currentTime = target
+                        return@synchronized null
+                    }
                     queue.remove(candidate)
                     currentTime = maxOf(currentTime, candidate.time)
                     candidate
                 } ?: break
             next.block.run()
         }
-        synchronized(lock) { currentTime = target }
     }
 }
