@@ -574,13 +574,21 @@ class ListenTogetherManager
                     stopHeartbeat()
                     stopVolumeSyncObservation()
                 }
-                // SARASWATI: Sangat resync fix — a host whose connection had gone null (e.g. after
-                // setPlayerConnection(null) on unbind, while the service kept running and the room
-                // stayed live) used to be excluded here (`oldConnection != null` required for a
-                // host), so getting a real connection back requested no resync at all: the same
-                // staleness bug as the reconnect/host-transfer gaps above, just via a third
-                // trigger. A host now resyncs on any genuinely new connection, same as a guest.
-                if (resync && connection != null && oldConnection !== connection && isInRoom) {
+                // SARASWATI: Sangat resync — KNOWN GAP, deliberately not fixed here. A host whose
+                // connection had gone null (e.g. after setPlayerConnection(null) on unbind, or the
+                // car-mode path above, while the service kept the room alive) and then gets a real
+                // connection back requests no resync, because `oldConnection != null` is required
+                // for a host below. An earlier attempt to fix this by just dropping that
+                // requirement was wrong: requestSync() is PULL-based (it asks the server to send
+                // ITS last snapshot back via SyncStateReceived/handleSyncState(forceFullState=true)
+                // /applyPlaybackState), so removing the guard made a rebinding host's own
+                // actively-playing track get overwritten by the server's possibly-stale state —
+                // backwards, and worse than the gap it tried to close. A correct fix needs a
+                // PUSH in the other direction (the host sending ITS real state), the same shape as
+                // performHostReconnectResync already used for the Reconnected and HostChanged
+                // paths — not requestSync(). That's a larger change than this pass warrants; left
+                // as a known, documented limitation.
+                if (resync && connection != null && oldConnection !== connection && isInRoom && (!isHost || oldConnection != null)) {
                     applyNextHostSnapshot = isHost
                     client.requestSync()
                 }
