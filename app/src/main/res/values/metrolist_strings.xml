@@ -477,6 +477,8 @@
     <string name="eq_disabled">Disabled</string>
     <string name="eq_wizard">AutoEQ Wizard</string>
     <string name="eq_download_db">Download AutoEQ database (17 MB)</string>
+    <!-- SARASWATI: shown under the AutoEQ download button when the online database cannot be fetched -->
+    <string name="eq_database_unreachable">Couldn\'t reach the AutoEQ database right now. Try again later.</string>
     <string name="eq_downloading">Downloading…</string>
     <string name="import_from_file">Import from file</string>
     <plurals name="band_count">
