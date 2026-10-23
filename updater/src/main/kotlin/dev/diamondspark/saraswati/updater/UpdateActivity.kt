@@ -130,13 +130,18 @@ class UpdateActivity : Activity() {
     override fun onResume() {
         super.onResume()
         InstallEvents.listener = { code ->
-            mainHandler.post {
+            postToMain {
                 // Purge the persisted copy too: whichever path "wins" the
                 // race against a later resume's recovery check, exactly one
                 // consumer must clear it, or a stale status could otherwise
                 // leak into a completely unrelated, later install attempt.
                 PendingInstall.consumeTerminalStatus(prefs)
-                dispatch(Event.InstallStatus(code))
+                if (isAlive) {
+                    dispatch(Event.InstallStatus(code))
+                } else {
+                    // dispatch would delete the verified APK via runSideEffects; do that directly instead.
+                    (checkpoint as? UiState.ReadyToInstall)?.let { downloadTargetFile(it.manifest.versionCode).delete() }
+                }
             }
         }
 
@@ -315,15 +320,15 @@ class UpdateActivity : Activity() {
                 val json = httpFetcher.fetchText("$MANIFEST_BASE_URL$channel.json")
                 val manifest = ManifestParser.parse(json).getOrThrow()
                 val installed = installedVersionCode(TARGET_PACKAGE_SARASWATI)
-                mainHandler.post {
-                    if (generation != checkGeneration) return@post
+                postToMain {
+                    if (generation != checkGeneration) return@postToMain
                     checkInFlight = false
                     lastFetchedManifest = manifest
                     dispatch(Event.ManifestLoaded(manifest, installed))
                 }
             } catch (e: Exception) {
-                mainHandler.post {
-                    if (generation != checkGeneration) return@post
+                postToMain {
+                    if (generation != checkGeneration) return@postToMain
                     checkInFlight = false
                     dispatch(Event.ManifestFailed(getString(R.string.cant_reach_update_server)))
                 }
@@ -337,11 +342,11 @@ class UpdateActivity : Activity() {
             try {
                 httpFetcher.download(manifest.apk.url, target) { bytesSoFar ->
                     val percent = percentOf(bytesSoFar, manifest.apk.size)
-                    mainHandler.post { dispatch(Event.DownloadProgress(percent)) }
+                    postToMain { dispatch(Event.DownloadProgress(percent)) }
                 }
             } catch (e: Exception) {
                 target.delete()
-                mainHandler.post { dispatch(Event.ManifestFailed(getString(R.string.cant_reach_update_server))) }
+                postToMain { dispatch(Event.ManifestFailed(getString(R.string.cant_reach_update_server))) }
                 return@execute
             }
 
@@ -356,7 +361,10 @@ class UpdateActivity : Activity() {
             if (verifyResult is VerifyResult.Failed) {
                 target.delete()
             }
-            mainHandler.post { dispatch(Event.DownloadFinished(verifyResult)) }
+            mainHandler.post {
+                // A dropped, successfully verified APK would otherwise be left on disk.
+                if (isAlive) dispatch(Event.DownloadFinished(verifyResult)) else target.delete()
+            }
         }
     }
 
@@ -373,7 +381,10 @@ class UpdateActivity : Activity() {
             try {
                 installSession.install(target, expectedPackage)
             } catch (e: Exception) {
-                mainHandler.post { dispatch(Event.InstallStatus(INSTALL_STATUS_EXCEPTION)) }
+                mainHandler.post {
+                    // A dropped install result would otherwise leave the APK on disk.
+                    if (isAlive) dispatch(Event.InstallStatus(INSTALL_STATUS_EXCEPTION)) else target.delete()
+                }
             }
         }
     }
@@ -411,6 +422,15 @@ class UpdateActivity : Activity() {
     private fun targetPackageName(): String = if (updatingSelf) BuildConfig.APPLICATION_ID else TARGET_PACKAGE_SARASWATI
 
     // ---- small helpers ----------------------------------------------------
+
+    /** False once the user has backed out of, or the system has destroyed, this Activity. */
+    private val isAlive: Boolean get() = !isFinishing && !isDestroyed
+
+    // For UI/state-only updates. A callback that also owns cleanup (APK deletion,
+    // PendingInstall bookkeeping) checks isAlive itself so its cleanup still runs.
+    private fun postToMain(block: () -> Unit) {
+        mainHandler.post { if (isAlive) block() }
+    }
 
     private fun currentChannel(): String {
         val fromIntent = intent?.getStringExtra(EXTRA_CHANNEL)?.lowercase()
