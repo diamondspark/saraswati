@@ -1,21 +1,21 @@
 {
   "schema": 1,
   "channel": "beta",
-  "versionCode": 4141,
-  "versionName": "13.7.0-s4141",
+  "versionCode": 4161,
+  "versionName": "13.7.0-s4161",
   "apk": {
-    "url": "https://github.com/diamondspark/saraswati/releases/download/v4141/saraswati-v4141.apk",
-    "sha256": "447ed467f36f42f75c3d7bd2309270c19399731baf988bac528a094bd29d50ff",
-    "size": 27020164
+    "url": "https://github.com/diamondspark/saraswati/releases/download/v4161/saraswati-v4161.apk",
+    "sha256": "74dd39cbb2ba91a7b3859d6570932d037211d5e47f5dd6fe03c9441e7b9524a0",
+    "size": 27024260
   },
   "urgent": true,
-  "notes": "Fixes the Sudhaar update banner, which could wrongly say the Updates app wasn't installed when it was.",
-  "publishedAt": "2026-10-23T18:36:56Z",
+  "notes": "Fixes Sangat getting stuck/stale (reconnect and host-transfer resync), the Sangat invite link, the AutoEQ download button's silent failure, a battery-optimization nudge, and an update-channel throttle bug.",
+  "publishedAt": "2026-10-23T21:58:26Z",
   "updater": {
-    "versionCode": 4141,
+    "versionCode": 4161,
     "apk": {
-      "url": "https://github.com/diamondspark/saraswati/releases/download/v4141/saraswati-updater-v4141.apk",
-      "sha256": "029a983a3328fcd1383b0d6cf2bd358859923e86072c0b7506faedc9774174bf",
+      "url": "https://github.com/diamondspark/saraswati/releases/download/v4161/saraswati-updater-v4161.apk",
+      "sha256": "a7438b0d6c58583e7bf1fbcc073bd62026c6c41ee41dbdef97779a5ec9304ff5",
       "size": 256152
     }
   }
