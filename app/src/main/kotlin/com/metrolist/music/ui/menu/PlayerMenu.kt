@@ -1453,10 +1453,8 @@ fun ListenTogetherDialog(
                             }
                             if (isHost) {
                                 Spacer(modifier = Modifier.height(12.dp))
-                                val inviteLink =
-                                    remember(room.roomCode) {
-                                        "https://metrolist.cc/listen?code=${room.roomCode}"
-                                    }
+                                // SARASWATI: metrolist.cc belongs to upstream, so the invite shares the room code with join instructions instead of a link.
+                                val inviteMessage = stringResource(R.string.listen_together_invite_message, room.roomCode)
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.Center,
@@ -1467,18 +1465,18 @@ fun ListenTogetherDialog(
                                                 context.getSystemService(
                                                     Context.CLIPBOARD_SERVICE,
                                                 ) as android.content.ClipboardManager
-                                            val clip = android.content.ClipData.newPlainText("Listen Together Link", inviteLink)
+                                            val clip = android.content.ClipData.newPlainText("Listen Together Invite", inviteMessage)
                                             clipboard.setPrimaryClip(clip)
                                             Toast.makeText(context, R.string.copied_to_clipboard, Toast.LENGTH_SHORT).show()
                                         },
                                     ) {
                                         Icon(
                                             painter = painterResource(R.drawable.link),
-                                            contentDescription = stringResource(R.string.copy_link),
+                                            contentDescription = stringResource(R.string.listen_together_copy_invite),
                                             modifier = Modifier.size(18.dp),
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
-                                        Text(stringResource(R.string.copy_link))
+                                        Text(stringResource(R.string.listen_together_copy_invite))
                                     }
 
                                     Spacer(modifier = Modifier.width(8.dp))

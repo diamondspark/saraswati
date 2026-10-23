@@ -138,6 +138,9 @@ import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertube.models.WatchEndpoint
 import com.metrolist.music.saraswati.SaraswatiDeepLinkPolicy
+import com.metrolist.music.saraswati.battery.BatteryOptimizationNudge
+import com.metrolist.music.saraswati.battery.isIgnoringBatteryOptimizations
+import com.metrolist.music.saraswati.localmedia.openAppSettings
 // SARASWATI: Phase 6 Task 3 — the snooze undo snackbar.
 import com.metrolist.music.saraswati.craft.snooze.SnoozeActions
 import com.metrolist.music.saraswati.craft.snooze.SnoozeUndo
@@ -161,6 +164,7 @@ import com.metrolist.music.saraswati.family.PairingLink
 import com.metrolist.music.saraswati.security.DeepLinkGuard
 import com.metrolist.music.constants.AppBarHeight
 import com.metrolist.music.constants.AppLanguageKey
+import com.metrolist.music.constants.BatteryOptimizationNudgeDismissedKey
 import com.metrolist.music.constants.CheckForUpdatesKey
 import com.metrolist.music.constants.DarkModeKey
 import com.metrolist.music.constants.DefaultOpenTabKey
@@ -1638,6 +1642,20 @@ class MainActivity : FragmentActivity() {
                                 }
                             }
                         }
+                    }
+
+                    // SARASWATI: battery-optimization nudge — one time, and never on top of an update or changelog dialog.
+                    var batteryNudgeDismissed by rememberPreference(BatteryOptimizationNudgeDismissedKey, defaultValue = true)
+                    if (!batteryNudgeDismissed && !showChangelog.value && availableUpdate == null &&
+                        !isIgnoringBatteryOptimizations(this@MainActivity)
+                    ) {
+                        BatteryOptimizationNudge(
+                            onDismiss = { batteryNudgeDismissed = true },
+                            onOpenSettings = {
+                                batteryNudgeDismissed = true
+                                openAppSettings(this@MainActivity)
+                            },
+                        )
                     }
 
                     if (!showChangelog.value) {

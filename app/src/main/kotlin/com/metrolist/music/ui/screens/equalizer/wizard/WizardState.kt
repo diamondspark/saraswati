@@ -18,6 +18,8 @@ data class WizardState(
 
     // UI state flags
     val isDatabaseReady: Boolean = false,
+    // SARASWATI: download failures get their own flag so the screen can show them next to the download button, not as a generic error bar
+    val isDatabaseUnavailable: Boolean = false,
     val isLoading: Boolean = false,
     val error: String? = null,
     val isComplete: Boolean = false

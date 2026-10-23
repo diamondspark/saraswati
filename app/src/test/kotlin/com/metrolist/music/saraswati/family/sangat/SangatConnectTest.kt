@@ -120,7 +120,9 @@ class SangatConnectTest {
         val outcome = upgrade(hub.url("/ws").toString(), "device-session")
 
         assertEquals(101 to true, outcome.get())
-        val request = requireNotNull(hub.takeRequest(2, TimeUnit.SECONDS))
+        // SARASWATI: give takeRequest the same 5s margin as the upgrade's own done.await,
+        // so a slow CI runner has equal slack for the mock server to record the request.
+        val request = requireNotNull(hub.takeRequest(5, TimeUnit.SECONDS))
         assertEquals("Bearer device-session", request.headers["Authorization"])
         assertEquals("dev.test", request.headers["User-Agent"])
         assertEquals("/ws", request.url.encodedPath)

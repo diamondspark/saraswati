@@ -27,6 +27,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
@@ -146,6 +147,31 @@ class UpdateCheckerTest {
 
         assertEquals(UpdateStatus.Ready(versionName = "v200", urgent = false), status)
         assertEquals(1, fetcher.requestedUrls.size)
+    }
+
+    @Test
+    fun `failed check is throttled for one hour, then retried`() = runBlocking {
+        val oneHour = 60 * 60 * 1000L
+        val stamp = lastCheckMillisAfter(UpdateStatus.Failed, NOW)!!
+
+        val early = RecordingFetcher { null }
+        val throttled = UpdateChecker(early) { NOW + oneHour - 1 }
+            .check(installedVersionCode = 100, channel = "stable", lastCheckMillis = stamp)
+        assertEquals(UpdateStatus.Throttled, throttled)
+        assertTrue("expected no network request, got ${early.requestedUrls}", early.requestedUrls.isEmpty())
+
+        val later = RecordingFetcher { null }
+        val retried = UpdateChecker(later) { NOW + oneHour + 1 }
+            .check(installedVersionCode = 100, channel = "stable", lastCheckMillis = stamp)
+        assertEquals(UpdateStatus.Failed, retried)
+        assertEquals(1, later.requestedUrls.size)
+    }
+
+    @Test
+    fun `stamp rule leaves the record alone on Throttled and stamps now otherwise`() {
+        assertNull(lastCheckMillisAfter(UpdateStatus.Throttled, NOW))
+        assertEquals(NOW, lastCheckMillisAfter(UpdateStatus.None, NOW))
+        assertEquals(NOW, lastCheckMillisAfter(UpdateStatus.Ready(versionName = "v200", urgent = false), NOW))
     }
 
     @Test

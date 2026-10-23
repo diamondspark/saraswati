@@ -14,6 +14,7 @@ import com.metrolist.music.constants.AccountChannelHandleKey
 import com.metrolist.music.constants.AccountEmailKey
 import com.metrolist.music.constants.AccountNameKey
 import com.metrolist.music.constants.AudioQualityKey
+import com.metrolist.music.constants.BatteryOptimizationNudgeDismissedKey
 import com.metrolist.music.constants.DarkModeKey
 import com.metrolist.music.constants.DataSyncIdKey
 import com.metrolist.music.constants.DeeplApiKey
@@ -421,5 +422,14 @@ class BackupPolicyTest {
         val planted = mutablePreferencesOf(HasSeenAskVoiceExplanationKey to true, SongSortTypeKey to "NAME").toPreferences()
 
         assertNull(BackupPolicy.sanitize(planted)[HasSeenAskVoiceExplanationKey])
+    }
+
+    // SARASWATI: battery-optimization nudge — a restored backup must not hide the nudge on this phone.
+    @Test
+    fun `a backup cannot plant the battery nudge as dismissed`() {
+        assertTrue(BatteryOptimizationNudgeDismissedKey in BackupPolicy.NEVER_EXPORT_OR_RESTORE)
+        val planted = mutablePreferencesOf(BatteryOptimizationNudgeDismissedKey to true, SongSortTypeKey to "NAME").toPreferences()
+
+        assertNull(BackupPolicy.sanitize(planted)[BatteryOptimizationNudgeDismissedKey])
     }
 }

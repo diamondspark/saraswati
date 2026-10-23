@@ -74,6 +74,7 @@ import com.metrolist.music.BuildConfig
 import com.metrolist.music.LocalPlayerAwareWindowInsets
 import com.metrolist.music.LocalPlayerConnection
 import com.metrolist.music.R
+import com.metrolist.music.constants.SaraswatiLastUpdateCheckKey
 import com.metrolist.music.constants.SaraswatiUpdateChannelKey
 import com.metrolist.music.playback.PlayerConnection
 import com.metrolist.music.playback.queues.YouTubeQueue
@@ -274,6 +275,7 @@ fun AboutScreen(
     val context = LocalContext.current
     var betaToggleTapCount by remember { mutableIntStateOf(0) }
     var updateChannel by rememberPreference(SaraswatiUpdateChannelKey, defaultValue = "stable")
+    var lastUpdateCheckMillis by rememberPreference(SaraswatiLastUpdateCheckKey, defaultValue = 0L)
 
     val windowInsets = LocalPlayerAwareWindowInsets.current
 
@@ -339,6 +341,11 @@ fun AboutScreen(
                             if (betaToggleTapCount >= 7) {
                                 betaToggleTapCount = 0
                                 val enablingBeta = updateChannel != "beta"
+                                // SARASWATI: a channel switch must re-check immediately, not wait out
+                                // UpdateChecker's 12h throttle. HomeScreen's LaunchedEffect(updateChannel)
+                                // re-runs on the change, but the throttle reads only lastUpdateCheckMillis,
+                                // so zero it first; DataStore applies the writes in this order.
+                                lastUpdateCheckMillis = 0L
                                 updateChannel = if (enablingBeta) "beta" else "stable"
                                 Toast.makeText(
                                     context,

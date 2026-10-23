@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -107,6 +108,7 @@ private fun WizardScreenContent(
                             models = state.models,
                             isLoading = state.isLoading,
                             isDatabaseReady = state.isDatabaseReady,
+                            isDatabaseUnavailable = state.isDatabaseUnavailable,
                             onDownloadDatabase = onDownloadDatabase,
                             onSearchQueryChanged = onModelSearchQueryChanged,
                             onModelSelected = onModelSelected
@@ -145,6 +147,7 @@ private fun ModelSelectionStep(
     models: List<DeviceModel>,
     isLoading: Boolean,
     isDatabaseReady: Boolean,
+    isDatabaseUnavailable: Boolean,
     onDownloadDatabase: () -> Unit,
     onSearchQueryChanged: (String) -> Unit,
     onModelSelected: (DeviceModel) -> Unit
@@ -174,14 +177,28 @@ private fun ModelSelectionStep(
                     )
                 }
             } else {
-                Button(onClick = onDownloadDatabase) {
-                    Icon(
-                        painter = painterResource(R.drawable.download),
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(stringResource(R.string.eq_download_db))
+                Column(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Button(onClick = onDownloadDatabase) {
+                        Icon(
+                            painter = painterResource(R.drawable.download),
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(stringResource(R.string.eq_download_db))
+                    }
+                    if (isDatabaseUnavailable) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = stringResource(R.string.eq_database_unreachable),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                            textAlign = TextAlign.Center
+                        )
+                    }
                 }
             }
         }
