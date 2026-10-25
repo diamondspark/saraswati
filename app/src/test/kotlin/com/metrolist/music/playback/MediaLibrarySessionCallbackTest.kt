@@ -237,7 +237,7 @@ class MediaLibrarySessionCallbackTest {
     }
 
     @Test
-    fun `a seed listed twice in its radio mix is not duplicated`() {
+    fun `a seed listed twice in its radio mix starts at its first occurrence and the mix is left as it is`() {
         val plan = radioPlayPlan("seed", "seed", listOf("seed", "a", "seed", "b")) { it }!!
 
         assertEquals(listOf("seed", "a", "seed", "b"), plan.items)
