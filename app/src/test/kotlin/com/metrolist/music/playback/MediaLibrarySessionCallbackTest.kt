@@ -5,8 +5,16 @@
 
 package com.metrolist.music.playback
 
+// SARASWATI: artist-queue plan tests
+import com.metrolist.innertube.models.ArtistItem
+import com.metrolist.innertube.models.SongItem
+import com.metrolist.innertube.models.WatchEndpoint
+import com.metrolist.innertube.pages.ArtistPage
+import com.metrolist.innertube.pages.ArtistSection
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -111,4 +119,113 @@ class MediaLibrarySessionCallbackTest {
         assertFalse(titleMentionsAllTokens("Bum Bum Bole", setOf("aamir", "khan")))
         assertFalse(titleMentionsAllTokens("anything", emptySet()))
     }
+
+    // SARASWATI: the artist-queue plan behind "play <artist> songs".
+    @Test
+    fun `an artist with a radio endpoint plays that radio`() {
+        val radio = WatchEndpoint(playlistId = "RDEM-sonu")
+        val page = artistPage(radioEndpoint = radio, sections = listOf(songsSection(song("s1"), song("s2"))))
+
+        val plan = runBlocking { artistQueuePlan("UCsonu", { Result.success(page) }) }
+
+        assertEquals(radio, plan.radioEndpoint)
+    }
+
+    @Test
+    fun `an artist without a radio uses its shuffle or play endpoint before its songs`() {
+        val shuffle = WatchEndpoint(playlistId = "shuffle")
+        val play = WatchEndpoint(playlistId = "play")
+
+        val withShuffle = runBlocking {
+            artistQueuePlan("UCa", { Result.success(artistPage(shuffleEndpoint = shuffle, playEndpoint = play)) })
+        }
+        val withPlayOnly = runBlocking {
+            artistQueuePlan("UCa", { Result.success(artistPage(playEndpoint = play)) })
+        }
+
+        assertEquals(shuffle, withShuffle.radioEndpoint)
+        assertEquals(play, withPlayOnly.radioEndpoint)
+    }
+
+    @Test
+    fun `without an endpoint the artist's songs are used once each and only songs are kept`() {
+        val artistItem = ArtistItem(id = "UCrelated", title = "Other", thumbnail = null, shuffleEndpoint = null, radioEndpoint = null)
+        val page =
+            artistPage(
+                radioEndpoint = null,
+                sections =
+                    listOf(
+                        songsSection(song("s1"), song("s2"), song("s1")),
+                        ArtistSection(title = "Related", items = listOf(artistItem), moreEndpoint = null),
+                        songsSection(song("s3")),
+                    ),
+            )
+
+        val plan = runBlocking { artistQueuePlan("UCsonu", { Result.success(page) }) }
+
+        assertNull(plan.radioEndpoint)
+        assertEquals(listOf("s1", "s2", "s3"), plan.topSongs.map { it.id })
+    }
+
+    @Test
+    fun `a failed or empty artist page leaves the caller on its local fallback`() {
+        val failed = runBlocking {
+            artistQueuePlan("UCsonu", { Result.failure(IllegalStateException("offline")) })
+        }
+        val thrown = runBlocking {
+            artistQueuePlan("UCsonu", { throw IllegalStateException("offline") })
+        }
+        val empty = runBlocking {
+            artistQueuePlan("UCsonu", { Result.success(artistPage(radioEndpoint = null, sections = emptyList())) })
+        }
+
+        for (plan in listOf(failed, thrown, empty)) {
+            assertNull(plan.radioEndpoint)
+            assertTrue(plan.topSongs.isEmpty())
+        }
+    }
+
+    @Test
+    fun `a local artist id is never sent to the artist page`() {
+        var fetches = 0
+
+        val plan = runBlocking {
+            artistQueuePlan(
+                "FEmusic_local_artist-1234",
+                {
+                    fetches++
+                    Result.success(artistPage(radioEndpoint = WatchEndpoint(playlistId = "RDEM")))
+                },
+            )
+        }
+
+        assertEquals(0, fetches)
+        assertNull(plan.radioEndpoint)
+        assertTrue(plan.topSongs.isEmpty())
+    }
+
+    private fun artistPage(
+        radioEndpoint: WatchEndpoint? = null,
+        shuffleEndpoint: WatchEndpoint? = null,
+        playEndpoint: WatchEndpoint? = null,
+        sections: List<ArtistSection> = emptyList(),
+    ) = ArtistPage(
+        artist =
+            ArtistItem(
+                id = "UCsonu",
+                title = "Sonu Nigam",
+                thumbnail = null,
+                playEndpoint = playEndpoint,
+                shuffleEndpoint = shuffleEndpoint,
+                radioEndpoint = radioEndpoint,
+            ),
+        sections = sections,
+        description = null,
+        subscriberCountText = null,
+    )
+
+    private fun songsSection(vararg songs: SongItem) =
+        ArtistSection(title = "Songs", items = songs.toList(), moreEndpoint = null)
+
+    private fun song(id: String) = SongItem(id = id, title = id, artists = emptyList(), thumbnail = "")
 }

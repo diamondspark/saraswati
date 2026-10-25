@@ -34,8 +34,10 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.PlaylistItem
 import com.metrolist.innertube.models.SongItem
+import com.metrolist.innertube.models.WatchEndpoint // SARASWATI: artist queue
 import com.metrolist.innertube.models.filterExplicit
 import com.metrolist.innertube.models.filterVideoSongs
+import com.metrolist.innertube.pages.ArtistPage // SARASWATI: artist queue
 import com.metrolist.music.R
 import com.metrolist.music.constants.AndroidAutoSearchLocalLimitKey
 import com.metrolist.music.constants.HideExplicitKey
@@ -1121,6 +1123,46 @@ constructor(
                                 searchQuery,
                                 snapshot.flatMap { it.artists }.distinctBy { it.id },
                             )
+                        // SARASWATI: a matched artist plays from its YouTube artist page first (radio, else top songs), so the
+                        // queue is the catalog rather than the search page. Any failure falls through to the snapshot logic below.
+                        if (artist != null) {
+                            val plan = artistQueuePlan(artist.id, fetchArtistPage = { YouTube.artist(it) }, onFailure = ::reportException)
+                            if (plan.radioEndpoint != null) {
+                                val radioQueue = YouTubeQueue(plan.radioEndpoint)
+                                val radioItems =
+                                    try {
+                                        withContext(Dispatchers.IO) {
+                                            radioQueue
+                                                .getInitialStatus()
+                                                .filterExplicit(context.dataStore.get(HideExplicitKey, false))
+                                                .filterVideoSongs(context.dataStore.get(HideVideoSongsKey, false))
+                                                .items
+                                        }
+                                    } catch (e: CancellationException) {
+                                        throw e
+                                    } catch (e: Exception) {
+                                        reportException(e)
+                                        null
+                                    }
+                                if (!radioItems.isNullOrEmpty()) {
+                                    withContext(Dispatchers.Main) {
+                                        service.adoptQueue(radioQueue, artist.name, radioItems.size)
+                                    }
+                                    return@future MediaItemsWithStartPosition(radioItems, 0, C.TIME_UNSET)
+                                }
+                            }
+                            val topItems =
+                                plan.topSongs
+                                    .filterExplicit(context.dataStore.get(HideExplicitKey, false))
+                                    .filterVideoSongs(context.dataStore.get(HideVideoSongsKey, false))
+                                    .map { it.toMediaItem() }
+                            if (topItems.isNotEmpty()) {
+                                withContext(Dispatchers.Main) {
+                                    service.adoptQueue(ListQueue(title = artist.name, items = topItems), title = artist.name)
+                                }
+                                return@future MediaItemsWithStartPosition(topItems, 0, C.TIME_UNSET)
+                            }
+                        }
                         val songsByArtist =
                             artist?.let { matched -> snapshot.filter { song -> song.artists.any { it.id == matched.id } } }
                         // SARASWATI: a matched artist with a thin catalog (an actor or featured credit like "Aamir Khan") also gets
@@ -1318,6 +1360,39 @@ internal fun titleMentionsAllTokens(title: String, tokens: Set<String>): Boolean
     if (tokens.isEmpty()) return false
     val lowered = title.lowercase()
     return tokens.all { lowered.contains(it) }
+}
+
+internal data class ArtistQueuePlan(
+    val radioEndpoint: WatchEndpoint?,
+    val topSongs: List<SongItem>,
+)
+
+// SARASWATI: the search page is one page of results for the query string, so an artist's songs taken from it can never
+// make a real catalog ("play sonu nigam songs" gave 3). A matched artist therefore asks YouTube for its own page: the
+// artist radio if it has one, else its top songs. Both empty means the caller keeps its local fallback. Pure, so the
+// choice is testable without the network.
+internal suspend fun artistQueuePlan(
+    browseId: String,
+    fetchArtistPage: suspend (String) -> Result<ArtistPage>,
+    onFailure: (Throwable) -> Unit = {},
+): ArtistQueuePlan {
+    val empty = ArtistQueuePlan(radioEndpoint = null, topSongs = emptyList())
+    // Local-only artists carry generated ids that YouTube cannot browse.
+    if (!browseId.startsWith("UC")) return empty
+    val page: ArtistPage? =
+        try {
+            fetchArtistPage(browseId).onFailure(onFailure).getOrNull()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            onFailure(e)
+            null
+        }
+    if (page == null) return empty
+    return ArtistQueuePlan(
+        radioEndpoint = page.artist.radioEndpoint ?: page.artist.shuffleEndpoint ?: page.artist.playEndpoint,
+        topSongs = page.sections.flatMap { it.items }.filterIsInstance<SongItem>().distinctBy { it.id },
+    )
 }
 
 internal fun <T> List<T>.paginate(
