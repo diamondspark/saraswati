@@ -71,6 +71,27 @@ class VoiceCandidateTest {
     }
 
     @Test
+    fun `two songs by the same null-id artist share one fallback artist id`() {
+        val first =
+            SongItem(
+                id = "vid5",
+                title = "Song A",
+                artists = listOf(Artist(name = "Unknown Singer", id = null)),
+                thumbnail = "",
+            ).toVoiceCandidate()
+        val second =
+            SongItem(
+                id = "vid6",
+                title = "Song B",
+                artists = listOf(Artist(name = " unknown singer ", id = null)),
+                thumbnail = "",
+            ).toVoiceCandidate()
+
+        assertEquals(first.artists.single().id, second.artists.single().id)
+        assertFalse(first.artists.single().id.startsWith("UC"))
+    }
+
+    @Test
     fun `a voice candidate can be turned into a media item`() {
         val candidate =
             SongItem(

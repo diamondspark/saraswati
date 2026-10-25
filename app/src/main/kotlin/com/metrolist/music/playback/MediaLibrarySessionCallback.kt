@@ -1417,15 +1417,16 @@ internal suspend fun artistQueuePlan(
 // SARASWATI: the DB read-back can come back empty because the insert is still queued on Room's executor, so a voice
 // candidate is built from the search result alone.
 // Same shape as ImportSongResolver's toImportSong. A real artist id is kept (the artist-queue path needs its UC prefix);
-// only a null id gets a fallback, and that fallback does not look like a YouTube id.
+// only a null id gets a fallback, and that fallback does not look like a YouTube id. The fallback is keyed on the artist's
+// name, so one null-id artist is one artist across every song that credits them.
 internal fun SongItem.toVoiceCandidate(): Song {
     val metadata = toMediaMetadata()
     return Song(
         song = metadata.toSongEntity(),
         artists =
-            metadata.artists.mapIndexed { index, artist ->
+            metadata.artists.map { artist ->
                 ArtistEntity(
-                    id = artist.id ?: "voice_${metadata.id}_artist_$index",
+                    id = artist.id ?: "voice_${artist.name.trim().lowercase()}",
                     name = artist.name,
                 )
             },
