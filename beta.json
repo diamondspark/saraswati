@@ -1,21 +1,21 @@
 {
   "schema": 1,
   "channel": "beta",
-  "versionCode": 4161,
-  "versionName": "13.7.0-s4161",
+  "versionCode": 4179,
+  "versionName": "13.7.0-s4179",
   "apk": {
-    "url": "https://github.com/diamondspark/saraswati/releases/download/v4161/saraswati-v4161.apk",
-    "sha256": "74dd39cbb2ba91a7b3859d6570932d037211d5e47f5dd6fe03c9441e7b9524a0",
+    "url": "https://github.com/diamondspark/saraswati/releases/download/v4179/saraswati-v4179.apk",
+    "sha256": "4f149d311738dd6f15e78d0f9083e886e03431109694537fed22cc634f8fa307",
     "size": 27024260
   },
   "urgent": true,
-  "notes": "Fixes Sangat getting stuck/stale (reconnect and host-transfer resync), the Sangat invite link, the AutoEQ download button's silent failure, a battery-optimization nudge, and an update-channel throttle bug.",
-  "publishedAt": "2026-10-23T21:58:26Z",
+  "notes": "Android Auto voice search: 'play <artist> songs' gave one song, or silently played the wrong song. Four fixes - search results no longer lost to a database race, an artist now plays its own catalog instead of a similar-artists mix, a radio mix missing its seed no longer collapses to one track, and the artist lookup is bounded so a weak signal falls back to songs already loaded instead of leaving the car silent.",
+  "publishedAt": "2026-10-25T08:12:15Z",
   "updater": {
-    "versionCode": 4161,
+    "versionCode": 4179,
     "apk": {
-      "url": "https://github.com/diamondspark/saraswati/releases/download/v4161/saraswati-updater-v4161.apk",
-      "sha256": "a7438b0d6c58583e7bf1fbcc073bd62026c6c41ee41dbdef97779a5ec9304ff5",
+      "url": "https://github.com/diamondspark/saraswati/releases/download/v4179/saraswati-updater-v4179.apk",
+      "sha256": "5e569eaf45aad8baeef5f533856b004cb0f9ce2d7e409a3d6bb166794de953b7",
       "size": 256152
     }
   }
