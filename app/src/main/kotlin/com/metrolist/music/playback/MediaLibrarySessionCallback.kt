@@ -34,8 +34,10 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.PlaylistItem
 import com.metrolist.innertube.models.SongItem
+import com.metrolist.innertube.models.WatchEndpoint // SARASWATI: artist queue
 import com.metrolist.innertube.models.filterExplicit
 import com.metrolist.innertube.models.filterVideoSongs
+import com.metrolist.innertube.pages.ArtistPage // SARASWATI: artist queue
 import com.metrolist.music.R
 import com.metrolist.music.constants.AndroidAutoSearchLocalLimitKey
 import com.metrolist.music.constants.HideExplicitKey
@@ -43,6 +45,7 @@ import com.metrolist.music.constants.HideVideoSongsKey
 import com.metrolist.music.constants.MediaSessionConstants
 import com.metrolist.music.constants.SongSortType
 import com.metrolist.music.db.MusicDatabase
+import com.metrolist.music.db.entities.ArtistEntity // SARASWATI: voice candidates built outside the DB
 import com.metrolist.music.db.entities.PlaylistEntity
 import com.metrolist.music.db.entities.Song
 import com.metrolist.music.extensions.toMediaItem
@@ -110,6 +113,7 @@ import com.metrolist.music.ui.screens.settings.AndroidAutoSection
 import com.metrolist.music.ui.screens.settings.deserializeSections
 import com.metrolist.music.ui.screens.settings.serializeSections
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.cancellation.CancellationException
 
 class MediaLibrarySessionCallback
@@ -1083,15 +1087,22 @@ constructor(
                                 }
                             } ?: emptyList()
 
+                        // SARASWATI: the read-back may not see the row yet. The insert is queued on Room's executor and does not
+                        // block, so a null read is normal timing, not an error. The candidate is then built from the search result.
                         onlineResults.forEach { songItem ->
-                            try {
-                                database.query { insert(songItem.toMediaMetadata()) }
-                                database.song(songItem.id).first()?.let { newSong ->
-                                    searchResults.add(newSong)
-                                    if (topOnline == null) topOnline = newSong
+                            val cached =
+                                try {
+                                    database.query { insert(songItem.toMediaMetadata()) }
+                                    database.song(songItem.id).first()
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    reportException(e)
+                                    null
                                 }
-                            } catch (e: Exception) {
-                            }
+                            val candidate = cached ?: songItem.toVoiceCandidate()
+                            searchResults.add(candidate)
+                            if (topOnline == null) topOnline = candidate
                         }
                     } catch (e: Exception) {
                         reportException(e)
@@ -1121,6 +1132,54 @@ constructor(
                                 searchQuery,
                                 snapshot.flatMap { it.artists }.distinctBy { it.id },
                             )
+                        // SARASWATI: a matched artist plays from its YouTube artist page first (shuffle, play, radio, else top songs), so the
+                        // queue is the catalog rather than the search page. Any failure falls through to the snapshot logic below.
+                        if (artist != null) {
+                            // SARASWATI: a driver is waiting in the car, so the artist page and its radio share one 8 s budget.
+                            // On a weak signal the wait gives up and the songs already in memory play instead, which beats
+                            // silence. A timeout is handled like any other failure here: it falls through to the snapshot logic below.
+                            val fromArtistPage: MediaItemsWithStartPosition? =
+                                withTimeoutOrNull(ARTIST_HOPS_TIMEOUT_MS) {
+                                    val plan = artistQueuePlan(artist.id, fetchArtistPage = { YouTube.artist(it) }, onFailure = ::reportException)
+                                    if (plan.queueEndpoint != null) {
+                                        val radioQueue = YouTubeQueue(plan.queueEndpoint)
+                                        val radioItems =
+                                            try {
+                                                withContext(Dispatchers.IO) {
+                                                    radioQueue
+                                                        .getInitialStatus()
+                                                        .filterExplicit(context.dataStore.get(HideExplicitKey, false))
+                                                        .filterVideoSongs(context.dataStore.get(HideVideoSongsKey, false))
+                                                        .items
+                                                }
+                                            } catch (e: CancellationException) {
+                                                throw e
+                                            } catch (e: Exception) {
+                                                reportException(e)
+                                                null
+                                            }
+                                        if (!radioItems.isNullOrEmpty()) {
+                                            withContext(Dispatchers.Main) {
+                                                service.adoptQueue(radioQueue, artist.name, radioItems.size)
+                                            }
+                                            return@withTimeoutOrNull MediaItemsWithStartPosition(radioItems, 0, C.TIME_UNSET)
+                                        }
+                                    }
+                                    val topItems =
+                                        plan.topSongs
+                                            .filterExplicit(context.dataStore.get(HideExplicitKey, false))
+                                            .filterVideoSongs(context.dataStore.get(HideVideoSongsKey, false))
+                                            .map { it.toMediaItem() }
+                                    if (topItems.isNotEmpty()) {
+                                        withContext(Dispatchers.Main) {
+                                            service.adoptQueue(ListQueue(title = artist.name, items = topItems), title = artist.name)
+                                        }
+                                        return@withTimeoutOrNull MediaItemsWithStartPosition(topItems, 0, C.TIME_UNSET)
+                                    }
+                                    null
+                                }
+                            if (fromArtistPage != null) return@future fromArtistPage
+                        }
                         val songsByArtist =
                             artist?.let { matched -> snapshot.filter { song -> song.artists.any { it.id == matched.id } } }
                         // SARASWATI: a matched artist with a thin catalog (an actor or featured credit like "Aamir Khan") also gets
@@ -1205,27 +1264,26 @@ constructor(
                             }
                         }.getOrNull()
 
-                        if (radioStatus != null && radioStatus.items.isNotEmpty()) {
-                            val matchedIndex = radioStatus.items.indexOfFirst { it.mediaId == selectedSong.id }
-                            // SARASWATI: a radio mix frequently does not include its own seed track, so
-                            // indexOfFirst can return -1 here. Falling back to index 0 in that case used to
-                            // start whatever song the radio put first — a silent wrong-song bug for voice
-                            // play ("Hey Google, play X" would transcribe and match X correctly, then play
-                            // something else). Only take the radio path when the matched song is actually
-                            // in it; otherwise fall through to playing the matched song directly, below.
-                            if (matchedIndex != -1) {
-                                withContext(Dispatchers.Main) {
-                                    service.adoptQueue(radioQueue, radioStatus.title, radioStatus.items.size) //Used to make the radio queue load more songs when near the end
-                                }
-                                return@future MediaItemsWithStartPosition(
-                                    radioStatus.items,
-                                    matchedIndex,
-                                    C.TIME_UNSET,
-                                )
+                        // SARASWATI: the voice-matched song always plays first, so the car starts on exactly what was asked for
+                        // and the radio mix follows it. A radio mix often does not include its own seed track; the earlier
+                        // guard then fell back to the seed alone, collapsing "play shahrukh khan songs" to one song.
+                        val radioPlay =
+                            radioStatus?.items?.let { mix ->
+                                radioPlayPlan(selectedSong.id, selectedSong.toMediaItem(), mix) { it.mediaId }
                             }
+                        if (radioStatus != null && radioPlay != null) {
+                            withContext(Dispatchers.Main) {
+                                service.adoptQueue(radioQueue, radioStatus.title, radioPlay.items.size) //Used to make the radio queue load more songs when near the end
+                            }
+                            return@future MediaItemsWithStartPosition(
+                                radioPlay.items,
+                                radioPlay.startIndex,
+                                C.TIME_UNSET,
+                            )
                         }
                     }
 
+                    // SARASWATI: the genuine last resort, reached only when radio is switched off or its fetch failed or came back empty.
                     val items = listOf(selectedSong?.toMediaItem() ?: return@future defaultResult)
                     withContext(Dispatchers.Main) {
                         service.adoptQueue(
@@ -1318,6 +1376,73 @@ internal fun titleMentionsAllTokens(title: String, tokens: Set<String>): Boolean
     if (tokens.isEmpty()) return false
     val lowered = title.lowercase()
     return tokens.all { lowered.contains(it) }
+}
+
+internal data class ArtistQueuePlan(
+    val queueEndpoint: WatchEndpoint?,
+    val topSongs: List<SongItem>,
+)
+
+private const val ARTIST_HOPS_TIMEOUT_MS = 8_000L
+
+// SARASWATI: the search page is one page of results for the query string, so an artist's songs taken from it can never
+// make a real catalog ("play sonu nigam songs" gave 3). A matched artist therefore asks YouTube for its own page: its
+// shuffle (the artist's own catalog), else its play, else its radio, else its top songs. The radio comes last because
+// a MIX deliberately includes similar artists, which "play <artist> songs" does not ask for. Both empty means the
+// caller keeps its local fallback. Pure, so the choice is testable without the network.
+internal suspend fun artistQueuePlan(
+    browseId: String,
+    fetchArtistPage: suspend (String) -> Result<ArtistPage>,
+    onFailure: (Throwable) -> Unit = {},
+): ArtistQueuePlan {
+    val empty = ArtistQueuePlan(queueEndpoint = null, topSongs = emptyList())
+    // Local-only artists carry generated ids that YouTube cannot browse.
+    if (!browseId.startsWith("UC")) return empty
+    val page: ArtistPage? =
+        try {
+            fetchArtistPage(browseId).onFailure(onFailure).getOrNull()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            onFailure(e)
+            null
+        }
+    if (page == null) return empty
+    return ArtistQueuePlan(
+        queueEndpoint = page.artist.shuffleEndpoint ?: page.artist.playEndpoint ?: page.artist.radioEndpoint,
+        topSongs = page.sections.flatMap { it.items }.filterIsInstance<SongItem>().distinctBy { it.id },
+    )
+}
+
+// SARASWATI: the DB read-back can come back empty because the insert is still queued on Room's executor, so a voice
+// candidate is built from the search result alone.
+// Same shape as ImportSongResolver's toImportSong. A real artist id is kept (the artist-queue path needs its UC prefix);
+// only a null id gets a fallback, and that fallback does not look like a YouTube id. The fallback is keyed on the artist's
+// name, so one null-id artist is one artist across every song that credits them.
+internal fun SongItem.toVoiceCandidate(): Song {
+    val metadata = toMediaMetadata()
+    return Song(
+        song = metadata.toSongEntity(),
+        artists =
+            metadata.artists.map { artist ->
+                ArtistEntity(
+                    id = artist.id ?: "voice_${artist.name.trim().lowercase()}",
+                    name = artist.name,
+                )
+            },
+    )
+}
+
+// SARASWATI: the voice-search radio queue, as the list to play and the index to start on. Pure, so the choice is testable
+// without the network. A seed that is in its own mix starts at its place in the mix. Otherwise the seed plays first and the
+// mix follows it, so the requested song is never swapped for another song. An empty mix gives null: the caller plays the seed alone.
+internal data class RadioPlay<T>(val items: List<T>, val startIndex: Int)
+
+internal fun <T> radioPlayPlan(seedId: String, seed: T, mix: List<T>, idOf: (T) -> String): RadioPlay<T>? {
+    if (mix.isEmpty()) return null
+    val matchedIndex = mix.indexOfFirst { idOf(it) == seedId }
+    if (matchedIndex != -1) return RadioPlay(mix, matchedIndex)
+    return RadioPlay(listOf(seed) + mix.filterNot { idOf(it) == seedId }, 0)
 }
 
 internal fun <T> List<T>.paginate(
