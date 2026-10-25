@@ -2,13 +2,20 @@ package com.metrolist.music.playback
 
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.ArtistItem
 import com.metrolist.innertube.models.SongItem
+import com.metrolist.innertube.models.filterExplicit
+import com.metrolist.innertube.models.filterVideoSongs
 import com.metrolist.music.db.entities.ArtistEntity
 import com.metrolist.music.db.entities.Song
+import com.metrolist.music.constants.HideExplicitKey
+import com.metrolist.music.constants.HideVideoSongsKey
 import com.metrolist.music.db.entities.SongEntity
 import com.metrolist.music.playback.queues.YouTubeQueue
+import com.metrolist.music.utils.dataStore
+import com.metrolist.music.utils.get
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -31,6 +38,10 @@ class VoiceDiagnosticInstrumentedTest {
 
     private suspend fun diagnoseQuery(query: String) {
         Log.i(DIAG_TAG, "query\t$query\tbegin")
+        val target = InstrumentationRegistry.getInstrumentation().targetContext
+        val hideExplicit = target.dataStore.get(HideExplicitKey, false)
+        val hideVideo = target.dataStore.get(HideVideoSongsKey, false)
+        Log.i(DIAG_TAG, "settings\thideExplicit=$hideExplicit\thideVideoSongs=$hideVideo")
         var firstSongs: List<SongItem> = emptyList()
         repeat(SEARCH_ATTEMPTS) { attempt ->
             val result = YouTube.search(query, YouTube.SearchFilter.FILTER_SONG)
@@ -40,6 +51,14 @@ class VoiceDiagnosticInstrumentedTest {
             val attemptBest = VoiceSearchMatcher.findBest(query, songs.map { it.toEntity() })?.song?.title
             val attemptFirst = songs.firstOrNull()?.title
             val selection = attemptBest ?: attemptFirst ?: "none"
+            // Production applies these two filters before the matcher sees the list.
+            val kept = songs.filterExplicit(hideExplicit).filterVideoSongs(hideVideo)
+            val keptBest = VoiceSearchMatcher.findBest(query, kept.map { it.toEntity() })?.song?.title
+            Log.i(
+                DIAG_TAG,
+                "filter\t$query\tattempt=${attempt + 1}\tkept=${kept.size}/${songs.size}\t" +
+                    "findBestAfterFilters=${keptBest ?: "null"}\tpaalanKept=${kept.any { it.title.contains("Paalan", ignoreCase = true) }}",
+            )
             val paalIndex = songs.indexOfFirst { it.title.contains("palan", ignoreCase = true) }
                 .takeIf { it >= 0 }?.let { "#${it + 1}" } ?: "absent"
             Log.i(
@@ -57,7 +76,7 @@ class VoiceDiagnosticInstrumentedTest {
             Log.i(
                 DIAG_TAG,
                 "candidate\t$query\t#${index + 1}\t${song.title}\t" +
-                    "${song.artists.joinToString(", ") { it.name }}\t${song.id}",
+                    "${song.artists.joinToString(", ") { it.name }}\t${song.id}\texplicit=${song.explicit}\tvideo=${song.isVideoSong}",
             )
         }
 
