@@ -1247,27 +1247,26 @@ constructor(
                             }
                         }.getOrNull()
 
-                        if (radioStatus != null && radioStatus.items.isNotEmpty()) {
-                            val matchedIndex = radioStatus.items.indexOfFirst { it.mediaId == selectedSong.id }
-                            // SARASWATI: a radio mix frequently does not include its own seed track, so
-                            // indexOfFirst can return -1 here. Falling back to index 0 in that case used to
-                            // start whatever song the radio put first — a silent wrong-song bug for voice
-                            // play ("Hey Google, play X" would transcribe and match X correctly, then play
-                            // something else). Only take the radio path when the matched song is actually
-                            // in it; otherwise fall through to playing the matched song directly, below.
-                            if (matchedIndex != -1) {
-                                withContext(Dispatchers.Main) {
-                                    service.adoptQueue(radioQueue, radioStatus.title, radioStatus.items.size) //Used to make the radio queue load more songs when near the end
-                                }
-                                return@future MediaItemsWithStartPosition(
-                                    radioStatus.items,
-                                    matchedIndex,
-                                    C.TIME_UNSET,
-                                )
+                        // SARASWATI: the voice-matched song always plays first, so the car starts on exactly what was asked for
+                        // and the radio mix follows it. A radio mix often does not include its own seed track; the earlier
+                        // guard then fell back to the seed alone, collapsing "play shahrukh khan songs" to one song.
+                        val radioPlay =
+                            radioStatus?.items?.let { mix ->
+                                radioPlayPlan(selectedSong.id, selectedSong.toMediaItem(), mix) { it.mediaId }
                             }
+                        if (radioStatus != null && radioPlay != null) {
+                            withContext(Dispatchers.Main) {
+                                service.adoptQueue(radioQueue, radioStatus.title, radioPlay.items.size) //Used to make the radio queue load more songs when near the end
+                            }
+                            return@future MediaItemsWithStartPosition(
+                                radioPlay.items,
+                                radioPlay.startIndex,
+                                C.TIME_UNSET,
+                            )
                         }
                     }
 
+                    // SARASWATI: the genuine last resort, reached only when radio is switched off or its fetch failed or came back empty.
                     val items = listOf(selectedSong?.toMediaItem() ?: return@future defaultResult)
                     withContext(Dispatchers.Main) {
                         service.adoptQueue(
@@ -1393,6 +1392,18 @@ internal suspend fun artistQueuePlan(
         radioEndpoint = page.artist.radioEndpoint ?: page.artist.shuffleEndpoint ?: page.artist.playEndpoint,
         topSongs = page.sections.flatMap { it.items }.filterIsInstance<SongItem>().distinctBy { it.id },
     )
+}
+
+// SARASWATI: the voice-search radio queue, as the list to play and the index to start on. Pure, so the choice is testable
+// without the network. A seed that is in its own mix starts at its place in the mix. Otherwise the seed plays first and the
+// mix follows it, so the requested song is never swapped for another song. An empty mix gives null: the caller plays the seed alone.
+internal data class RadioPlay<T>(val items: List<T>, val startIndex: Int)
+
+internal fun <T> radioPlayPlan(seedId: String, seed: T, mix: List<T>, idOf: (T) -> String): RadioPlay<T>? {
+    if (mix.isEmpty()) return null
+    val matchedIndex = mix.indexOfFirst { idOf(it) == seedId }
+    if (matchedIndex != -1) return RadioPlay(mix, matchedIndex)
+    return RadioPlay(listOf(seed) + mix.filterNot { idOf(it) == seedId }, 0)
 }
 
 internal fun <T> List<T>.paginate(

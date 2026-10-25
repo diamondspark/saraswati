@@ -204,6 +204,37 @@ class MediaLibrarySessionCallbackTest {
         assertTrue(plan.topSongs.isEmpty())
     }
 
+    // SARASWATI: the voice-search radio plan behind "play <song or artist> songs" when the radio is used.
+    @Test
+    fun `a seed that is in its radio mix starts at its place in the mix`() {
+        val plan = radioPlayPlan("seed", "seed", listOf("a", "seed", "b")) { it }!!
+
+        assertEquals(listOf("a", "seed", "b"), plan.items)
+        assertEquals(1, plan.startIndex)
+    }
+
+    @Test
+    fun `a seed missing from its radio mix plays first and the mix follows`() {
+        val plan = radioPlayPlan("seed", "seed", listOf("a", "b", "c")) { it }!!
+
+        assertEquals(listOf("seed", "a", "b", "c"), plan.items)
+        assertEquals(0, plan.startIndex)
+        assertTrue(plan.items.size > 1)
+    }
+
+    @Test
+    fun `a seed listed twice in its radio mix is not duplicated`() {
+        val plan = radioPlayPlan("seed", "seed", listOf("seed", "a", "seed", "b")) { it }!!
+
+        assertEquals(listOf("seed", "a", "seed", "b"), plan.items)
+        assertEquals(0, plan.startIndex)
+    }
+
+    @Test
+    fun `an empty radio mix gives no plan so the seed plays alone`() {
+        assertNull(radioPlayPlan("seed", "seed", emptyList<String>()) { it })
+    }
+
     private fun artistPage(
         radioEndpoint: WatchEndpoint? = null,
         shuffleEndpoint: WatchEndpoint? = null,
