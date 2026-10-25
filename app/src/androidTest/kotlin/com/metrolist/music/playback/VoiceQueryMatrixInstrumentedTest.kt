@@ -58,7 +58,17 @@ private val MATRIX = listOf(
 
 private data class Snapshot(val count: Int, val first: String)
 
-private data class Row(val query: MatrixQuery, val snapshot: Snapshot, val elapsedMs: Long, val failure: String?)
+private data class Row(
+    val query: MatrixQuery,
+    val snapshot: Snapshot,
+    val elapsedMs: Long,
+    val titleScore: Double?,
+    val failure: String?,
+)
+
+// SARASWATI: an EXACT_TITLE row needs a strong match, not a plausible one. "O Sabke Palanhaari" scores 0.667 against
+// "o palan hare" and used to pass at the 0.60 findBest threshold; a real title match reaches 0.95 or 1.0.
+private const val EXACT_TITLE_MIN_SCORE = 0.90
 
 @RunWith(AndroidJUnit4::class)
 class VoiceQueryMatrixInstrumentedTest {
@@ -144,11 +154,16 @@ class VoiceQueryMatrixInstrumentedTest {
         val started = System.currentTimeMillis()
         val snapshot = awaitQueue()
         val elapsedMs = System.currentTimeMillis() - started
-        Log.i(VOICE_MATRIX_TAG, "${query.category}\t${query.query}\tcount=${snapshot.count}\tfirst=${snapshot.first}")
-        return Row(query, snapshot, elapsedMs, evaluate(query, snapshot, cleared))
+        val titleScore =
+            if (query.kind == Kind.EXACT_TITLE && snapshot.first != "-") titleScore(query.query, snapshot.first) else null
+        Log.i(
+            VOICE_MATRIX_TAG,
+            "${query.category}\t${query.query}\tcount=${snapshot.count}\tfirst=${snapshot.first}\tscore=${titleScore.formatScore()}",
+        )
+        return Row(query, snapshot, elapsedMs, titleScore, evaluate(query, snapshot, cleared, titleScore))
     }
 
-    private fun evaluate(query: MatrixQuery, snapshot: Snapshot, cleared: Boolean): String? {
+    private fun evaluate(query: MatrixQuery, snapshot: Snapshot, cleared: Boolean, titleScore: Double?): String? {
         val minCount = when (query.kind) {
             Kind.PERSON -> 10
             Kind.MOVIE -> 5
@@ -158,20 +173,23 @@ class VoiceQueryMatrixInstrumentedTest {
             !cleared -> "stale queue was not cleared before the query"
             snapshot.count < minCount -> "count=${snapshot.count} is below $minCount"
             query.kind == Kind.EXACT_TITLE && snapshot.first == "-" -> "no first track title"
-            query.kind == Kind.EXACT_TITLE && !titleMatches(query.query, snapshot.first) ->
-                "first title '${snapshot.first}' does not match the query"
+            query.kind == Kind.EXACT_TITLE && (titleScore ?: 0.0) < EXACT_TITLE_MIN_SCORE ->
+                "first title '${snapshot.first}' scores ${titleScore.formatScore()}, below $EXACT_TITLE_MIN_SCORE"
             else -> null
         }
     }
 
-    private fun titleMatches(query: String, firstTitle: String): Boolean {
+    // The score of the first track's title against the query, from the same ranking the voice path uses.
+    private fun titleScore(query: String, firstTitle: String): Double {
         val song = Song(
             song = SongEntity(id = "matrix-first", title = firstTitle, duration = -1, thumbnailUrl = null),
             artists = emptyList(),
             album = null,
         )
-        return VoiceSearchMatcher.findBest(query, listOf(song)) != null
+        return VoiceSearchMatcher.rankAll(query, listOf(song)).firstOrNull()?.score ?: 0.0
     }
+
+    private fun Double?.formatScore(): String = this?.let { "%.3f".format(it) } ?: "-"
 
     private fun awaitEmptyQueue(): Boolean {
         val deadline = System.currentTimeMillis() + SETTLE_TIMEOUT_MS
@@ -218,7 +236,7 @@ class VoiceQueryMatrixInstrumentedTest {
             Log.i(
                 VOICE_MATRIX_TAG,
                 "RESULT\t$status\t${row.query.category}\t${row.query.query}\tcount=${row.snapshot.count}\t" +
-                    "first=${row.snapshot.first}\tms=${row.elapsedMs}\t${row.failure ?: "ok"}",
+                    "first=${row.snapshot.first}\tscore=${row.titleScore.formatScore()}\tms=${row.elapsedMs}\t${row.failure ?: "ok"}",
             )
         }
     }
