@@ -1087,7 +1087,8 @@ constructor(
                                 }
                             } ?: emptyList()
 
-                        // SARASWATI: a candidate never depends on the DB round-trip; the insert is only a cache write.
+                        // SARASWATI: the read-back may not see the row yet. The insert is queued on Room's executor and does not
+                        // block, so a null read is normal timing, not an error. The candidate is then built from the search result.
                         onlineResults.forEach { songItem ->
                             val cached =
                                 try {
@@ -1413,7 +1414,8 @@ internal suspend fun artistQueuePlan(
     )
 }
 
-// SARASWATI: a voice candidate must survive a failed DB cache write, so it can be built from the search result alone.
+// SARASWATI: the DB read-back can come back empty because the insert is still queued on Room's executor, so a voice
+// candidate is built from the search result alone.
 // Same shape as ImportSongResolver's toImportSong. A real artist id is kept (the artist-queue path needs its UC prefix);
 // only a null id gets a fallback, and that fallback does not look like a YouTube id.
 internal fun SongItem.toVoiceCandidate(): Song {
