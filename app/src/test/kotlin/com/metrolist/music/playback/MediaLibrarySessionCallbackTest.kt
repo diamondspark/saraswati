@@ -122,29 +122,43 @@ class MediaLibrarySessionCallbackTest {
 
     // SARASWATI: the artist-queue plan behind "play <artist> songs".
     @Test
-    fun `an artist with a radio endpoint plays that radio`() {
+    fun `an artist with only a radio endpoint queues that radio`() {
         val radio = WatchEndpoint(playlistId = "RDEM-sonu")
         val page = artistPage(radioEndpoint = radio, sections = listOf(songsSection(song("s1"), song("s2"))))
 
         val plan = runBlocking { artistQueuePlan("UCsonu", { Result.success(page) }) }
 
-        assertEquals(radio, plan.radioEndpoint)
+        assertEquals(radio, plan.queueEndpoint)
     }
 
     @Test
-    fun `an artist without a radio uses its shuffle or play endpoint before its songs`() {
+    fun `an artist with a shuffle endpoint queues the shuffle before its play and radio endpoints`() {
         val shuffle = WatchEndpoint(playlistId = "shuffle")
         val play = WatchEndpoint(playlistId = "play")
+        val radio = WatchEndpoint(playlistId = "radio")
 
-        val withShuffle = runBlocking {
-            artistQueuePlan("UCa", { Result.success(artistPage(shuffleEndpoint = shuffle, playEndpoint = play)) })
-        }
-        val withPlayOnly = runBlocking {
-            artistQueuePlan("UCa", { Result.success(artistPage(playEndpoint = play)) })
-        }
+        val plan =
+            runBlocking {
+                artistQueuePlan(
+                    "UCa",
+                    { Result.success(artistPage(shuffleEndpoint = shuffle, playEndpoint = play, radioEndpoint = radio)) },
+                )
+            }
 
-        assertEquals(shuffle, withShuffle.radioEndpoint)
-        assertEquals(play, withPlayOnly.radioEndpoint)
+        assertEquals(shuffle, plan.queueEndpoint)
+    }
+
+    @Test
+    fun `an artist with play and radio endpoints but no shuffle queues play, not the mix`() {
+        val play = WatchEndpoint(playlistId = "play")
+        val radio = WatchEndpoint(playlistId = "radio")
+
+        val plan =
+            runBlocking {
+                artistQueuePlan("UCa", { Result.success(artistPage(playEndpoint = play, radioEndpoint = radio)) })
+            }
+
+        assertEquals(play, plan.queueEndpoint)
     }
 
     @Test
@@ -163,7 +177,7 @@ class MediaLibrarySessionCallbackTest {
 
         val plan = runBlocking { artistQueuePlan("UCsonu", { Result.success(page) }) }
 
-        assertNull(plan.radioEndpoint)
+        assertNull(plan.queueEndpoint)
         assertEquals(listOf("s1", "s2", "s3"), plan.topSongs.map { it.id })
     }
 
@@ -180,7 +194,7 @@ class MediaLibrarySessionCallbackTest {
         }
 
         for (plan in listOf(failed, thrown, empty)) {
-            assertNull(plan.radioEndpoint)
+            assertNull(plan.queueEndpoint)
             assertTrue(plan.topSongs.isEmpty())
         }
     }
@@ -200,7 +214,7 @@ class MediaLibrarySessionCallbackTest {
         }
 
         assertEquals(0, fetches)
-        assertNull(plan.radioEndpoint)
+        assertNull(plan.queueEndpoint)
         assertTrue(plan.topSongs.isEmpty())
     }
 

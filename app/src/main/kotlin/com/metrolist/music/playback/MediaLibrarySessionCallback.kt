@@ -1130,12 +1130,12 @@ constructor(
                                 searchQuery,
                                 snapshot.flatMap { it.artists }.distinctBy { it.id },
                             )
-                        // SARASWATI: a matched artist plays from its YouTube artist page first (radio, else top songs), so the
+                        // SARASWATI: a matched artist plays from its YouTube artist page first (shuffle, play, radio, else top songs), so the
                         // queue is the catalog rather than the search page. Any failure falls through to the snapshot logic below.
                         if (artist != null) {
                             val plan = artistQueuePlan(artist.id, fetchArtistPage = { YouTube.artist(it) }, onFailure = ::reportException)
-                            if (plan.radioEndpoint != null) {
-                                val radioQueue = YouTubeQueue(plan.radioEndpoint)
+                            if (plan.queueEndpoint != null) {
+                                val radioQueue = YouTubeQueue(plan.queueEndpoint)
                                 val radioItems =
                                     try {
                                         withContext(Dispatchers.IO) {
@@ -1369,20 +1369,21 @@ internal fun titleMentionsAllTokens(title: String, tokens: Set<String>): Boolean
 }
 
 internal data class ArtistQueuePlan(
-    val radioEndpoint: WatchEndpoint?,
+    val queueEndpoint: WatchEndpoint?,
     val topSongs: List<SongItem>,
 )
 
 // SARASWATI: the search page is one page of results for the query string, so an artist's songs taken from it can never
-// make a real catalog ("play sonu nigam songs" gave 3). A matched artist therefore asks YouTube for its own page: the
-// artist radio if it has one, else its top songs. Both empty means the caller keeps its local fallback. Pure, so the
-// choice is testable without the network.
+// make a real catalog ("play sonu nigam songs" gave 3). A matched artist therefore asks YouTube for its own page: its
+// shuffle (the artist's own catalog), else its play, else its radio, else its top songs. The radio comes last because
+// a MIX deliberately includes similar artists, which "play <artist> songs" does not ask for. Both empty means the
+// caller keeps its local fallback. Pure, so the choice is testable without the network.
 internal suspend fun artistQueuePlan(
     browseId: String,
     fetchArtistPage: suspend (String) -> Result<ArtistPage>,
     onFailure: (Throwable) -> Unit = {},
 ): ArtistQueuePlan {
-    val empty = ArtistQueuePlan(radioEndpoint = null, topSongs = emptyList())
+    val empty = ArtistQueuePlan(queueEndpoint = null, topSongs = emptyList())
     // Local-only artists carry generated ids that YouTube cannot browse.
     if (!browseId.startsWith("UC")) return empty
     val page: ArtistPage? =
@@ -1396,7 +1397,7 @@ internal suspend fun artistQueuePlan(
         }
     if (page == null) return empty
     return ArtistQueuePlan(
-        radioEndpoint = page.artist.radioEndpoint ?: page.artist.shuffleEndpoint ?: page.artist.playEndpoint,
+        queueEndpoint = page.artist.shuffleEndpoint ?: page.artist.playEndpoint ?: page.artist.radioEndpoint,
         topSongs = page.sections.flatMap { it.items }.filterIsInstance<SongItem>().distinctBy { it.id },
     )
 }
