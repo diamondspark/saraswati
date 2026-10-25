@@ -113,6 +113,7 @@ import com.metrolist.music.ui.screens.settings.AndroidAutoSection
 import com.metrolist.music.ui.screens.settings.deserializeSections
 import com.metrolist.music.ui.screens.settings.serializeSections
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.cancellation.CancellationException
 
 class MediaLibrarySessionCallback
@@ -1133,42 +1134,50 @@ constructor(
                         // SARASWATI: a matched artist plays from its YouTube artist page first (shuffle, play, radio, else top songs), so the
                         // queue is the catalog rather than the search page. Any failure falls through to the snapshot logic below.
                         if (artist != null) {
-                            val plan = artistQueuePlan(artist.id, fetchArtistPage = { YouTube.artist(it) }, onFailure = ::reportException)
-                            if (plan.queueEndpoint != null) {
-                                val radioQueue = YouTubeQueue(plan.queueEndpoint)
-                                val radioItems =
-                                    try {
-                                        withContext(Dispatchers.IO) {
-                                            radioQueue
-                                                .getInitialStatus()
-                                                .filterExplicit(context.dataStore.get(HideExplicitKey, false))
-                                                .filterVideoSongs(context.dataStore.get(HideVideoSongsKey, false))
-                                                .items
+                            // SARASWATI: a driver is waiting in the car, so the artist page and its radio share one 8 s budget.
+                            // On a weak signal the wait gives up and the songs already in memory play instead, which beats
+                            // silence. A timeout is handled like any other failure here: it falls through to the snapshot logic below.
+                            val fromArtistPage: MediaItemsWithStartPosition? =
+                                withTimeoutOrNull(ARTIST_HOPS_TIMEOUT_MS) {
+                                    val plan = artistQueuePlan(artist.id, fetchArtistPage = { YouTube.artist(it) }, onFailure = ::reportException)
+                                    if (plan.queueEndpoint != null) {
+                                        val radioQueue = YouTubeQueue(plan.queueEndpoint)
+                                        val radioItems =
+                                            try {
+                                                withContext(Dispatchers.IO) {
+                                                    radioQueue
+                                                        .getInitialStatus()
+                                                        .filterExplicit(context.dataStore.get(HideExplicitKey, false))
+                                                        .filterVideoSongs(context.dataStore.get(HideVideoSongsKey, false))
+                                                        .items
+                                                }
+                                            } catch (e: CancellationException) {
+                                                throw e
+                                            } catch (e: Exception) {
+                                                reportException(e)
+                                                null
+                                            }
+                                        if (!radioItems.isNullOrEmpty()) {
+                                            withContext(Dispatchers.Main) {
+                                                service.adoptQueue(radioQueue, artist.name, radioItems.size)
+                                            }
+                                            return@withTimeoutOrNull MediaItemsWithStartPosition(radioItems, 0, C.TIME_UNSET)
                                         }
-                                    } catch (e: CancellationException) {
-                                        throw e
-                                    } catch (e: Exception) {
-                                        reportException(e)
-                                        null
                                     }
-                                if (!radioItems.isNullOrEmpty()) {
-                                    withContext(Dispatchers.Main) {
-                                        service.adoptQueue(radioQueue, artist.name, radioItems.size)
+                                    val topItems =
+                                        plan.topSongs
+                                            .filterExplicit(context.dataStore.get(HideExplicitKey, false))
+                                            .filterVideoSongs(context.dataStore.get(HideVideoSongsKey, false))
+                                            .map { it.toMediaItem() }
+                                    if (topItems.isNotEmpty()) {
+                                        withContext(Dispatchers.Main) {
+                                            service.adoptQueue(ListQueue(title = artist.name, items = topItems), title = artist.name)
+                                        }
+                                        return@withTimeoutOrNull MediaItemsWithStartPosition(topItems, 0, C.TIME_UNSET)
                                     }
-                                    return@future MediaItemsWithStartPosition(radioItems, 0, C.TIME_UNSET)
+                                    null
                                 }
-                            }
-                            val topItems =
-                                plan.topSongs
-                                    .filterExplicit(context.dataStore.get(HideExplicitKey, false))
-                                    .filterVideoSongs(context.dataStore.get(HideVideoSongsKey, false))
-                                    .map { it.toMediaItem() }
-                            if (topItems.isNotEmpty()) {
-                                withContext(Dispatchers.Main) {
-                                    service.adoptQueue(ListQueue(title = artist.name, items = topItems), title = artist.name)
-                                }
-                                return@future MediaItemsWithStartPosition(topItems, 0, C.TIME_UNSET)
-                            }
+                            if (fromArtistPage != null) return@future fromArtistPage
                         }
                         val songsByArtist =
                             artist?.let { matched -> snapshot.filter { song -> song.artists.any { it.id == matched.id } } }
@@ -1372,6 +1381,8 @@ internal data class ArtistQueuePlan(
     val queueEndpoint: WatchEndpoint?,
     val topSongs: List<SongItem>,
 )
+
+private const val ARTIST_HOPS_TIMEOUT_MS = 8_000L
 
 // SARASWATI: the search page is one page of results for the query string, so an artist's songs taken from it can never
 // make a real catalog ("play sonu nigam songs" gave 3). A matched artist therefore asks YouTube for its own page: its
