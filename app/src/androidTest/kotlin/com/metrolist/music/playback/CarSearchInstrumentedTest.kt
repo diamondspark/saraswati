@@ -12,8 +12,9 @@ import java.util.concurrent.TimeUnit
 
 // SARASWATI: the car's search path, onSearch then onGetSearchResult through a MediaBrowser. This is a different code path
 // from voice (onSetMediaItems), so it is measured on its own. Rows go to logcat under CARSEARCH; the assertion runs at the end.
-// The empty query must give an empty list, not an error. A run of three consecutive empty results among the queries that
-// should return songs stops the suite (lockout signal).
+// The empty query is checked on its own: MediaBrowser.search rejects it with IllegalArgumentException in the client library,
+// before the service sees it. A run of three consecutive empty results among the queries that should return songs stops
+// the suite (lockout signal).
 
 private const val SEARCH_TAG = "CARSEARCH"
 private const val RESULT_PAGE_SIZE = 100
@@ -40,13 +41,14 @@ class CarSearchInstrumentedTest {
                     failures += "NOT RUN '$query': $stopped"
                     return@forEach
                 }
+                if (query == "") {
+                    checkEmptyQueryGuard(failures)
+                    return@forEach
+                }
                 val outcome = runQuery(query)
                 outcome.error?.let { failures += "'$query' $it" }
                 if (outcome.error == null && outcome.code != SessionResult.RESULT_SUCCESS) {
                     failures += "'$query' returned code ${outcome.code}"
-                }
-                if (query == "" && (outcome.count != 0 || outcome.error != null)) {
-                    failures += "empty query must return an empty list, got count=${outcome.count} error=${outcome.error}"
                 }
                 if (query in EXPECT_SONGS && streak.record(outcome.count == 0)) {
                     stopped = "three consecutive empty results, last '$query'"
@@ -62,6 +64,20 @@ class CarSearchInstrumentedTest {
             "${failures.size} search checks failed: ${failures.joinToString("; ")}",
             failures.isEmpty(),
         )
+    }
+
+    // The service's onGetSearchResult already returns an empty list for an empty query, which is correct, but
+    // MediaBrowser.search rejects an empty query in the client library before it reaches the service. A car using this
+    // API can never deliver an empty query to the service, so that branch is unreachable here. This check pins the
+    // client-side guard. Do not change the service to "fix" this.
+    private fun checkEmptyQueryGuard(failures: MutableList<String>) {
+        val threw = runCatching {
+            session.onMain { it.search("", null) }.get(AA_CALL_TIMEOUT_S, TimeUnit.SECONDS)
+        }.exceptionOrNull()
+        Log.i(SEARCH_TAG, "GUARD\t''\tsearchThrew=${threw?.javaClass?.name ?: "none"}\tmessage=${threw?.message ?: "-"}")
+        if (threw !is IllegalArgumentException) {
+            failures += "empty query: expected MediaBrowser.search to throw IllegalArgumentException, got ${threw?.javaClass?.name ?: "no exception"}"
+        }
     }
 
     private class Outcome(val code: Int, val count: Int, val error: String?)
