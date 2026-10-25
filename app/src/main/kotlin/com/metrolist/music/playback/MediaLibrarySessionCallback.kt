@@ -45,6 +45,7 @@ import com.metrolist.music.constants.HideVideoSongsKey
 import com.metrolist.music.constants.MediaSessionConstants
 import com.metrolist.music.constants.SongSortType
 import com.metrolist.music.db.MusicDatabase
+import com.metrolist.music.db.entities.ArtistEntity // SARASWATI: voice candidates built outside the DB
 import com.metrolist.music.db.entities.PlaylistEntity
 import com.metrolist.music.db.entities.Song
 import com.metrolist.music.extensions.toMediaItem
@@ -1085,15 +1086,21 @@ constructor(
                                 }
                             } ?: emptyList()
 
+                        // SARASWATI: a candidate never depends on the DB round-trip; the insert is only a cache write.
                         onlineResults.forEach { songItem ->
-                            try {
-                                database.query { insert(songItem.toMediaMetadata()) }
-                                database.song(songItem.id).first()?.let { newSong ->
-                                    searchResults.add(newSong)
-                                    if (topOnline == null) topOnline = newSong
+                            val cached =
+                                try {
+                                    database.query { insert(songItem.toMediaMetadata()) }
+                                    database.song(songItem.id).first()
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    reportException(e)
+                                    null
                                 }
-                            } catch (e: Exception) {
-                            }
+                            val candidate = cached ?: songItem.toVoiceCandidate()
+                            searchResults.add(candidate)
+                            if (topOnline == null) topOnline = candidate
                         }
                     } catch (e: Exception) {
                         reportException(e)
@@ -1391,6 +1398,23 @@ internal suspend fun artistQueuePlan(
     return ArtistQueuePlan(
         radioEndpoint = page.artist.radioEndpoint ?: page.artist.shuffleEndpoint ?: page.artist.playEndpoint,
         topSongs = page.sections.flatMap { it.items }.filterIsInstance<SongItem>().distinctBy { it.id },
+    )
+}
+
+// SARASWATI: a voice candidate must survive a failed DB cache write, so it can be built from the search result alone.
+// Same shape as ImportSongResolver's toImportSong. A real artist id is kept (the artist-queue path needs its UC prefix);
+// only a null id gets a fallback, and that fallback does not look like a YouTube id.
+internal fun SongItem.toVoiceCandidate(): Song {
+    val metadata = toMediaMetadata()
+    return Song(
+        song = metadata.toSongEntity(),
+        artists =
+            metadata.artists.mapIndexed { index, artist ->
+                ArtistEntity(
+                    id = artist.id ?: "voice_${metadata.id}_artist_$index",
+                    name = artist.name,
+                )
+            },
     )
 }
 
