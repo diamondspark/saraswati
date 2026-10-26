@@ -1294,8 +1294,9 @@ class ListenTogetherClient
 
                         // Check if auto-approval is enabled
                         // SARASWATI: Phase 4 Task 9 — a host who is driving cannot tap Approve.
+                        // SARASWATI: owner-approved — auto-approve is on by default for family Sangats; a stored choice still wins.
                         val autoApprovalEnabled =
-                            SangatApprovalPolicy.autoApprove(context.dataStore.get(ListenTogetherAutoApprovalKey, false), carMode.active.value)
+                            SangatApprovalPolicy.autoApprove(context.dataStore.get(ListenTogetherAutoApprovalKey, true), carMode.active.value)
 
                         if (_role.value == RoomRole.HOST) {
                             if (autoApprovalEnabled) {

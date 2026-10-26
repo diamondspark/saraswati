@@ -110,7 +110,8 @@ fun ListenTogetherSettings(navController: NavController) {
     val blockedUsernames by manager.blockedUsernames.collectAsStateWithLifecycle()
 
     var username by rememberPreference(ListenTogetherUsernameKey, "")
-    var autoApprovalJoins by rememberPreference(ListenTogetherAutoApprovalKey, false)
+    // SARASWATI: owner-approved — on by default; a choice the person already stored is kept.
+    var autoApprovalJoins by rememberPreference(ListenTogetherAutoApprovalKey, true)
     var autoApproveSuggestions by rememberPreference(ListenTogetherAutoApproveSuggestionsKey, false)
     var syncHostVolume by rememberPreference(ListenTogetherSyncVolumeKey, true)
 
