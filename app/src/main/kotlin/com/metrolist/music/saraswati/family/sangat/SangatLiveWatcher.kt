@@ -110,6 +110,19 @@ class SangatLiveWatcher(
         announce(visible)
     }
 
+    /** The hub's live list asked for now, or null when it cannot be had: Sangat off, no session, or the hub failed. */
+    suspend fun fetchLiveRooms(): List<LiveSangatRoom>? {
+        if (!gate.isEnabled(FamilyFeature.SANGAT)) return null
+        val token = identity.sessionToken() ?: return null
+        return try {
+            hub.getLiveSangat(token).getOrNull()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     // Beside the poll, not in it: a slow hub or disk must not hold up the list the screen shows.
     private fun refreshGateAsync(scope: CoroutineScope) {
         scope.launch {

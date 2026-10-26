@@ -23,6 +23,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -161,6 +162,17 @@ class SangatLiveWatcherTest {
 
         assertEquals(6, hub.polls.size)
         assertEquals(listOf("EEEE"), got)
+    }
+
+    @Test
+    fun `a fresh lookup returns the hub's live list, and nothing without a session`() {
+        hub.rooms = Result.success(listOf(room("CCCC", car = true)))
+        val watcher = watcher()
+
+        assertEquals(listOf("CCCC"), runBlocking { watcher.fetchLiveRooms() }?.map { it.roomCode })
+
+        token = null
+        assertNull(runBlocking { watcher.fetchLiveRooms() })
     }
 
     @Test

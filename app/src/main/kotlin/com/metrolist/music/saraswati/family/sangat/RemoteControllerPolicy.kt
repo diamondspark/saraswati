@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.cancellation.CancellationException
 
 object RemoteControllerPolicy {
     /** The host plays for the room; a guest plays too unless it joined as a remote controller. */
@@ -31,13 +32,29 @@ object RemoteControllerPolicy {
     ): Boolean = isHost || !remoteController
 
     /**
-     * Whether joining [roomCode] is a remote controller's join: the room is a car room on the live list. A code the
-     * live list does not show is joined as a guest, as it always was.
+     * Whether a join by [roomCode] is a remote controller's join. The live list answers first. A code it does not show
+     * is asked of the hub once more, within [timeoutMs]. Anything that cannot be had (no answer, a slow hub, the room
+     * not listed) makes it a guest's join, as it always was: a normal room joined while the hub is down must still play.
      */
-    fun joinsAsRemoteController(
+    suspend fun resolveJoinRemote(
         roomCode: String,
         live: List<LiveSangatRoom>,
-    ): Boolean = live.any { it.carMode && it.roomCode.equals(roomCode, ignoreCase = true) }
+        timeoutMs: Long = FRESH_LOOKUP_TIMEOUT_MS,
+        fetchLive: suspend () -> List<LiveSangatRoom>?,
+    ): Boolean {
+        live.firstOrNull { it.roomCode.equals(roomCode, ignoreCase = true) }?.let { return it.carMode }
+        val fresh =
+            try {
+                withTimeoutOrNull(timeoutMs) { fetchLive() }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+        return fresh?.any { it.carMode && it.roomCode.equals(roomCode, ignoreCase = true) } == true
+    }
+
+    private const val FRESH_LOOKUP_TIMEOUT_MS = 3_000L
 }
 
 /**
