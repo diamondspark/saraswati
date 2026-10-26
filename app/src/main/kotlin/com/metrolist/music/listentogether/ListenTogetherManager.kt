@@ -26,6 +26,7 @@ import com.metrolist.music.models.toMediaMetadata
 import com.metrolist.music.playback.PlayerConnection
 import com.metrolist.music.playback.queues.YouTubeQueue
 import com.metrolist.music.saraswati.family.sangat.CarConnectionKeeper
+import com.metrolist.music.saraswati.family.sangat.SangatLiveWatcher
 import com.metrolist.music.saraswati.family.sangat.PassengerPlayCredit
 import com.metrolist.music.saraswati.family.sangat.tickWhilePresent
 import com.metrolist.music.saraswati.family.sangat.GuestPlaybackLock
@@ -192,6 +193,8 @@ class ListenTogetherManager
     constructor(
         private val client: ListenTogetherClient,
         @ApplicationContext private val context: Context,
+        // SARASWATI: Phase 4 Task 10 — the live list says which room codes are car rooms; a join reads it, never the caller.
+        private val sangatWatcher: SangatLiveWatcher,
     ) {
         companion object {
             private const val TAG = "ListenTogetherManager"
@@ -2075,14 +2078,15 @@ class ListenTogetherManager
         }
 
         /**
-         * Join an existing room
+         * Join an existing room. A car room is joined as a remote controller, so this phone shows the room and suggests
+         * songs but never plays it; the car mode comes from the live room list, not from the caller.
          */
         fun joinRoom(
             roomCode: String,
             username: String,
-            // SARASWATI: Phase 4 Task 10 — join to watch and suggest only; this phone never plays the room
-            remoteController: Boolean = false,
         ) {
+            // SARASWATI: Phase 4 Task 10 — join to watch and suggest only; this phone never plays a car room
+            val remoteController = RemoteControllerPolicy.joinsAsRemoteController(roomCode, sangatWatcher.liveRooms.value)
             Timber.tag(TAG).d("Joining room $roomCode as $username (remoteController=$remoteController)")
             if (remoteController) remoteMode.enter() else remoteMode.clear()
             client.joinRoom(roomCode, username)

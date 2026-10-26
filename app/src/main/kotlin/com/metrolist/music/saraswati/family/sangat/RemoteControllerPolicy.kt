@@ -12,6 +12,7 @@ import com.metrolist.music.listentogether.ConnectionState
 import com.metrolist.music.listentogether.ListenTogetherEvent
 import com.metrolist.music.listentogether.RoomRole
 import com.metrolist.music.listentogether.RoomState
+import com.metrolist.music.saraswati.family.LiveSangatRoom
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,6 +29,15 @@ object RemoteControllerPolicy {
         isHost: Boolean,
         remoteController: Boolean,
     ): Boolean = isHost || !remoteController
+
+    /**
+     * Whether joining [roomCode] is a remote controller's join: the room is a car room on the live list. A code the
+     * live list does not show is joined as a guest, as it always was.
+     */
+    fun joinsAsRemoteController(
+        roomCode: String,
+        live: List<LiveSangatRoom>,
+    ): Boolean = live.any { it.carMode && it.roomCode.equals(roomCode, ignoreCase = true) }
 }
 
 /**

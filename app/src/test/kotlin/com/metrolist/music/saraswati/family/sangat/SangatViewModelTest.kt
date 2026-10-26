@@ -37,7 +37,7 @@ class SangatViewModelTest {
         val info = MutableStateFlow<SangatRoomInfo?>(null)
         val suggested = mutableListOf<SangatCandidate>()
         val created = mutableListOf<String>()
-        val joined = mutableListOf<Triple<String, String, Boolean>>()
+        val joined = mutableListOf<Pair<String, String>>()
         var left = 0
 
         override val currentRoomCode: Flow<String?> get() = here
@@ -56,9 +56,8 @@ class SangatViewModelTest {
         override fun joinRoom(
             roomCode: String,
             username: String,
-            remoteController: Boolean,
         ) {
-            joined += Triple(roomCode, username, remoteController)
+            joined += roomCode to username
         }
 
         override fun leaveRoom() {
@@ -125,21 +124,21 @@ class SangatViewModelTest {
     }
 
     @Test
-    fun `joining a car room enters remote-controller mode`() {
+    fun `joining a car room joins that room by its code`() {
         val vm = newVm()
 
         vm.join(room("CAR1", car = true))
 
-        assertEquals(listOf(Triple("CAR1", "Asha", true)), port.joined)
+        assertEquals(listOf("CAR1" to "Asha"), port.joined)
     }
 
     @Test
-    fun `joining a normal room does not`() {
+    fun `joining a normal room joins that room by its code`() {
         val vm = newVm()
 
         vm.join(room("NORM1"))
 
-        assertEquals(listOf(Triple("NORM1", "Asha", false)), port.joined)
+        assertEquals(listOf("NORM1" to "Asha"), port.joined)
     }
 
     @Test

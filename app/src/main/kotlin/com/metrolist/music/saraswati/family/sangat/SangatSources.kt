@@ -55,8 +55,7 @@ class ListenTogetherSangatPort(
     override fun joinRoom(
         roomCode: String,
         username: String,
-        remoteController: Boolean,
-    ) = manager.joinRoom(roomCode, username, remoteController)
+    ) = manager.joinRoom(roomCode, username)
 
     override fun leaveRoom() = manager.leaveRoom()
 }
