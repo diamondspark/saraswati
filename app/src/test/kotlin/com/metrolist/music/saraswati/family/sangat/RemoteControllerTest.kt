@@ -205,6 +205,8 @@ class RemoteControllerTest {
         assertTrue(buffer.contains("remoteMode.drives("))
         val leave = manager.substringAfter("fun leaveRoom()").substringBefore("\n        }\n")
         assertTrue(leave.contains("remoteMode.clear()"))
+        assertTrue("a leave stops a join still waiting on the lookup", leave.contains("joinTickets.cancel()"))
+        assertTrue("the join runs only while its ticket is current", manager.contains("joinTickets.runIfCurrent("))
     }
 
     // SARASWATI: Phase 4 Task 15 — a host must never be a remote controller.

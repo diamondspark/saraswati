@@ -26,6 +26,7 @@ import com.metrolist.music.models.toMediaMetadata
 import com.metrolist.music.playback.PlayerConnection
 import com.metrolist.music.playback.queues.YouTubeQueue
 import com.metrolist.music.saraswati.family.sangat.CarConnectionKeeper
+import com.metrolist.music.saraswati.family.sangat.JoinTickets
 import com.metrolist.music.saraswati.family.sangat.SangatLiveWatcher
 import com.metrolist.music.saraswati.family.sangat.PassengerPlayCredit
 import com.metrolist.music.saraswati.family.sangat.tickWhilePresent
@@ -207,6 +208,9 @@ class ListenTogetherManager
         }
 
         private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+
+        // SARASWATI: Phase 4 Task 10 — a join waiting on the hub lookup must not land after a leave, a new room or a disconnect.
+        private val joinTickets = JoinTickets()
 
         // SARASWATI: Phase 4 Task 10 — remote-controller mode: a car passenger's phone shows the room and
         // suggests songs but never plays. The router is the first stop for every room event that would drive
@@ -2062,6 +2066,7 @@ class ListenTogetherManager
          */
         fun disconnect() {
             Timber.tag(TAG).d("Disconnecting from server")
+            joinTickets.cancel()
             cleanup()
             remoteMode.clear() // SARASWATI: Phase 4 Task 10
             client.disconnect()
@@ -2073,6 +2078,7 @@ class ListenTogetherManager
          */
         fun createRoom(username: String) {
             Timber.tag(TAG).d("Creating room with username: $username")
+            joinTickets.cancel()
             remoteMode.clear() // SARASWATI: Phase 4 Task 10 — a host plays
             client.createRoom(username)
         }
@@ -2086,15 +2092,22 @@ class ListenTogetherManager
             roomCode: String,
             username: String,
         ) {
+            val ticket = joinTickets.issue()
             scope.launch {
-                // SARASWATI: Phase 4 Task 10 — join to watch and suggest only; this phone never plays a car room
-                val remoteController =
-                    RemoteControllerPolicy.resolveJoinRemote(roomCode, sangatWatcher.liveRooms.value) {
-                        sangatWatcher.fetchLiveRooms()
-                    }
-                Timber.tag(TAG).d("Joining room $roomCode as $username (remoteController=$remoteController)")
-                if (remoteController) remoteMode.enter() else remoteMode.clear()
-                client.joinRoom(roomCode, username)
+                joinTickets.runIfCurrent(
+                    ticket,
+                    resolve = {
+                        RemoteControllerPolicy.resolveJoinRemote(roomCode, sangatWatcher.liveRooms.value) {
+                            sangatWatcher.fetchLiveRooms()
+                        }
+                    },
+                    join = { remoteController ->
+                        // SARASWATI: Phase 4 Task 10 — join to watch and suggest only; this phone never plays a car room
+                        Timber.tag(TAG).d("Joining room $roomCode as $username (remoteController=$remoteController)")
+                        if (remoteController) remoteMode.enter() else remoteMode.clear()
+                        client.joinRoom(roomCode, username)
+                    },
+                )
             }
         }
 
@@ -2113,6 +2126,7 @@ class ListenTogetherManager
          */
         fun leaveRoom() {
             Timber.tag(TAG).d("Leaving room")
+            joinTickets.cancel()
             cleanup()
             remoteMode.clear() // SARASWATI: Phase 4 Task 10 — after cleanup, which must still see the mode
             client.leaveRoom()
