@@ -67,6 +67,8 @@ data class SangatBanner(
     val room: LiveSangatRoom,
     val joined: Boolean,
     val syncedWith: List<String>,
+    /** Joined to a car room, where nothing plays on this phone: the banner says it adds songs, not that it plays in sync. */
+    val remote: Boolean = false,
 )
 
 object SangatDisplay {
@@ -158,7 +160,7 @@ object SangatDisplay {
         if (info?.isHost == true) return null
         if (info == null) return live.firstOrNull()?.let { SangatBanner(it, joined = false, syncedWith = emptyList()) }
         val room = rows(live, info, remoteController).first { it.joined }.room
-        return SangatBanner(room, joined = true, syncedWith = info.others)
+        return SangatBanner(room, joined = true, syncedWith = info.others, remote = room.carMode || remoteController)
     }
 
 }

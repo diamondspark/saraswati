@@ -94,6 +94,17 @@ class SangatDisplayTest {
     }
 
     @Test
+    fun `banner is remote only when joined to a car room or a remote controller`() {
+        val me = SangatMember("Me", true)
+        val others = arrayOf(SangatMember("Papa", false), me)
+        assertTrue(SangatDisplay.banner(listOf(live("CAR", car = true)), info("CAR", false, *others), false)!!.remote)
+        assertFalse(SangatDisplay.banner(listOf(live("HOME")), info("HOME", false, *others), false)!!.remote)
+        // The moment between a car mark and the next poll: the hub's list still says home, the controller flag is set.
+        assertTrue(SangatDisplay.banner(listOf(live("HOME")), info("HOME", false, *others), true)!!.remote)
+        assertFalse(SangatDisplay.banner(listOf(live("CAR", car = true)), null, true)!!.remote)
+    }
+
+    @Test
     fun `room info reads host, connected members, track and position from the room state`() {
         val track = TrackInfo(id = "t1", title = "Pal Pal", artist = "Kishore", duration = 252_000, suggestedBy = "Papa")
         val state =

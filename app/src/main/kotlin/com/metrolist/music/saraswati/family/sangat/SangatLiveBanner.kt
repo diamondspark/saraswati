@@ -70,7 +70,9 @@ fun SangatLiveBanner(
                 }
                 Text(
                     text =
-                        if (banner.joined && banner.syncedWith.isNotEmpty()) {
+                        if (banner.joined && banner.remote) {
+                            stringResource(R.string.family_sangat_remote_here)
+                        } else if (banner.joined && banner.syncedWith.isNotEmpty()) {
                             stringResource(R.string.family_sangat_live_sync, banner.syncedWith.joinToString(", "))
                         } else {
                             SangatDisplay.songTitle(room)?.let { stringResource(R.string.family_sangat_listening_song, room.memberCount, it) }
