@@ -142,6 +142,23 @@ class SangatViewModelTest {
     }
 
     @Test
+    fun `a home sangat that is not in the car is offered as a prompt too`() {
+        rooms.value = listOf(room("NORM1"))
+        val vm = newVm()
+
+        assertEquals("NORM1", vm.prompt.value?.roomCode)
+    }
+
+    @Test
+    fun `a dismissed home sangat is not offered again`() {
+        rooms.value = listOf(room("NORM1"))
+        val vm = newVm()
+        vm.dismissPrompt("NORM1")
+
+        assertNull(vm.prompt.value)
+    }
+
+    @Test
     fun `a dismissed prompt never shows again for that room`() {
         rooms.value = listOf(room("CAR1", car = true))
         val vm = newVm()

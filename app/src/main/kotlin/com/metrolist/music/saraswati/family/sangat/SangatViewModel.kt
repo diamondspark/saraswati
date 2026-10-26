@@ -134,10 +134,10 @@ class SangatViewModel
             combine(live, roomInfo, remoteController) { list, info, remote -> SangatDisplay.banner(list, info, remote) }
                 .stateIn(scope, SharingStarted.Eagerly, null)
 
-        /** The car room to offer: live, in the car, not this phone's own room, and not dismissed. */
+        /** The room to offer: live, not this phone's own room, and not dismissed. Car or home, the same prompt. */
         val prompt: StateFlow<LiveSangatRoom?> =
             combine(live, currentRoomCode, dismissals.dismissed) { list, here, gone ->
-                list.firstOrNull { it.carMode && it.roomCode != here && it.roomCode !in gone }
+                list.firstOrNull { it.roomCode != here && it.roomCode !in gone }
             }.stateIn(scope, SharingStarted.Eagerly, null)
 
         private val _askName = MutableStateFlow(false)
