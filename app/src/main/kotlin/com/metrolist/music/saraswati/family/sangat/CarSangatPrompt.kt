@@ -70,12 +70,22 @@ fun CarSangatPrompt(
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
-                        text = stringResource(R.string.family_sangat_car_prompt_title, room.hostName),
+                        text =
+                            if (room.carMode) {
+                                stringResource(R.string.family_sangat_car_prompt_title, room.hostName)
+                            } else {
+                                stringResource(R.string.family_sangat_home_prompt_title, room.hostName)
+                            },
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        text = stringResource(R.string.family_sangat_car_prompt_hindi, room.hostName),
+                        text =
+                            if (room.carMode) {
+                                stringResource(R.string.family_sangat_car_prompt_hindi, room.hostName)
+                            } else {
+                                stringResource(R.string.family_sangat_home_prompt_hindi, room.hostName)
+                            },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 4.dp),
@@ -83,7 +93,12 @@ fun CarSangatPrompt(
                 }
             }
             Text(
-                text = stringResource(R.string.family_sangat_car_prompt_desc),
+                text =
+                    if (room.carMode) {
+                        stringResource(R.string.family_sangat_car_prompt_desc)
+                    } else {
+                        stringResource(R.string.family_sangat_home_prompt_desc)
+                    },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
