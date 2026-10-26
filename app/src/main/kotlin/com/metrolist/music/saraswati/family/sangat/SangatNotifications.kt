@@ -53,9 +53,10 @@ class SangatNotifications
                 }
             }
             scope.launch {
-                combine(watcher.liveRooms, watcher.lastPolledAt, port.currentRoomCode, dismissals.dismissed) { live, polledAt, here, dismissed ->
-                    // An empty list before the first poll means "not asked yet", not "no rooms".
-                    if (polledAt == null) emptySet() else SangatNotifyPolicy.toCancel(postedRoomCodes(), live, here, dismissed)
+                combine(watcher.answeredLive, port.currentRoomCode, dismissals.dismissed) { answered, here, dismissed ->
+                    // Null is "the hub has not answered while we ran" (not polled yet, app in the background, or a failed
+                    // poll), which says nothing about whether a room has ended.
+                    if (answered == null) emptySet() else SangatNotifyPolicy.toCancel(postedRoomCodes(), answered, here, dismissed)
                 }.collect { codes -> codes.forEach { NotificationManagerCompat.from(context).cancel(it, NOTIFICATION_ID) } }
             }
         }

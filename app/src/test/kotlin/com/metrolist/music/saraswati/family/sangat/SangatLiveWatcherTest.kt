@@ -214,6 +214,62 @@ class SangatLiveWatcherTest {
     }
 
     @Test
+    fun `answeredLive is null before the first answer and set after a successful poll`() {
+        val watcher = watcher()
+        assertNull(watcher.answeredLive.value)
+        hub.rooms = Result.success(listOf(room("BBBB"), room("MINE", host = "me")))
+        watcher.start(scope)
+        time.runCurrent()
+        assertEquals(listOf("BBBB"), watcher.answeredLive.value?.map { it.roomCode })
+    }
+
+    @Test
+    fun `answeredLive keeps its last answer through a failed call, a thrown exception and a missing token`() {
+        val watcher = watcher()
+        hub.rooms = Result.success(listOf(room("BBBB")))
+        watcher.start(scope)
+        time.runCurrent()
+
+        hub.rooms = Result.failure(HubException(500, "down"))
+        time.advanceBy(30_000)
+        assertTrue(watcher.liveRooms.value.isEmpty())
+        assertEquals(listOf("BBBB"), watcher.answeredLive.value?.map { it.roomCode })
+
+        hub.rooms = Result.success(listOf(room("BBBB")))
+        hub.throwing = java.io.IOException("boom")
+        time.advanceBy(30_000)
+        assertEquals(listOf("BBBB"), watcher.answeredLive.value?.map { it.roomCode })
+
+        hub.throwing = null
+        token = null
+        time.advanceBy(30_000)
+        assertEquals(listOf("BBBB"), watcher.answeredLive.value?.map { it.roomCode })
+    }
+
+    @Test
+    fun `answeredLive is null again after stop`() {
+        val watcher = watcher()
+        hub.rooms = Result.success(listOf(room("BBBB")))
+        watcher.start(scope)
+        time.runCurrent()
+        assertEquals(1, watcher.answeredLive.value?.size)
+        watcher.stop()
+        assertNull(watcher.answeredLive.value)
+    }
+
+    @Test
+    fun `answeredLive is an empty list when the sangat gate is off`() {
+        val watcher = watcher()
+        watcher.start(scope)
+        time.runCurrent()
+        killSwitchHub.killSwitches = mapOf("sangat" to false)
+        runBlocking { gate.refresh() }
+        hub.rooms = Result.success(listOf(room("BBBB")))
+        time.advanceBy(30_000)
+        assertEquals(emptyList<LiveSangatRoom>(), watcher.answeredLive.value)
+    }
+
+    @Test
     fun `does not poll while sangat is disabled`() {
         killSwitchHub.killSwitches = mapOf("sangat" to false)
         runBlocking { gate.refresh() }

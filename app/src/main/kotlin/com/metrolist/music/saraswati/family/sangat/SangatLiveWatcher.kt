@@ -46,6 +46,15 @@ class SangatLiveWatcher(
     private val rooms = MutableStateFlow<List<LiveSangatRoom>>(emptyList())
     val liveRooms: StateFlow<List<LiveSangatRoom>> = rooms.asStateFlow()
 
+    private val answered = MutableStateFlow<List<LiveSangatRoom>?>(null)
+
+    /**
+     * The visible list from the last time the hub actually answered (or Sangat was switched off) while the watcher ran.
+     * Null before that and after [stop]; a failed call or a missing session leaves it as it was. [liveRooms] goes empty
+     * on those, so only this one says whether a room has really ended.
+     */
+    val answeredLive: StateFlow<List<LiveSangatRoom>?> = answered.asStateFlow()
+
     private val prompts = MutableSharedFlow<LiveSangatRoom>(extraBufferCapacity = PROMPT_BUFFER, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     val carPrompts: SharedFlow<LiveSangatRoom> = prompts.asSharedFlow()
 
@@ -83,11 +92,14 @@ class SangatLiveWatcher(
         job?.cancel()
         job = null
         rooms.value = emptyList()
+        answered.value = null
     }
 
     private suspend fun pollOnce(scope: CoroutineScope) {
+        var answeredByHub = false
         val fetched =
             if (!gate.isEnabled(FamilyFeature.SANGAT)) {
+                answeredByHub = true
                 emptyList()
             } else {
                 val token = identity.sessionToken()
@@ -97,6 +109,7 @@ class SangatLiveWatcher(
                     try {
                         val answer = hub.getLiveSangat(token)
                         if ((answer.exceptionOrNull() as? HubException)?.status == 503) refreshGateAsync(scope)
+                        answeredByHub = answer.isSuccess
                         answer.getOrNull() ?: emptyList()
                     } catch (e: CancellationException) {
                         throw e
@@ -109,6 +122,7 @@ class SangatLiveWatcher(
         val visible = fetched.filter { self == null || it.hostDeviceId != self }
         currentCoroutineContext().ensureActive()
         rooms.value = visible
+        if (answeredByHub) answered.value = visible
         _lastPolledAt.value = clock()
         announce(visible)
     }
