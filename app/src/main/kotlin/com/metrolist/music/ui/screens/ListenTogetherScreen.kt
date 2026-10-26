@@ -1118,6 +1118,7 @@ private fun JoinCreateRoomSection(
             )
 
             // Room code input
+            // SARASWATI: Join by code is the fallback for when the hub cannot list the live rooms; the live list is the family's join.
             if (showCodeEntry) {
                 OutlinedTextField(
                     value = roomCodeInput,
@@ -1254,7 +1255,7 @@ private fun JoinCreateRoomSection(
                 }
             }
 
-            // Join by code: the room code is for when the hub cannot list the rooms
+            // SARASWATI: Join by code is the fallback for when the hub cannot list the live rooms; the live list is the family's join.
             if (!showCodeEntry) {
                 TextButton(onClick = { showCodeEntry = true }) {
                     Text(stringResource(R.string.join_by_code), fontWeight = FontWeight.SemiBold)

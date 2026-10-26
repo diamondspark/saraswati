@@ -1920,6 +1920,7 @@ fun ListenTogetherDialog(
 
                         HorizontalDivider()
 
+                        // SARASWATI: Join by code is the fallback for when the hub cannot list the live rooms; the live list is the family's join.
                         if (showCodeEntry) {
                             Text(
                                 text = stringResource(R.string.join_existing_room),
