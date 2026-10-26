@@ -126,6 +126,43 @@ class JoinModeTest {
     }
 
     @Test
+    fun `a stale car entry with the lookup throwing is a remote-controller join`() {
+        assertTrue(resolve("CAR1CAR1", listOf(room("CAR1CAR1", car = true)), Lookups { error("hub unreachable") }, listFresh = false))
+    }
+
+    @Test
+    fun `a stale car entry with the lookup timing out is a remote-controller join`() {
+        val slow = Lookups {
+            delay(1_000L)
+            listOf(room("CAR1CAR1", car = true))
+        }
+        assertTrue(resolve("CAR1CAR1", listOf(room("CAR1CAR1", car = true)), slow, timeoutMs = 50L, listFresh = false))
+    }
+
+    @Test
+    fun `a stale car entry with the lookup saying not a car room is a guest join, the lookup being authoritative`() {
+        val fresh = Lookups { listOf(room("CAR1CAR1", car = false)) }
+        assertFalse(resolve("CAR1CAR1", listOf(room("CAR1CAR1", car = true)), fresh, listFresh = false))
+        assertEquals(1, fresh.calls)
+    }
+
+    @Test
+    fun `a stale car entry with a lookup that does not name the room is still a remote-controller join`() {
+        val fresh = Lookups { listOf(room("OTHER123", car = false)) }
+        assertTrue(resolve("CAR1CAR1", listOf(room("CAR1CAR1", car = true)), fresh, listFresh = false))
+    }
+
+    @Test
+    fun `a stale car entry with the lookup failing is a remote-controller join`() {
+        assertTrue(resolve("CAR1CAR1", listOf(room("CAR1CAR1", car = true)), Lookups { null }, listFresh = false))
+    }
+
+    @Test
+    fun `no cached entry with the lookup failing is a guest join`() {
+        assertFalse(resolve("CAR1CAR1", emptyList(), Lookups { null }, listFresh = false))
+    }
+
+    @Test
     fun `another room being a car room does not make this one one`() {
         val live = listOf(room("CAR1CAR1", car = true), room("NORM1234", car = false))
         assertFalse(resolve("NORM1234", live))

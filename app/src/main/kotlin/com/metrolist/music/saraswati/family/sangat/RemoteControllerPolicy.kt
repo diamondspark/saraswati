@@ -51,11 +51,12 @@ object RemoteControllerPolicy {
     }
 
     /**
-     * Whether a join by [roomCode] is a remote controller's join. The live list answers first, but only while it is
+     * Whether a join by [roomCode] is a remote controller's join. A cached entry is trusted only while the list is
      * [listFresh]: a car room is listed as a normal room until its mode is marked, so an old entry can say "not a car
-     * room" for a room that is one now. Otherwise, and for a code the list does not show, the hub is asked once more,
-     * within [timeoutMs]. Anything that cannot be had (no answer, a slow hub, the room not listed) makes it a guest's
-     * join, as it always was: a normal room joined while the hub is down must still play.
+     * room" for a room that is one now. Otherwise the hub is asked once more, within [timeoutMs], and its answer for
+     * this room wins. When the hub cannot answer for this room, the last thing known about it decides: a cached entry
+     * says what it says, and a room never seen before is a guest's join, as it always was, so a normal room joined
+     * while the hub is down still plays.
      */
     suspend fun resolveJoinRemote(
         roomCode: String,
@@ -64,7 +65,8 @@ object RemoteControllerPolicy {
         timeoutMs: Long = FRESH_LOOKUP_TIMEOUT_MS,
         fetchLive: suspend () -> List<LiveSangatRoom>?,
     ): Boolean {
-        if (listFresh) live.firstOrNull { it.roomCode.equals(roomCode, ignoreCase = true) }?.let { return it.carMode }
+        val cached = live.firstOrNull { it.roomCode.equals(roomCode, ignoreCase = true) }
+        if (listFresh && cached != null) return cached.carMode
         val fresh =
             try {
                 withTimeoutOrNull(timeoutMs) { fetchLive() }
@@ -73,7 +75,11 @@ object RemoteControllerPolicy {
             } catch (e: Exception) {
                 null
             }
-        return fresh?.any { it.carMode && it.roomCode.equals(roomCode, ignoreCase = true) } == true
+        fresh?.firstOrNull { it.roomCode.equals(roomCode, ignoreCase = true) }?.let { return it.carMode }
+        // SARASWATI: when unsure, stay silent. Guessing "remote" wrongly leaves a passenger hearing nothing, and can rejoin.
+        // Guessing "guest" wrongly plays a second copy of the car's audio out of sync and burns the passenger's mobile data,
+        // so a stale car entry is kept when the hub cannot say otherwise. Do not flip this to a guess of "guest".
+        return cached?.carMode == true
     }
 
     private const val FRESH_LOOKUP_TIMEOUT_MS = 3_000L
