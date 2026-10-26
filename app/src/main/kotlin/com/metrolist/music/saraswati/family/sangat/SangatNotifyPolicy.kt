@@ -14,11 +14,23 @@ object SangatNotifyPolicy {
     /** How long a notification tap stays good for a join. */
     const val JOIN_REQUEST_TTL_MS = 60_000L
 
-    /** The rooms just announced that the person has not dismissed. A dismissed room never notifies again. */
+    /** The rooms just announced that the person has not dismissed. A dismissed room never notifies again, nor does the one this phone is in. */
     fun toNotify(
         announced: List<LiveSangatRoom>,
         dismissed: Set<String>,
-    ): List<LiveSangatRoom> = announced.filter { it.roomCode !in dismissed }
+        here: String? = null,
+    ): List<LiveSangatRoom> = announced.filter { it.roomCode !in dismissed && it.roomCode != here }
+
+    /** The posted notifications to take down: the room has ended, this phone is in it, or the person dismissed it. */
+    fun toCancel(
+        posted: Set<String>,
+        live: List<LiveSangatRoom>,
+        here: String?,
+        dismissed: Set<String>,
+    ): Set<String> {
+        val liveCodes = live.mapTo(HashSet()) { it.roomCode }
+        return posted.filterTo(HashSet()) { it !in liveCodes || it == here || it in dismissed }
+    }
 
     fun isFreshJoin(
         requestedAt: Long,

@@ -32,6 +32,32 @@ class SangatNotifyPolicyTest {
     }
 
     @Test
+    fun `a room this phone is already in does not notify`() {
+        val out = SangatNotifyPolicy.toNotify(listOf(room("AAAA"), room("BBBB")), emptySet(), here = "AAAA")
+        assertEquals(listOf("BBBB"), out.map { it.roomCode })
+    }
+
+    @Test
+    fun `a posted room that has ended is cancelled`() {
+        assertEquals(setOf("AAAA"), SangatNotifyPolicy.toCancel(setOf("AAAA", "BBBB"), listOf(room("BBBB")), null, emptySet()))
+    }
+
+    @Test
+    fun `a posted room this phone is in is cancelled`() {
+        assertEquals(setOf("AAAA"), SangatNotifyPolicy.toCancel(setOf("AAAA"), listOf(room("AAAA")), "AAAA", emptySet()))
+    }
+
+    @Test
+    fun `a posted room that was dismissed is cancelled`() {
+        assertEquals(setOf("AAAA"), SangatNotifyPolicy.toCancel(setOf("AAAA"), listOf(room("AAAA")), null, setOf("AAAA")))
+    }
+
+    @Test
+    fun `a posted room that is live, not joined and not dismissed is kept`() {
+        assertTrue(SangatNotifyPolicy.toCancel(setOf("AAAA"), listOf(room("AAAA")), "ZZZZ", setOf("YYYY")).isEmpty())
+    }
+
+    @Test
     fun `a tap is honoured within the time to live and not after it`() {
         assertTrue(SangatNotifyPolicy.isFreshJoin(requestedAt = 1_000L, now = 1_000L))
         assertTrue(SangatNotifyPolicy.isFreshJoin(requestedAt = 1_000L, now = 1_000L + SangatNotifyPolicy.JOIN_REQUEST_TTL_MS))

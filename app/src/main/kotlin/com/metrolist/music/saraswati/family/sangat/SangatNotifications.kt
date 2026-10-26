@@ -7,6 +7,8 @@
 // no push channel, so it is posted only while the watcher polls (the app on screen, or its media service alive).
 // It has its own channel, so it can be muted without muting playback. Tapping it hands the room code to
 // SangatJoinRequests, and the Sangat view model joins that room the same way the banner does.
+// SARASWATI: device fix F2 — each notification is tagged with its room code, so a room that has ended, one this phone is
+// in, or one dismissed is found again in the shade (even after the process died) and cancelled.
 package com.metrolist.music.saraswati.family.sangat
 
 import android.Manifest
@@ -27,6 +29,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -39,15 +43,32 @@ class SangatNotifications
         @ApplicationContext private val context: Context,
         private val watcher: SangatLiveWatcher,
         private val dismissals: SangatDismissals,
+        private val port: SangatRoomPort,
     ) {
         /** Posts a notification for each room the watcher announces. Called once, from the application scope. */
         fun start(scope: CoroutineScope) {
             scope.launch {
                 watcher.carPrompts.collect { room ->
-                    SangatNotifyPolicy.toNotify(listOf(room), dismissals.dismissed.value).forEach(::post)
+                    SangatNotifyPolicy.toNotify(listOf(room), dismissals.dismissed.value, port.currentRoomCode.first()).forEach(::post)
                 }
             }
+            scope.launch {
+                combine(watcher.liveRooms, watcher.lastPolledAt, port.currentRoomCode, dismissals.dismissed) { live, polledAt, here, dismissed ->
+                    // An empty list before the first poll means "not asked yet", not "no rooms".
+                    if (polledAt == null) emptySet() else SangatNotifyPolicy.toCancel(postedRoomCodes(), live, here, dismissed)
+                }.collect { codes -> codes.forEach { NotificationManagerCompat.from(context).cancel(it, NOTIFICATION_ID) } }
+            }
         }
+
+        /** The room codes of the Sangat notifications still in the shade, read back from the system. */
+        private fun postedRoomCodes(): Set<String> =
+            context
+                .getSystemService(NotificationManager::class.java)
+                ?.activeNotifications
+                .orEmpty()
+                .filter { it.id == NOTIFICATION_ID }
+                .mapNotNull { it.tag }
+                .toSet()
 
         @SuppressLint("MissingPermission")
         private fun post(room: LiveSangatRoom) {
@@ -81,11 +102,12 @@ class SangatNotifications
                     .setContentIntent(pending)
                     .setAutoCancel(true)
                     .build()
-            NotificationManagerCompat.from(context).notify(room.roomCode.hashCode(), notification)
+            NotificationManagerCompat.from(context).notify(room.roomCode, NOTIFICATION_ID, notification)
         }
 
         companion object {
             private const val CHANNEL_ID = "sangat_live"
+            private const val NOTIFICATION_ID = 0x5A46
         }
     }
 
