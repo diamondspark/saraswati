@@ -1,21 +1,21 @@
 {
   "schema": 1,
   "channel": "stable",
-  "versionCode": 4141,
-  "versionName": "13.7.0-s4141",
+  "versionCode": 4200,
+  "versionName": "13.7.0-s4200",
   "apk": {
-    "url": "https://github.com/diamondspark/saraswati/releases/download/v4141/saraswati-v4141.apk",
-    "sha256": "447ed467f36f42f75c3d7bd2309270c19399731baf988bac528a094bd29d50ff",
-    "size": 27020164
+    "url": "https://github.com/diamondspark/saraswati/releases/download/v4200/saraswati-v4200.apk",
+    "sha256": "2d34b82ffe3c1cfb46495c171f3abc357dc779f630f73bc343380566d37de9b6",
+    "size": 27044740
   },
   "urgent": true,
-  "notes": "Fixes the Sudhaar update banner, which could wrongly say the Updates app wasn't installed when it was.",
-  "publishedAt": "2026-10-23T18:36:56Z",
+  "notes": "Car: 'Start Sangat' on the car screen now works, and the car screen no longer goes blank after it. Sangat: family can join with one tap, no code needed. In the car, passengers' phones stay silent and just add songs to the car, so only the driver's phone uses data. Car voice: 'Hey Google, play ...' now finds the right song, singer or film song, and plays that singer's own songs.",
+  "publishedAt": "2026-10-26T05:46:13Z",
   "updater": {
-    "versionCode": 4141,
+    "versionCode": 4200,
     "apk": {
-      "url": "https://github.com/diamondspark/saraswati/releases/download/v4141/saraswati-updater-v4141.apk",
-      "sha256": "029a983a3328fcd1383b0d6cf2bd358859923e86072c0b7506faedc9774174bf",
+      "url": "https://github.com/diamondspark/saraswati/releases/download/v4200/saraswati-updater-v4200.apk",
+      "sha256": "06e345776bf4f641cb0e532e502a447d46f00d19e7a6e5b77b031ae4c219ceb8",
       "size": 256152
     }
   }
