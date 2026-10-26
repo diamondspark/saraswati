@@ -8,7 +8,7 @@
 // live rooms every [POLL_INTERVAL_MS], between [start] and [stop] and no other time. Nothing is asked while
 // the Sangat kill-switch is off or this phone has no session. A hub that cannot be reached, or answers
 // something unusable, gives an empty list; it never throws. Rooms this phone hosts are left out, and each room
-// code in car mode is announced once on [carPrompts] (forgotten when the room leaves the list).
+// code is announced once on [carPrompts] (forgotten when the room leaves the list).
 //
 // The kill-switches would otherwise only be read when the app resumes, so a phone left on screen would keep
 // a stale answer for as long as it stays there. The watcher therefore asks the gate to refresh itself when the
@@ -127,7 +127,7 @@ class SangatLiveWatcher(
         val fresh =
             synchronized(prompted) {
                 prompted.retainAll(visible.mapTo(HashSet()) { it.roomCode })
-                visible.filter { it.carMode && prompted.add(it.roomCode) }
+                visible.filter { prompted.add(it.roomCode) }
             }
         fresh.forEach { prompts.tryEmit(it) }
     }

@@ -126,7 +126,7 @@ class SangatLiveWatcherTest {
     }
 
     @Test
-    fun `emits one car prompt per room code`() {
+    fun `emits one prompt per room code, car or not`() {
         val got = mutableListOf<String>()
         val watcher = watcher()
         scope.launch { watcher.carPrompts.collect { got += it.roomCode } }
@@ -138,13 +138,29 @@ class SangatLiveWatcherTest {
         time.advanceBy(30_000)
         time.advanceBy(30_000)
 
-        assertEquals(listOf("BBBB"), got)
+        assertEquals(listOf("BBBB", "CCCC"), got)
         assertEquals(3, hub.polls.size)
 
-        // CCCC starts driving: its first car-mode poll prompts; BBBB is not repeated.
+        // CCCC starts driving: it was already prompted, so it is not prompted again; BBBB is not repeated.
         hub.rooms = Result.success(listOf(room("BBBB", car = true), room("CCCC", car = true)))
         time.advanceBy(30_000)
         assertEquals(listOf("BBBB", "CCCC"), got)
+    }
+
+    @Test
+    fun `a non-car room prompts exactly once while it stays live`() {
+        val got = mutableListOf<String>()
+        val watcher = watcher()
+        scope.launch { watcher.carPrompts.collect { got += it.roomCode } }
+        time.runCurrent()
+        hub.rooms = Result.success(listOf(room("EEEE", car = false)))
+
+        watcher.start(scope)
+        time.runCurrent()
+        repeat(5) { time.advanceBy(30_000) }
+
+        assertEquals(6, hub.polls.size)
+        assertEquals(listOf("EEEE"), got)
     }
 
     @Test
