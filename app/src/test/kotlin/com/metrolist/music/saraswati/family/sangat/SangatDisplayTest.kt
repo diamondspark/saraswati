@@ -94,6 +94,15 @@ class SangatDisplayTest {
     }
 
     @Test
+    fun `a joined room listed as home is a car room for a remote controller, so the rows and banner agree`() {
+        val others = arrayOf(SangatMember("Papa", false), SangatMember("Me", true))
+        val row = SangatDisplay.rows(listOf(live("HOME"), live("OTHER")), info("HOME", false, *others), remoteController = true)
+        assertTrue(row.first { it.joined }.room.carMode)
+        assertFalse(row.first { !it.joined }.room.carMode)
+        assertFalse(SangatDisplay.rows(listOf(live("HOME")), info("HOME", false, *others), remoteController = false).single().room.carMode)
+    }
+
+    @Test
     fun `banner is remote only when joined to a car room or a remote controller`() {
         val me = SangatMember("Me", true)
         val others = arrayOf(SangatMember("Papa", false), me)

@@ -134,7 +134,8 @@ object SangatDisplay {
     ): List<SangatRow> {
         val here = info?.roomCode
         val others = live.filterNot { it.roomCode == here && info?.isHost == true }
-        val rows = others.map { SangatRow(it, joined = it.roomCode == here) }
+        // A remote controller is in a car room even when the list has not caught up with the car mark yet.
+        val rows = others.map { if (it.roomCode == here) SangatRow(it.copy(carMode = it.carMode || remoteController), joined = true) else SangatRow(it, joined = false) }
         if (info == null || info.isHost || rows.any { it.joined }) return rows
         val synthesized =
             LiveSangatRoom(
