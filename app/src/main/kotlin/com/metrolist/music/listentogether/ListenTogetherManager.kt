@@ -2105,11 +2105,13 @@ class ListenTogetherManager
         /**
          * Join an existing room. A car room is joined as a remote controller, so this phone shows the room and suggests
          * songs but never plays it. The car mode comes from the live room list, or from one fresh hub lookup for a code
-         * the list does not show yet; never from the caller.
+         * the list does not show yet; never from the caller. [onJoined] gets the mode this join resolved to, once it has
+         * joined; it is not called for a join that a leave or another join overtook.
          */
         fun joinRoom(
             roomCode: String,
             username: String,
+            onJoined: (remoteController: Boolean) -> Unit = {},
         ) {
             val ticket = joinTickets.issue()
             scope.launch {
@@ -2125,6 +2127,7 @@ class ListenTogetherManager
                         Timber.tag(TAG).d("Joining room $roomCode as $username (remoteController=$remoteController)")
                         if (remoteController) remoteMode.enter() else remoteMode.clear()
                         client.joinRoom(roomCode, username)
+                        onJoined(remoteMode.enabled.value)
                     },
                 )
             }

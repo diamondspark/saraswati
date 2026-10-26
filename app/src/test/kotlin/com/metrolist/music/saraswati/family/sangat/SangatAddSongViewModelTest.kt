@@ -53,6 +53,7 @@ class SangatAddSongViewModelTest {
             override fun joinRoom(
                 roomCode: String,
                 username: String,
+                onJoined: (remoteController: Boolean) -> Unit,
             ) = Unit
 
             override fun leaveRoom() = Unit

@@ -49,10 +49,15 @@ interface SangatRoomPort {
 
     fun createRoom(username: String)
 
-    /** The room machinery decides the mode itself: a car room on the live list is joined as a remote controller. */
+    /**
+     * The room machinery decides the mode itself: a car room on the live list is joined as a remote controller.
+     * [onJoined] runs once that decision is made, with whether this phone is a remote controller now. It does not run
+     * for a join that a leave or another join overtook.
+     */
     fun joinRoom(
         roomCode: String,
         username: String,
+        onJoined: (remoteController: Boolean) -> Unit,
     )
 
     fun leaveRoom()
@@ -160,8 +165,8 @@ class SangatViewModel
         /** Joins a live room. A car room is joined as a remote controller, so nothing plays on this phone. */
         fun join(room: LiveSangatRoom) {
             withName { name ->
-                rooms.joinRoom(room.roomCode, name)
-                if (room.carMode) _enteredCarRoom.tryEmit(Unit)
+                // The mode this join resolved to, not the list the prompt was shown from: the screen must match what the phone does.
+                rooms.joinRoom(room.roomCode, name) { remote -> if (remote) _enteredCarRoom.tryEmit(Unit) }
             }
         }
 

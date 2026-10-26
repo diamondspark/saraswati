@@ -397,6 +397,12 @@ class RemoteControllerTest {
         assertTrue(manager.contains("observeCarRoomForRemote()\n        }"))
     }
 
+    @Test
+    fun `a join reports the mode it resolved to once it has joined`() {
+        val manager = source("src/main/kotlin/com/metrolist/music/listentogether/ListenTogetherManager.kt")
+        assertTrue(manager.contains("client.joinRoom(roomCode, username)\n                        onJoined(remoteMode.enabled.value)"))
+    }
+
     private fun source(path: String): String {
         val file = listOf(File(path), File("app/$path")).firstOrNull { it.isFile } ?: error("cannot find $path")
         return file.readText()
