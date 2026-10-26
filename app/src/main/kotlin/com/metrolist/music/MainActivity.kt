@@ -153,6 +153,7 @@ import com.metrolist.music.saraswati.family.parivaar.ParivaarMemberName
 import com.metrolist.music.saraswati.family.parivaar.ParivaarMixRefresher
 import com.metrolist.music.saraswati.family.parivaar.TopSongsPlaylistSync
 import com.metrolist.music.saraswati.family.sangat.SangatForeground
+import com.metrolist.music.saraswati.family.sangat.SangatJoinRequests
 import com.metrolist.music.saraswati.family.PairingInbox
 import com.metrolist.music.saraswati.family.StationsCache
 import com.metrolist.music.saraswati.family.StationsRefresher
@@ -486,6 +487,7 @@ class MainActivity : FragmentActivity() {
             dropIntentsForSaral(intent)
             return
         }
+        SangatJoinRequests.offerFrom(intent, System.currentTimeMillis()) // SARASWATI: Phase 4 Task 9 — a tap on the Sangat notification
         if (::navController.isInitialized) {
             handleWidgetTargetIntent(intent, navController)
             // SARASWATI (audit A9.3): a malformed link (e.g. a non-hierarchical
@@ -501,6 +503,7 @@ class MainActivity : FragmentActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        SangatJoinRequests.offerFrom(intent, System.currentTimeMillis()) // SARASWATI: Phase 4 Task 9 — a tap on the Sangat notification
         window.decorView.layoutDirection = View.LAYOUT_DIRECTION_LTR
         WindowCompat.setDecorFitsSystemWindows(window, false)
 

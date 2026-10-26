@@ -90,4 +90,13 @@ class SangatWiringSourceTest {
         assertTrue(resumed.indexOf("featureGate.refresh()") < resumed.indexOf("topSongsPlaylistSync.syncIfDue("))
         assertTrue(Regex("""launch\s*\{\s*familyViewModel\.ensureSelfPaired\(""").containsMatchIn(resumed))
     }
+
+    @Test
+    fun `the prompt names a home room as a home room, with its own copy`() {
+        val prompt = source("src/main/kotlin/com/metrolist/music/saraswati/family/sangat/CarSangatPrompt.kt")
+        assertEquals(3, Regex("""if \(room\.carMode\)""").findAll(prompt).count())
+        assertTrue(prompt.contains("R.string.family_sangat_home_prompt_title"))
+        assertTrue(prompt.contains("R.string.family_sangat_home_prompt_hindi"))
+        assertTrue(prompt.contains("R.string.family_sangat_home_prompt_desc"))
+    }
 }

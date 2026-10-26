@@ -23,6 +23,8 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -115,6 +117,21 @@ class SangatLiveWatcherTest {
     }
 
     @Test
+    fun `the live list is fresh for ten seconds after a poll and no longer`() {
+        val watcher = watcher()
+        assertFalse(watcher.listIsFresh())
+
+        watcher.start(scope)
+        time.runCurrent()
+        assertTrue(watcher.listIsFresh())
+
+        time.advanceBy(SangatLiveWatcher.LIST_FRESH_MS)
+        assertTrue(watcher.listIsFresh())
+        time.advanceBy(1)
+        assertFalse(watcher.listIsFresh())
+    }
+
+    @Test
     fun `excludes rooms this device hosts`() {
         hub.rooms = Result.success(listOf(room("AAAA", host = "me"), room("BBBB", host = "other")))
         val watcher = watcher()
@@ -126,7 +143,7 @@ class SangatLiveWatcherTest {
     }
 
     @Test
-    fun `emits one car prompt per room code`() {
+    fun `emits one prompt per room code, car or not`() {
         val got = mutableListOf<String>()
         val watcher = watcher()
         scope.launch { watcher.carPrompts.collect { got += it.roomCode } }
@@ -138,13 +155,40 @@ class SangatLiveWatcherTest {
         time.advanceBy(30_000)
         time.advanceBy(30_000)
 
-        assertEquals(listOf("BBBB"), got)
+        assertEquals(listOf("BBBB", "CCCC"), got)
         assertEquals(3, hub.polls.size)
 
-        // CCCC starts driving: its first car-mode poll prompts; BBBB is not repeated.
+        // CCCC starts driving: it was already prompted, so it is not prompted again; BBBB is not repeated.
         hub.rooms = Result.success(listOf(room("BBBB", car = true), room("CCCC", car = true)))
         time.advanceBy(30_000)
         assertEquals(listOf("BBBB", "CCCC"), got)
+    }
+
+    @Test
+    fun `a non-car room prompts exactly once while it stays live`() {
+        val got = mutableListOf<String>()
+        val watcher = watcher()
+        scope.launch { watcher.carPrompts.collect { got += it.roomCode } }
+        time.runCurrent()
+        hub.rooms = Result.success(listOf(room("EEEE", car = false)))
+
+        watcher.start(scope)
+        time.runCurrent()
+        repeat(5) { time.advanceBy(30_000) }
+
+        assertEquals(6, hub.polls.size)
+        assertEquals(listOf("EEEE"), got)
+    }
+
+    @Test
+    fun `a fresh lookup returns the hub's live list, and nothing without a session`() {
+        hub.rooms = Result.success(listOf(room("CCCC", car = true)))
+        val watcher = watcher()
+
+        assertEquals(listOf("CCCC"), runBlocking { watcher.fetchLiveRooms() }?.map { it.roomCode })
+
+        token = null
+        assertNull(runBlocking { watcher.fetchLiveRooms() })
     }
 
     @Test
@@ -167,6 +211,62 @@ class SangatLiveWatcherTest {
         hub.throwing = null
         time.advanceBy(30_000)
         assertEquals(1, watcher.liveRooms.value.size)
+    }
+
+    @Test
+    fun `answeredLive is null before the first answer and set after a successful poll`() {
+        val watcher = watcher()
+        assertNull(watcher.answeredLive.value)
+        hub.rooms = Result.success(listOf(room("BBBB"), room("MINE", host = "me")))
+        watcher.start(scope)
+        time.runCurrent()
+        assertEquals(listOf("BBBB"), watcher.answeredLive.value?.map { it.roomCode })
+    }
+
+    @Test
+    fun `answeredLive keeps its last answer through a failed call, a thrown exception and a missing token`() {
+        val watcher = watcher()
+        hub.rooms = Result.success(listOf(room("BBBB")))
+        watcher.start(scope)
+        time.runCurrent()
+
+        hub.rooms = Result.failure(HubException(500, "down"))
+        time.advanceBy(30_000)
+        assertTrue(watcher.liveRooms.value.isEmpty())
+        assertEquals(listOf("BBBB"), watcher.answeredLive.value?.map { it.roomCode })
+
+        hub.rooms = Result.success(listOf(room("BBBB")))
+        hub.throwing = java.io.IOException("boom")
+        time.advanceBy(30_000)
+        assertEquals(listOf("BBBB"), watcher.answeredLive.value?.map { it.roomCode })
+
+        hub.throwing = null
+        token = null
+        time.advanceBy(30_000)
+        assertEquals(listOf("BBBB"), watcher.answeredLive.value?.map { it.roomCode })
+    }
+
+    @Test
+    fun `answeredLive is null again after stop`() {
+        val watcher = watcher()
+        hub.rooms = Result.success(listOf(room("BBBB")))
+        watcher.start(scope)
+        time.runCurrent()
+        assertEquals(1, watcher.answeredLive.value?.size)
+        watcher.stop()
+        assertNull(watcher.answeredLive.value)
+    }
+
+    @Test
+    fun `answeredLive is an empty list when the sangat gate is off`() {
+        val watcher = watcher()
+        watcher.start(scope)
+        time.runCurrent()
+        killSwitchHub.killSwitches = mapOf("sangat" to false)
+        runBlocking { gate.refresh() }
+        hub.rooms = Result.success(listOf(room("BBBB")))
+        time.advanceBy(30_000)
+        assertEquals(emptyList<LiveSangatRoom>(), watcher.answeredLive.value)
     }
 
     @Test

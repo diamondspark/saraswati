@@ -198,13 +198,15 @@ class RemoteControllerTest {
             "handleEvent returns when the remote filter consumed the event",
             handleEvent.contains("if (remoteEventRouter.route(event)) return"),
         )
-        assertTrue(manager.contains("remoteController: Boolean = false"))
+        assertTrue(manager.contains("RemoteControllerPolicy.resolveJoinRemote(roomCode, sangatWatcher.liveRooms.value, sangatWatcher.listIsFresh())"))
         val volume = manager.substringAfter("private fun applyHostVolumeIfNeeded").substringBefore("\n        }\n")
         assertTrue("the host's volume is not applied to a remote controller", volume.contains("drivesLocalPlayer"))
         val buffer = manager.substringAfter("is ListenTogetherEvent.BufferComplete ->").substringBefore("is ListenTogetherEvent.SyncStateReceived")
         assertTrue(buffer.contains("remoteMode.drives("))
         val leave = manager.substringAfter("fun leaveRoom()").substringBefore("\n        }\n")
         assertTrue(leave.contains("remoteMode.clear()"))
+        assertTrue("a leave stops a join still waiting on the lookup", leave.contains("joinTickets.cancel()"))
+        assertTrue("the join runs only while its ticket is current", manager.contains("joinTickets.runIfCurrent("))
     }
 
     // SARASWATI: Phase 4 Task 15 — a host must never be a remote controller.
@@ -340,6 +342,65 @@ class RemoteControllerTest {
         assertFalse(GuestPlaybackLock.blocks(isInRoom = true, isHost = false, connection = ConnectionState.ERROR))
         assertFalse(GuestPlaybackLock.blocks(isInRoom = true, isHost = true, connection = ConnectionState.CONNECTED))
         assertFalse(GuestPlaybackLock.blocks(isInRoom = false, isHost = false, connection = ConnectionState.CONNECTED))
+    }
+
+    // SARASWATI: the reconciliation after a join. Entering is always safe; leaving is never automatic.
+    private fun carRoom(code: String, car: Boolean) =
+        com.metrolist.music.saraswati.family.LiveSangatRoom(code, "Papa", "host", car, 1, "2026-10-25T10:00:00.000Z")
+
+    @Test
+    fun `in a car room as a guest that is not yet remote enters remote mode`() {
+        assertTrue(RemoteControllerPolicy.shouldEnterRemote("CAR1CAR1", false, listOf(carRoom("CAR1CAR1", true)), false))
+    }
+
+    @Test
+    fun `in a car room that is already remote is a no-op`() {
+        assertFalse(RemoteControllerPolicy.shouldEnterRemote("CAR1CAR1", false, listOf(carRoom("CAR1CAR1", true)), true))
+    }
+
+    @Test
+    fun `remote and the room now looks like a normal one stays remote, never leaves`() {
+        assertFalse(RemoteControllerPolicy.shouldEnterRemote("NORM1234", false, listOf(carRoom("NORM1234", false)), true))
+        assertFalse(RemoteControllerPolicy.shouldEnterRemote("NORM1234", false, emptyList(), true))
+    }
+
+    @Test
+    fun `not in a room is a no-op`() {
+        assertFalse(RemoteControllerPolicy.shouldEnterRemote(null, false, listOf(carRoom("CAR1CAR1", true)), false))
+        assertFalse(RemoteControllerPolicy.shouldEnterRemote("", false, listOf(carRoom("CAR1CAR1", true)), false))
+    }
+
+    @Test
+    fun `a host never enters remote mode, even when the list shows its room as a car room`() {
+        assertFalse(RemoteControllerPolicy.shouldEnterRemote("CAR1CAR1", true, listOf(carRoom("CAR1CAR1", true)), false))
+    }
+
+    @Test
+    fun `a normal room, or a car room another room is, does not enter remote mode`() {
+        assertFalse(RemoteControllerPolicy.shouldEnterRemote("NORM1234", false, listOf(carRoom("NORM1234", false)), false))
+        assertFalse(RemoteControllerPolicy.shouldEnterRemote("NORM1234", false, listOf(carRoom("CAR1CAR1", true)), false))
+    }
+
+    @Test
+    fun `the room code is matched whatever its case`() {
+        assertTrue(RemoteControllerPolicy.shouldEnterRemote("car1car1", false, listOf(carRoom("CAR1CAR1", true)), false))
+    }
+
+    @Test
+    fun `the manager reconciles the room after a join and only ever enters remote mode`() {
+        val manager = source("src/main/kotlin/com/metrolist/music/listentogether/ListenTogetherManager.kt")
+        val reconcile = manager.substringAfter("private fun observeCarRoomForRemote() {").substringBefore("\n        }\n")
+        assertTrue(reconcile.contains("RemoteControllerPolicy.shouldEnterRemote("))
+        assertTrue(reconcile.contains("remoteMode.enter()"))
+        assertTrue(reconcile.contains("pauseLocalForRemoteController()"))
+        assertFalse("nothing reconciles a remote controller back out", reconcile.contains("clear()"))
+        assertTrue(manager.contains("observeCarRoomForRemote()\n        }"))
+    }
+
+    @Test
+    fun `a join reports the mode it resolved to once it has joined`() {
+        val manager = source("src/main/kotlin/com/metrolist/music/listentogether/ListenTogetherManager.kt")
+        assertTrue(manager.contains("client.joinRoom(roomCode, username)\n                        onJoined(remoteMode.enabled.value)"))
     }
 
     private fun source(path: String): String {

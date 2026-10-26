@@ -26,6 +26,8 @@ import com.metrolist.music.models.toMediaMetadata
 import com.metrolist.music.playback.PlayerConnection
 import com.metrolist.music.playback.queues.YouTubeQueue
 import com.metrolist.music.saraswati.family.sangat.CarConnectionKeeper
+import com.metrolist.music.saraswati.family.sangat.JoinTickets
+import com.metrolist.music.saraswati.family.sangat.SangatLiveWatcher
 import com.metrolist.music.saraswati.family.sangat.PassengerPlayCredit
 import com.metrolist.music.saraswati.family.sangat.tickWhilePresent
 import com.metrolist.music.saraswati.family.sangat.GuestPlaybackLock
@@ -192,6 +194,8 @@ class ListenTogetherManager
     constructor(
         private val client: ListenTogetherClient,
         @ApplicationContext private val context: Context,
+        // SARASWATI: Phase 4 Task 10 — the live list says which room codes are car rooms; a join reads it, never the caller.
+        private val sangatWatcher: SangatLiveWatcher,
     ) {
         companion object {
             private const val TAG = "ListenTogetherManager"
@@ -204,6 +208,9 @@ class ListenTogetherManager
         }
 
         private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+
+        // SARASWATI: Phase 4 Task 10 — a join waiting on the hub lookup must not land after a leave, a new room or a disconnect.
+        private val joinTickets = JoinTickets()
 
         // SARASWATI: Phase 4 Task 10 — remote-controller mode: a car passenger's phone shows the room and
         // suggests songs but never plays. The router is the first stop for every room event that would drive
@@ -220,6 +227,25 @@ class ListenTogetherManager
             observePreferences()
             RemoteControllerStore.restore(context, scope, remoteMode)
             observePassengerCredit()
+            observeCarRoomForRemote()
+        }
+
+        // SARASWATI: the reconciliation after a join. The join decision can be wrong (a hub that is down, a stale list, a room
+        // marked as a car room after someone joined it), so while in a room the live list is watched: a car room this phone is
+        // in puts it in remote mode and pauses its player. It only ever enters remote mode; nothing here clears it. Leaving
+        // would start this phone's music on its own, which is the one thing the mode prevents. See shouldEnterRemote.
+        private fun observeCarRoomForRemote() {
+            scope.launch {
+                combine(client.roomState, sangatWatcher.liveRooms) { room, live ->
+                    RemoteControllerPolicy.shouldEnterRemote(room?.roomCode, isHost, live, remoteMode.enabled.value)
+                }.collect { enter ->
+                    if (enter) {
+                        Timber.tag(TAG).d("This room is a car room: entering remote-controller mode")
+                        remoteMode.enter()
+                        pauseLocalForRemoteController()
+                    }
+                }
+            }
         }
 
         // SARASWATI: Phase 4 Task 13 — this phone plays nothing as a remote controller, so a song it picked is
@@ -2059,6 +2085,7 @@ class ListenTogetherManager
          */
         fun disconnect() {
             Timber.tag(TAG).d("Disconnecting from server")
+            joinTickets.cancel()
             cleanup()
             remoteMode.clear() // SARASWATI: Phase 4 Task 10
             client.disconnect()
@@ -2070,22 +2097,40 @@ class ListenTogetherManager
          */
         fun createRoom(username: String) {
             Timber.tag(TAG).d("Creating room with username: $username")
+            joinTickets.cancel()
             remoteMode.clear() // SARASWATI: Phase 4 Task 10 — a host plays
             client.createRoom(username)
         }
 
         /**
-         * Join an existing room
+         * Join an existing room. A car room is joined as a remote controller, so this phone shows the room and suggests
+         * songs but never plays it. The car mode comes from the live room list, or from one fresh hub lookup for a code
+         * the list does not show yet; never from the caller. [onJoined] gets the mode this join resolved to, once it has
+         * joined; it is not called for a join that a leave or another join overtook.
          */
         fun joinRoom(
             roomCode: String,
             username: String,
-            // SARASWATI: Phase 4 Task 10 — join to watch and suggest only; this phone never plays the room
-            remoteController: Boolean = false,
+            onJoined: (remoteController: Boolean) -> Unit = {},
         ) {
-            Timber.tag(TAG).d("Joining room $roomCode as $username (remoteController=$remoteController)")
-            if (remoteController) remoteMode.enter() else remoteMode.clear()
-            client.joinRoom(roomCode, username)
+            val ticket = joinTickets.issue()
+            scope.launch {
+                joinTickets.runIfCurrent(
+                    ticket,
+                    resolve = {
+                        RemoteControllerPolicy.resolveJoinRemote(roomCode, sangatWatcher.liveRooms.value, sangatWatcher.listIsFresh()) {
+                            sangatWatcher.fetchLiveRooms()
+                        }
+                    },
+                    join = { remoteController ->
+                        // SARASWATI: Phase 4 Task 10 — join to watch and suggest only; this phone never plays a car room
+                        Timber.tag(TAG).d("Joining room $roomCode as $username (remoteController=$remoteController)")
+                        if (remoteController) remoteMode.enter() else remoteMode.clear()
+                        client.joinRoom(roomCode, username)
+                        onJoined(remoteMode.enabled.value)
+                    },
+                )
+            }
         }
 
         // SARASWATI: a remote controller's phone may still be playing what it played before the drive
@@ -2103,6 +2148,7 @@ class ListenTogetherManager
          */
         fun leaveRoom() {
             Timber.tag(TAG).d("Leaving room")
+            joinTickets.cancel()
             cleanup()
             remoteMode.clear() // SARASWATI: Phase 4 Task 10 — after cleanup, which must still see the mode
             client.leaveRoom()

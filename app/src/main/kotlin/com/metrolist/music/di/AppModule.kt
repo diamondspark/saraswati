@@ -20,6 +20,7 @@ import com.metrolist.music.listentogether.ListenTogetherManager
 import com.metrolist.music.saraswati.family.FamilyFeatureGate
 import com.metrolist.music.saraswati.family.HubIdentity
 import com.metrolist.music.saraswati.family.sangat.SangatCarMode
+import com.metrolist.music.saraswati.family.sangat.SangatLiveWatcher
 import com.metrolist.music.utils.dataStore
 import com.metrolist.music.utils.get
 import dagger.Module
@@ -113,5 +114,7 @@ object AppModule {
     fun provideListenTogetherManager(
         @ApplicationContext context: Context,
         client: ListenTogetherClient,
-    ): ListenTogetherManager = ListenTogetherManager(client, context)
+        // SARASWATI: Phase 4 Task 10 — the live list gives a join its car mode.
+        sangatWatcher: SangatLiveWatcher,
+    ): ListenTogetherManager = ListenTogetherManager(client, context, sangatWatcher)
 }

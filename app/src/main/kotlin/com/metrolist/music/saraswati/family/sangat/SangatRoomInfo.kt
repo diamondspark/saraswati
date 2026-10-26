@@ -67,6 +67,8 @@ data class SangatBanner(
     val room: LiveSangatRoom,
     val joined: Boolean,
     val syncedWith: List<String>,
+    /** Joined to a car room, where nothing plays on this phone: the banner says it adds songs, not that it plays in sync. */
+    val remote: Boolean = false,
 )
 
 object SangatDisplay {
@@ -132,7 +134,8 @@ object SangatDisplay {
     ): List<SangatRow> {
         val here = info?.roomCode
         val others = live.filterNot { it.roomCode == here && info?.isHost == true }
-        val rows = others.map { SangatRow(it, joined = it.roomCode == here) }
+        // A remote controller is in a car room even when the list has not caught up with the car mark yet.
+        val rows = others.map { if (it.roomCode == here) SangatRow(it.copy(carMode = it.carMode || remoteController), joined = true) else SangatRow(it, joined = false) }
         if (info == null || info.isHost || rows.any { it.joined }) return rows
         val synthesized =
             LiveSangatRoom(
@@ -158,7 +161,7 @@ object SangatDisplay {
         if (info?.isHost == true) return null
         if (info == null) return live.firstOrNull()?.let { SangatBanner(it, joined = false, syncedWith = emptyList()) }
         val room = rows(live, info, remoteController).first { it.joined }.room
-        return SangatBanner(room, joined = true, syncedWith = info.others)
+        return SangatBanner(room, joined = true, syncedWith = info.others, remote = room.carMode || remoteController)
     }
 
 }

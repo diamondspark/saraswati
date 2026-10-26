@@ -1064,6 +1064,8 @@ private fun JoinCreateRoomSection(
     onJoinRoom: () -> Unit,
     onFieldFocused: () -> Unit = {},
 ) {
+    var showCodeEntry by rememberSaveable { mutableStateOf(false) }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
@@ -1116,40 +1118,43 @@ private fun JoinCreateRoomSection(
             )
 
             // Room code input
-            OutlinedTextField(
-                value = roomCodeInput,
-                onValueChange = { if (it.length <= 8) onRoomCodeChange(it.uppercase()) },
-                label = { Text(stringResource(R.string.room_code)) },
-                placeholder = { Text(stringResource(R.string.enter_room_code)) },
-                leadingIcon = {
-                    Icon(
-                        painterResource(R.drawable.group),
-                        null,
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                },
-                trailingIcon = {
-                    if (roomCodeInput.isNotBlank()) {
-                        MaterialIconButton(onClick = { onRoomCodeChange("") }) {
-                            Icon(painterResource(R.drawable.close), null)
+            // SARASWATI: Join by code is the fallback for when the hub cannot list the live rooms; the live list is the family's join.
+            if (showCodeEntry) {
+                OutlinedTextField(
+                    value = roomCodeInput,
+                    onValueChange = { if (it.length <= 8) onRoomCodeChange(it.uppercase()) },
+                    label = { Text(stringResource(R.string.room_code)) },
+                    placeholder = { Text(stringResource(R.string.enter_room_code)) },
+                    leadingIcon = {
+                        Icon(
+                            painterResource(R.drawable.group),
+                            null,
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    },
+                    trailingIcon = {
+                        if (roomCodeInput.isNotBlank()) {
+                            MaterialIconButton(onClick = { onRoomCodeChange("") }) {
+                                Icon(painterResource(R.drawable.close), null)
+                            }
                         }
-                    }
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(16.dp),
-                colors =
-                    OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                    ),
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .bringIntoViewRequester(bringIntoViewRequester)
-                        .onFocusChanged { if (it.isFocused) onFieldFocused() },
-            )
+                    },
+                    singleLine = true,
+                    shape = RoundedCornerShape(16.dp),
+                    colors =
+                        OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                        ),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .bringIntoViewRequester(bringIntoViewRequester)
+                            .onFocusChanged { if (it.isFocused) onFieldFocused() },
+                )
+            }
 
             // Waiting for approval indicator
             AnimatedVisibility(
@@ -1247,6 +1252,13 @@ private fun JoinCreateRoomSection(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(stringResource(R.string.create_room), fontWeight = FontWeight.SemiBold)
+                }
+            }
+
+            // SARASWATI: Join by code is the fallback for when the hub cannot list the live rooms; the live list is the family's join.
+            if (!showCodeEntry) {
+                TextButton(onClick = { showCodeEntry = true }) {
+                    Text(stringResource(R.string.join_by_code), fontWeight = FontWeight.SemiBold)
                 }
             }
 

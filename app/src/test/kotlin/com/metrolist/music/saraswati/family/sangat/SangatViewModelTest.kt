@@ -14,6 +14,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -37,8 +38,14 @@ class SangatViewModelTest {
         val info = MutableStateFlow<SangatRoomInfo?>(null)
         val suggested = mutableListOf<SangatCandidate>()
         val created = mutableListOf<String>()
-        val joined = mutableListOf<Triple<String, String, Boolean>>()
+        val joined = mutableListOf<Pair<String, String>>()
+        private var onJoined: ((Boolean) -> Unit)? = null
         var left = 0
+
+        /** Settles the join asked for last, as the room machinery does once it has decided the mode. */
+        fun finishJoin(remoteController: Boolean) {
+            onJoined?.invoke(remoteController)
+        }
 
         override val currentRoomCode: Flow<String?> get() = here
         override val remoteController: Flow<Boolean> get() = car
@@ -56,9 +63,10 @@ class SangatViewModelTest {
         override fun joinRoom(
             roomCode: String,
             username: String,
-            remoteController: Boolean,
+            onJoined: (remoteController: Boolean) -> Unit,
         ) {
-            joined += Triple(roomCode, username, remoteController)
+            joined += roomCode to username
+            this.onJoined = onJoined
         }
 
         override fun leaveRoom() {
@@ -125,21 +133,85 @@ class SangatViewModelTest {
     }
 
     @Test
-    fun `joining a car room enters remote-controller mode`() {
+    fun `joining a car room joins that room by its code`() {
         val vm = newVm()
 
         vm.join(room("CAR1", car = true))
 
-        assertEquals(listOf(Triple("CAR1", "Asha", true)), port.joined)
+        assertEquals(listOf("CAR1" to "Asha"), port.joined)
     }
 
     @Test
-    fun `joining a normal room does not`() {
+    fun `a car room whose join resolves as a remote controller opens the remote screen`() {
+        val vm = newVm()
+        val opened = mutableListOf<Unit>()
+        scope.launch { vm.enteredCarRoom.collect { opened += it } }
+
+        vm.join(room("CAR1", car = true))
+        port.finishJoin(remoteController = true)
+
+        assertEquals(1, opened.size)
+    }
+
+    @Test
+    fun `a car room that resolves as a guest does not open the remote screen`() {
+        val vm = newVm()
+        val opened = mutableListOf<Unit>()
+        scope.launch { vm.enteredCarRoom.collect { opened += it } }
+
+        vm.join(room("CAR1", car = true))
+        port.finishJoin(remoteController = false)
+
+        assertTrue(opened.isEmpty())
+    }
+
+    @Test
+    fun `a room the list showed as normal that resolves as a remote controller opens the remote screen`() {
+        val vm = newVm()
+        val opened = mutableListOf<Unit>()
+        scope.launch { vm.enteredCarRoom.collect { opened += it } }
+
+        vm.join(room("NORM1"))
+        port.finishJoin(remoteController = true)
+
+        assertEquals(1, opened.size)
+    }
+
+    @Test
+    fun `a join that is still waiting opens nothing`() {
+        val vm = newVm()
+        val opened = mutableListOf<Unit>()
+        scope.launch { vm.enteredCarRoom.collect { opened += it } }
+
+        vm.join(room("CAR1", car = true))
+
+        assertTrue(opened.isEmpty())
+    }
+
+    @Test
+    fun `joining a normal room joins that room by its code`() {
         val vm = newVm()
 
         vm.join(room("NORM1"))
 
-        assertEquals(listOf(Triple("NORM1", "Asha", false)), port.joined)
+        assertEquals(listOf("NORM1" to "Asha"), port.joined)
+    }
+
+    @Test
+    fun `a home sangat that is not in the car is offered as a prompt too`() {
+        rooms.value = listOf(room("NORM1"))
+        val vm = newVm()
+
+        assertEquals("NORM1", vm.prompt.value?.roomCode)
+    }
+
+    @Test
+    fun `a dismissed home sangat is not offered again`() {
+        rooms.value = listOf(room("NORM1"))
+        val vm = newVm()
+        vm.dismissPrompt("NORM1")
+
+        assertNull(vm.prompt.value)
     }
 
     @Test

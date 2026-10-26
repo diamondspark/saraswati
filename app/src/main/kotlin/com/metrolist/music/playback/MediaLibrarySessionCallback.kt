@@ -60,14 +60,14 @@ import com.metrolist.music.utils.reportException
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.plus
 import javax.inject.Inject
 import com.metrolist.music.constants.AndroidAutoSectionsOrderKey
 import com.metrolist.music.constants.AutoRadioQueueKey
@@ -137,7 +137,8 @@ constructor(
     // SARASWATI: Phase 5 Task 6 — the car's On this phone rows; the repository honours the Local files switch.
     private val localSongs: com.metrolist.music.saraswati.localmedia.LocalSongsRepository,
 ) : MediaLibrarySession.Callback {
-    private val scope = CoroutineScope(Dispatchers.Main) + Job()
+    // SARASWATI: device fix F1 — a supervisor, so one failed car request cannot cancel the rest.
+    private val scope = newCarCallbackScope()
 
     // SARASWATI: fix wave B2 — see CarHomeSnapshot.
     private val homeSnapshot =
@@ -1344,6 +1345,14 @@ constructor(
             ).build()
     }
 }
+
+/**
+ * The scope every car request in [MediaLibrarySessionCallback] runs on. A SupervisorJob, not a plain Job: the Sangat row
+ * deliberately fails its `future` ("changes no queue"), and a plain parent would be cancelled by that child, so the toggle
+ * it had just launched never ran and every later list answered "Parent job is Cancelled" until the service restarted.
+ */
+internal fun newCarCallbackScope(dispatcher: CoroutineDispatcher = Dispatchers.Main): CoroutineScope =
+    CoroutineScope(SupervisorJob() + dispatcher)
 
 internal fun isBrowsableMediaId(mediaId: String): Boolean =
     mediaId == MusicService.ROOT ||

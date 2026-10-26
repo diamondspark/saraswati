@@ -24,9 +24,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -45,10 +49,15 @@ interface SangatRoomPort {
 
     fun createRoom(username: String)
 
+    /**
+     * The room machinery decides the mode itself: a car room on the live list is joined as a remote controller.
+     * [onJoined] runs once that decision is made, with whether this phone is a remote controller now. It does not run
+     * for a join that a leave or another join overtook.
+     */
     fun joinRoom(
         roomCode: String,
         username: String,
-        remoteController: Boolean,
+        onJoined: (remoteController: Boolean) -> Unit,
     )
 
     fun leaveRoom()
@@ -130,10 +139,10 @@ class SangatViewModel
             combine(live, roomInfo, remoteController) { list, info, remote -> SangatDisplay.banner(list, info, remote) }
                 .stateIn(scope, SharingStarted.Eagerly, null)
 
-        /** The car room to offer: live, in the car, not this phone's own room, and not dismissed. */
+        /** The room to offer: live, not this phone's own room, and not dismissed. Car or home, the same prompt. */
         val prompt: StateFlow<LiveSangatRoom?> =
             combine(live, currentRoomCode, dismissals.dismissed) { list, here, gone ->
-                list.firstOrNull { it.carMode && it.roomCode != here && it.roomCode !in gone }
+                list.firstOrNull { it.roomCode != here && it.roomCode !in gone }
             }.stateIn(scope, SharingStarted.Eagerly, null)
 
         private val _askName = MutableStateFlow(false)
@@ -156,8 +165,8 @@ class SangatViewModel
         /** Joins a live room. A car room is joined as a remote controller, so nothing plays on this phone. */
         fun join(room: LiveSangatRoom) {
             withName { name ->
-                rooms.joinRoom(room.roomCode, name, remoteController = room.carMode)
-                if (room.carMode) _enteredCarRoom.tryEmit(Unit)
+                // The mode this join resolved to, not the list the prompt was shown from: the screen must match what the phone does.
+                rooms.joinRoom(room.roomCode, name) { remote -> if (remote) _enteredCarRoom.tryEmit(Unit) }
             }
         }
 
@@ -206,6 +215,21 @@ class SangatViewModel
             rooms.leaveRoom()
         }
 
+        // A tap on the Sangat notification joins the room it names, as the banner would. The room must be on the live
+        // list within [JOIN_REQUEST_WAIT_MS], or the tap is dropped.
+        init {
+            scope.launch {
+                SangatJoinRequests.requests.filterNotNull().collect {
+                    val code = SangatJoinRequests.take(System.currentTimeMillis()) ?: return@collect
+                    val room =
+                        withTimeoutOrNull(JOIN_REQUEST_WAIT_MS) {
+                            live.map { list -> list.firstOrNull { it.roomCode == code } }.filterNotNull().first()
+                        }
+                    if (room != null) join(room)
+                }
+            }
+        }
+
         private fun withName(action: (String) -> Unit) {
             scope.launch {
                 val name = names.saved().trim()
@@ -221,5 +245,6 @@ class SangatViewModel
         companion object {
             /** The same limit as a Listen Together username. */
             const val MAX_NAME_LENGTH = 50
+            private const val JOIN_REQUEST_WAIT_MS = 15_000L
         }
     }

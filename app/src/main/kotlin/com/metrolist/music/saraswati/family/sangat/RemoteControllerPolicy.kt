@@ -12,6 +12,7 @@ import com.metrolist.music.listentogether.ConnectionState
 import com.metrolist.music.listentogether.ListenTogetherEvent
 import com.metrolist.music.listentogether.RoomRole
 import com.metrolist.music.listentogether.RoomState
+import com.metrolist.music.saraswati.family.LiveSangatRoom
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,6 +22,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.cancellation.CancellationException
 
 object RemoteControllerPolicy {
     /** The host plays for the room; a guest plays too unless it joined as a remote controller. */
@@ -28,6 +30,59 @@ object RemoteControllerPolicy {
         isHost: Boolean,
         remoteController: Boolean,
     ): Boolean = isHost || !remoteController
+
+    // SARASWATI: this only ever answers "enter". A guest of a car room that is not yet remote enters, because a passenger
+    // who joined before the room was marked as a car room (or on a wrong answer) must stop playing its own copy. The
+    // answer is never "leave": a phone that is remote while the room looks like a normal one stays remote, because leaving
+    // would start its music in the middle of the drive. Do not "fix" this into a two-way sync.
+    /**
+     * Whether the room this phone is in makes it a remote controller now: the live list shows that room as a car room.
+     * A host never enters, since it is the car's phone itself and must keep playing; the live list may not leave it out
+     * when the phone's device id is unknown.
+     */
+    fun shouldEnterRemote(
+        roomCode: String?,
+        isHost: Boolean,
+        live: List<LiveSangatRoom>,
+        alreadyRemote: Boolean,
+    ): Boolean {
+        if (roomCode.isNullOrEmpty() || isHost || alreadyRemote) return false
+        return live.any { it.carMode && it.roomCode.equals(roomCode, ignoreCase = true) }
+    }
+
+    /**
+     * Whether a join by [roomCode] is a remote controller's join. A cached entry is trusted only while the list is
+     * [listFresh]: a car room is listed as a normal room until its mode is marked, so an old entry can say "not a car
+     * room" for a room that is one now. Otherwise the hub is asked once more, within [timeoutMs], and its answer for
+     * this room wins. When the hub cannot answer for this room, the last thing known about it decides: a cached entry
+     * says what it says, and a room never seen before is a guest's join, as it always was, so a normal room joined
+     * while the hub is down still plays.
+     */
+    suspend fun resolveJoinRemote(
+        roomCode: String,
+        live: List<LiveSangatRoom>,
+        listFresh: Boolean,
+        timeoutMs: Long = FRESH_LOOKUP_TIMEOUT_MS,
+        fetchLive: suspend () -> List<LiveSangatRoom>?,
+    ): Boolean {
+        val cached = live.firstOrNull { it.roomCode.equals(roomCode, ignoreCase = true) }
+        if (listFresh && cached != null) return cached.carMode
+        val fresh =
+            try {
+                withTimeoutOrNull(timeoutMs) { fetchLive() }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+        fresh?.firstOrNull { it.roomCode.equals(roomCode, ignoreCase = true) }?.let { return it.carMode }
+        // SARASWATI: when unsure, stay silent. Guessing "remote" wrongly leaves a passenger hearing nothing, and can rejoin.
+        // Guessing "guest" wrongly plays a second copy of the car's audio out of sync and burns the passenger's mobile data,
+        // so a stale car entry is kept when the hub cannot say otherwise. Do not flip this to a guess of "guest".
+        return cached?.carMode == true
+    }
+
+    private const val FRESH_LOOKUP_TIMEOUT_MS = 3_000L
 }
 
 /**
