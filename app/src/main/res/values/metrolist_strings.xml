@@ -624,6 +624,7 @@
     <string name="room_code">Room code</string>
     <string name="leave_room">Leave room</string>
     <string name="join_room">Join</string>
+    <string name="join_by_code">Join by code</string>
     <string name="create_room">Create</string>
     <string name="joining_room">Joining room %s…</string>
     <string name="creating_room">Creating room…</string>

@@ -1014,6 +1014,7 @@ fun ListenTogetherDialog(
     // Local UI state for join/create actions
     var isCreatingRoom by rememberSaveable { mutableStateOf(false) }
     var isJoiningRoom by rememberSaveable { mutableStateOf(false) }
+    var showCodeEntry by rememberSaveable { mutableStateOf(false) }
     var joinErrorMessage by rememberSaveable { mutableStateOf<String?>(null) }
 
     // User action menu state
@@ -1919,42 +1920,48 @@ fun ListenTogetherDialog(
 
                         HorizontalDivider()
 
-                        Text(
-                            text = stringResource(R.string.join_existing_room),
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
+                        if (showCodeEntry) {
+                            Text(
+                                text = stringResource(R.string.join_existing_room),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
 
-                        OutlinedTextField(
-                            value = roomCodeInput,
-                            onValueChange = { roomCodeInput = it.uppercase().filter { c -> c.isLetterOrDigit() }.take(8) },
-                            label = { Text(stringResource(R.string.room_code)) },
-                            placeholder = { Text("ABCD1234") },
-                            supportingText = {
-                                Text(
-                                    text = "${roomCodeInput.length}/8",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    painterResource(R.drawable.token),
-                                    null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                )
-                            },
-                            singleLine = true,
-                            shape = RoundedCornerShape(12.dp),
-                            colors =
-                                OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                                    focusedLabelColor = MaterialTheme.colorScheme.primary,
-                                ),
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+                            OutlinedTextField(
+                                value = roomCodeInput,
+                                onValueChange = { roomCodeInput = it.uppercase().filter { c -> c.isLetterOrDigit() }.take(8) },
+                                label = { Text(stringResource(R.string.room_code)) },
+                                placeholder = { Text("ABCD1234") },
+                                supportingText = {
+                                    Text(
+                                        text = "${roomCodeInput.length}/8",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        painterResource(R.drawable.token),
+                                        null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                colors =
+                                    OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                        focusedLabelColor = MaterialTheme.colorScheme.primary,
+                                    ),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        } else {
+                            TextButton(onClick = { showCodeEntry = true }) {
+                                Text(stringResource(R.string.join_by_code), fontWeight = FontWeight.SemiBold)
+                            }
+                        }
 
                         // Status messages
                         if (isJoiningRoom) {
