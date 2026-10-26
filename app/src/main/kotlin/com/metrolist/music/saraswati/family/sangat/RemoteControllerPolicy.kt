@@ -32,17 +32,20 @@ object RemoteControllerPolicy {
     ): Boolean = isHost || !remoteController
 
     /**
-     * Whether a join by [roomCode] is a remote controller's join. The live list answers first. A code it does not show
-     * is asked of the hub once more, within [timeoutMs]. Anything that cannot be had (no answer, a slow hub, the room
-     * not listed) makes it a guest's join, as it always was: a normal room joined while the hub is down must still play.
+     * Whether a join by [roomCode] is a remote controller's join. The live list answers first, but only while it is
+     * [listFresh]: a car room is listed as a normal room until its mode is marked, so an old entry can say "not a car
+     * room" for a room that is one now. Otherwise, and for a code the list does not show, the hub is asked once more,
+     * within [timeoutMs]. Anything that cannot be had (no answer, a slow hub, the room not listed) makes it a guest's
+     * join, as it always was: a normal room joined while the hub is down must still play.
      */
     suspend fun resolveJoinRemote(
         roomCode: String,
         live: List<LiveSangatRoom>,
+        listFresh: Boolean,
         timeoutMs: Long = FRESH_LOOKUP_TIMEOUT_MS,
         fetchLive: suspend () -> List<LiveSangatRoom>?,
     ): Boolean {
-        live.firstOrNull { it.roomCode.equals(roomCode, ignoreCase = true) }?.let { return it.carMode }
+        if (listFresh) live.firstOrNull { it.roomCode.equals(roomCode, ignoreCase = true) }?.let { return it.carMode }
         val fresh =
             try {
                 withTimeoutOrNull(timeoutMs) { fetchLive() }

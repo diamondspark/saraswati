@@ -2097,7 +2097,7 @@ class ListenTogetherManager
                 joinTickets.runIfCurrent(
                     ticket,
                     resolve = {
-                        RemoteControllerPolicy.resolveJoinRemote(roomCode, sangatWatcher.liveRooms.value) {
+                        RemoteControllerPolicy.resolveJoinRemote(roomCode, sangatWatcher.liveRooms.value, sangatWatcher.listIsFresh()) {
                             sangatWatcher.fetchLiveRooms()
                         }
                     },

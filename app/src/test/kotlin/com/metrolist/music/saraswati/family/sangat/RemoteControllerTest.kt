@@ -198,7 +198,7 @@ class RemoteControllerTest {
             "handleEvent returns when the remote filter consumed the event",
             handleEvent.contains("if (remoteEventRouter.route(event)) return"),
         )
-        assertTrue(manager.contains("RemoteControllerPolicy.resolveJoinRemote(roomCode, sangatWatcher.liveRooms.value)"))
+        assertTrue(manager.contains("RemoteControllerPolicy.resolveJoinRemote(roomCode, sangatWatcher.liveRooms.value, sangatWatcher.listIsFresh())"))
         val volume = manager.substringAfter("private fun applyHostVolumeIfNeeded").substringBefore("\n        }\n")
         assertTrue("the host's volume is not applied to a remote controller", volume.contains("drivesLocalPlayer"))
         val buffer = manager.substringAfter("is ListenTogetherEvent.BufferComplete ->").substringBefore("is ListenTogetherEvent.SyncStateReceived")

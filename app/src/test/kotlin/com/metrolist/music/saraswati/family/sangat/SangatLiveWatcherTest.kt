@@ -23,6 +23,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -113,6 +114,21 @@ class SangatLiveWatcherTest {
         assertEquals(4, hub.polls.size)
         assertEquals(listOf("sess"), hub.polls.distinct())
         assertEquals(30_000L, SangatLiveWatcher.POLL_INTERVAL_MS)
+    }
+
+    @Test
+    fun `the live list is fresh for ten seconds after a poll and no longer`() {
+        val watcher = watcher()
+        assertFalse(watcher.listIsFresh())
+
+        watcher.start(scope)
+        time.runCurrent()
+        assertTrue(watcher.listIsFresh())
+
+        time.advanceBy(SangatLiveWatcher.LIST_FRESH_MS)
+        assertTrue(watcher.listIsFresh())
+        time.advanceBy(1)
+        assertFalse(watcher.listIsFresh())
     }
 
     @Test

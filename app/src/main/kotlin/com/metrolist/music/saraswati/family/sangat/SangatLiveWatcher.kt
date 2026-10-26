@@ -54,6 +54,9 @@ class SangatLiveWatcher(
     /** When the last poll finished ([clock] milliseconds), or null before the first one. */
     val lastPolledAt: StateFlow<Long?> = _lastPolledAt.asStateFlow()
 
+    /** Whether the live list was polled within [LIST_FRESH_MS]: the list a join may trust without asking the hub again. */
+    fun listIsFresh(): Boolean = _lastPolledAt.value?.let { clock() - it <= LIST_FRESH_MS } == true
+
     private val prompted = HashSet<String>()
     private var job: Job? = null
 
@@ -147,6 +150,9 @@ class SangatLiveWatcher(
 
     companion object {
         const val POLL_INTERVAL_MS = 30_000L
+
+        /** A poll this recent is current enough to answer a join; an older one is asked of the hub again. */
+        const val LIST_FRESH_MS = 10_000L
         private const val PROMPT_BUFFER = 8
 
         /** Every 10th poll, so about every 5 minutes. */

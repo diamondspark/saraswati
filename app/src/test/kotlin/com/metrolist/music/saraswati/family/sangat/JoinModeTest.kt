@@ -37,7 +37,9 @@ class JoinModeTest {
         live: List<LiveSangatRoom>,
         fresh: Lookups = Lookups { emptyList() },
         timeoutMs: Long = 3_000L,
-    ): Boolean = runBlocking { RemoteControllerPolicy.resolveJoinRemote(code, live, timeoutMs) { fresh.fetch() } }
+        listFresh: Boolean = true,
+    ): Boolean =
+        runBlocking { RemoteControllerPolicy.resolveJoinRemote(code, live, listFresh, timeoutMs) { fresh.fetch() } }
 
     @Test
     fun `on the list and a car room is a remote-controller join, without asking the hub again`() {
@@ -93,6 +95,34 @@ class JoinModeTest {
     @Test
     fun `the code is matched whatever its case`() {
         assertTrue(resolve("car1car1", listOf(room("CAR1CAR1", car = true))))
+    }
+
+    @Test
+    fun `a stale not-car entry is not trusted, so the hub reveals a car room that was marked after the list was polled`() {
+        val fresh = Lookups { listOf(room("CAR1CAR1", car = true)) }
+        assertTrue(resolve("CAR1CAR1", listOf(room("CAR1CAR1", car = false)), fresh, listFresh = false))
+        assertEquals(1, fresh.calls)
+    }
+
+    @Test
+    fun `a fresh not-car entry is trusted without asking the hub again`() {
+        val fresh = Lookups { listOf(room("CAR1CAR1", car = true)) }
+        assertFalse(resolve("CAR1CAR1", listOf(room("CAR1CAR1", car = false)), fresh, listFresh = true))
+        assertEquals(0, fresh.calls)
+    }
+
+    @Test
+    fun `a stale not-car entry that the lookup still calls not a car room is a guest join`() {
+        val fresh = Lookups { listOf(room("NORM1234", car = false)) }
+        assertFalse(resolve("NORM1234", listOf(room("NORM1234", car = false)), fresh, listFresh = false))
+        assertEquals(1, fresh.calls)
+    }
+
+    @Test
+    fun `a stale not-car entry with the lookup failing is a guest join`() {
+        val fresh = Lookups { null }
+        assertFalse(resolve("NORM1234", listOf(room("NORM1234", car = false)), fresh, listFresh = false))
+        assertEquals(1, fresh.calls)
     }
 
     @Test
