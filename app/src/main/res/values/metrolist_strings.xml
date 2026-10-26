@@ -1237,6 +1237,11 @@
     <string name="family_sangat_car_prompt_not_now">Not now</string>
     <string name="family_sangat_car_prompt_dismissed">Okay. You can join later from Family · Sangat.</string>
     <string name="family_sangat_car_prompt_show_again">Show again</string>
+    <!-- SARASWATI: Phase 4 Task 9 — the local notification for a family Sangat, on its own channel. -->
+    <string name="family_sangat_notify_channel_name">Family Sangat</string>
+    <string name="family_sangat_notify_channel_desc">When a family member starts a Sangat. Muting this does not mute playback.</string>
+    <string name="family_sangat_notify_title">%1$s started a Sangat</string>
+    <string name="family_sangat_notify_text">Tap to join the listening room.</string>
     <string name="sangat_remote_title">Sangat in the car · Remote</string>
     <string name="sangat_remote_title_host">%1$s\'s Sangat</string>
     <string name="sangat_remote_subtitle">In the car · %1$d listening</string>

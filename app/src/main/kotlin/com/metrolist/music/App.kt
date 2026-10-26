@@ -29,6 +29,7 @@ import com.metrolist.kugou.KuGou
 import com.metrolist.music.BuildConfig
 import com.metrolist.music.saraswati.SaraswatiFeatures
 import com.metrolist.music.saraswati.car.CarHomeHolder
+import com.metrolist.music.saraswati.family.sangat.SangatNotifications
 import com.metrolist.music.saraswati.offline.SmartDownloadExecutor
 import com.metrolist.music.saraswati.offline.SmartDownloadScheduler
 import com.metrolist.music.saraswati.saral.SaralActive
@@ -79,12 +80,17 @@ class App :
     @Inject
     lateinit var smartDownloadExecutor: dagger.Lazy<SmartDownloadExecutor>
 
+    // SARASWATI: Phase 4 Task 9 — posts the Sangat notification for each room the watcher announces.
+    @Inject
+    lateinit var sangatNotifications: SangatNotifications
+
     override fun onCreate() {
         super.onCreate()
 
         // CrashActivity runs in a separate process. Starting the full app there can make that
         // process claim WebView's data directory and crash the next main-process WebView.
         if (!isMainProcess()) return
+        sangatNotifications.start(applicationScope) // SARASWATI: Phase 4 Task 9
 
         // Install crash handler first
         CrashHandler.install(this)

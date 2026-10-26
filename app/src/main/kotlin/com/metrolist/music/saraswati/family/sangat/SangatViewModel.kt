@@ -24,9 +24,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -206,6 +210,21 @@ class SangatViewModel
             rooms.leaveRoom()
         }
 
+        // A tap on the Sangat notification joins the room it names, as the banner would. The room must be on the live
+        // list within [JOIN_REQUEST_WAIT_MS], or the tap is dropped.
+        init {
+            scope.launch {
+                SangatJoinRequests.requests.filterNotNull().collect {
+                    val code = SangatJoinRequests.take(System.currentTimeMillis()) ?: return@collect
+                    val room =
+                        withTimeoutOrNull(JOIN_REQUEST_WAIT_MS) {
+                            live.map { list -> list.firstOrNull { it.roomCode == code } }.filterNotNull().first()
+                        }
+                    if (room != null) join(room)
+                }
+            }
+        }
+
         private fun withName(action: (String) -> Unit) {
             scope.launch {
                 val name = names.saved().trim()
@@ -221,5 +240,6 @@ class SangatViewModel
         companion object {
             /** The same limit as a Listen Together username. */
             const val MAX_NAME_LENGTH = 50
+            private const val JOIN_REQUEST_WAIT_MS = 15_000L
         }
     }
