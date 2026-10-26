@@ -227,6 +227,25 @@ class ListenTogetherManager
             observePreferences()
             RemoteControllerStore.restore(context, scope, remoteMode)
             observePassengerCredit()
+            observeCarRoomForRemote()
+        }
+
+        // SARASWATI: the reconciliation after a join. The join decision can be wrong (a hub that is down, a stale list, a room
+        // marked as a car room after someone joined it), so while in a room the live list is watched: a car room this phone is
+        // in puts it in remote mode and pauses its player. It only ever enters remote mode; nothing here clears it. Leaving
+        // would start this phone's music on its own, which is the one thing the mode prevents. See shouldEnterRemote.
+        private fun observeCarRoomForRemote() {
+            scope.launch {
+                combine(client.roomState, sangatWatcher.liveRooms) { room, live ->
+                    RemoteControllerPolicy.shouldEnterRemote(room?.roomCode, isHost, live, remoteMode.enabled.value)
+                }.collect { enter ->
+                    if (enter) {
+                        Timber.tag(TAG).d("This room is a car room: entering remote-controller mode")
+                        remoteMode.enter()
+                        pauseLocalForRemoteController()
+                    }
+                }
+            }
         }
 
         // SARASWATI: Phase 4 Task 13 — this phone plays nothing as a remote controller, so a song it picked is
