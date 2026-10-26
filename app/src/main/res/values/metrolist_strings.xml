@@ -1237,7 +1237,7 @@
     <string name="family_sangat_car_prompt_not_now">Not now</string>
     <string name="family_sangat_car_prompt_dismissed">Okay. You can join later from Family · Sangat.</string>
     <string name="family_sangat_car_prompt_show_again">Show again</string>
-    <!-- SARASWATI: Sangat prompt for a home room. The Hindi line is derived from the car line by removing "गाड़ी में"; owner review pending. -->
+    <!-- SARASWATI: Sangat prompt for a home room. The Hindi line is the car line with "गाड़ी में" removed; approved by the owner 2026-10-25. -->
     <string name="family_sangat_home_prompt_title">%1$s started a Sangat</string>
     <string name="family_sangat_home_prompt_hindi">%1$s ने संगत शुरू की है</string>
     <string name="family_sangat_home_prompt_desc">You can add songs from your phone. Music will play here too, in sync with everyone.</string>
