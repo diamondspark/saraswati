@@ -32,6 +32,10 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
 class SangatLiveWatcherTest {
+    private companion object {
+        const val REAL_WAIT_NANOS = 20_000_000_000L
+    }
+
     @get:Rule val folder = TemporaryFolder()
 
     private class ScriptedSangatHub : SangatHubApi {
@@ -390,6 +394,17 @@ class SangatLiveWatcherTest {
             time.advanceBy(SangatLiveWatcher.POLL_INTERVAL_MS)
         }
 
+        // SARASWATI: the refreshes above run on real Dispatchers.IO threads, so how many had landed by the end of
+        // the loop depends on machine speed (on a loaded CI runner: too few). Keep moving virtual time in small
+        // steps (so the overlap with the real threads continues) while waiting a bounded amount of REAL time for
+        // the count to reach the threshold, then assert.
+        val deadline = System.nanoTime() + REAL_WAIT_NANOS
+        while (killSwitchHub.callsTo("getKillSwitches").size < SangatLiveWatcher.GATE_REFRESH_EVERY_POLLS &&
+            System.nanoTime() < deadline
+        ) {
+            time.advanceBy(SangatLiveWatcher.POLL_INTERVAL_MS)
+            Thread.sleep(20)
+        }
         assertTrue(
             "expected many real gate refreshes to have actually landed, not just queued",
             killSwitchHub.callsTo("getKillSwitches").size >= SangatLiveWatcher.GATE_REFRESH_EVERY_POLLS,
