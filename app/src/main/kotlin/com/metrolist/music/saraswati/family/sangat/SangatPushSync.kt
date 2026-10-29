@@ -4,18 +4,25 @@
  */
 
 // SARASWATI: Sangat push — when this phone tells the hub its FCM token, kept free of Firebase and Android so the
-// decisions are unit tested. It registers when the phone is paired and Sangat is on, and the token is new (its
-// SHA-256 differs from the one last registered) or the last successful registration is older than
+// decisions are unit tested. It registers when the phone is paired and Sangat is on, and the registration is new (the
+// SHA-256 of this phone's hub device id and the token differs from the one last registered, so a re-pair registers
+// again at once) or the last successful registration is older than
 // [REREGISTER_AFTER_MS]. The hash and time are stored only after the hub answered success. The token is never
 // stored, logged or put in an error.
 package com.metrolist.music.saraswati.family.sangat
 
+import com.metrolist.music.saraswati.family.FamilyFeature
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.security.MessageDigest
 import kotlin.coroutines.cancellation.CancellationException
 
-/** What the last successful registration left behind: the SHA-256 of the token (hex) and when ([clock] milliseconds). */
+/** What the last successful registration left behind: the SHA-256 of device id and token (hex) and when ([clock] milliseconds). */
 data class PushRegistration(
     val tokenHash: String,
     val registeredAt: Long,
@@ -45,6 +52,7 @@ class SangatPushSync(
     private val hub: PushHubApi,
     private val store: PushRegistrationStore,
     private val sessionToken: suspend () -> String?,
+    private val deviceId: suspend () -> String?,
     private val sangatEnabled: suspend () -> Boolean,
     private val fetchToken: suspend () -> String?,
     private val clock: () -> Long = System::currentTimeMillis,
@@ -58,7 +66,7 @@ class SangatPushSync(
         lock.withLock {
             val session = session() ?: return@withLock refusal()
             val token = safely { fetchToken() } ?: return@withLock Outcome.NO_TOKEN
-            val hash = sha256Hex(token)
+            val hash = fingerprint(token)
             val last = safely { store.read() }
             if (last != null && last.tokenHash == hash && clock() - last.registeredAt in 0 until REREGISTER_AFTER_MS) {
                 return@withLock Outcome.UP_TO_DATE
@@ -70,7 +78,7 @@ class SangatPushSync(
     suspend fun onNewToken(token: String): Outcome =
         lock.withLock {
             val session = session() ?: return@withLock refusal()
-            register(session, token, sha256Hex(token))
+            register(session, token, fingerprint(token))
         }
 
     private suspend fun register(
@@ -83,6 +91,9 @@ class SangatPushSync(
         safely { store.write(PushRegistration(hash, clock())) }
         return Outcome.REGISTERED
     }
+
+    // SARASWATI: Sangat push — the hub keeps a token per device, so what was registered is the pair, not the token alone.
+    private suspend fun fingerprint(token: String): String = fingerprintOf(safely { deviceId() }, token)
 
     // The session token when every condition holds; otherwise null, with [refusal] saying which one failed.
     private var refused = Outcome.NOT_CONFIGURED
@@ -109,7 +120,23 @@ class SangatPushSync(
     companion object {
         const val REREGISTER_AFTER_MS = 7L * 24 * 60 * 60 * 1000
 
-        fun sha256Hex(token: String): String =
-            MessageDigest.getInstance("SHA-256").digest(token.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+        /** SHA-256 (hex) of `deviceId + "\n" + token`; a phone with no device id yet hashes an empty one. */
+        fun fingerprintOf(
+            deviceId: String?,
+            token: String,
+        ): String =
+            MessageDigest
+                .getInstance("SHA-256")
+                .digest("${deviceId.orEmpty()}\n$token".toByteArray(Charsets.UTF_8))
+                .joinToString("") { "%02x".format(it) }
+
+        /** Emits each time Sangat goes from off to on in [enabled] (the feature gate's state), not for the value it starts at. */
+        fun sangatTurnedOn(enabled: Flow<Map<FamilyFeature, Boolean>>): Flow<Unit> =
+            enabled
+                .map { it[FamilyFeature.SANGAT] ?: true }
+                .distinctUntilChanged()
+                .drop(1)
+                .filter { it }
+                .map { }
     }
 }

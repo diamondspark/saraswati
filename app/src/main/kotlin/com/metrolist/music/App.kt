@@ -96,7 +96,7 @@ class App :
         // process claim WebView's data directory and crash the next main-process WebView.
         if (!isMainProcess()) return
         sangatNotifications.start(applicationScope) // SARASWATI: Phase 4 Task 9
-        applicationScope.launch(Dispatchers.IO) { sangatPushRegistrar.ensureRegistered() } // SARASWATI: Sangat push
+        sangatPushRegistrar.start(applicationScope) // SARASWATI: Sangat push — Firebase up before any FCM delivery, then register
 
         // Install crash handler first
         CrashHandler.install(this)

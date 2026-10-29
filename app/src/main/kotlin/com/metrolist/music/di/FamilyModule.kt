@@ -53,6 +53,8 @@ import com.metrolist.music.saraswati.family.sangat.WatcherSangatFeed
 import com.metrolist.music.saraswati.family.sangat.ListenTogetherCarRoom
 import com.metrolist.music.saraswati.family.sangat.DataStoreCarRoomStore
 import com.metrolist.music.saraswati.family.sangat.SangatCarMode
+import com.metrolist.music.saraswati.family.sangat.AnnouncedRoomsStore
+import com.metrolist.music.saraswati.family.sangat.DataStoreAnnouncedRoomsStore
 import com.metrolist.music.saraswati.family.sangat.PushHubApi
 import com.metrolist.music.saraswati.family.sangat.SangatForeground
 import com.metrolist.music.saraswati.family.sangat.SangatLiveWatcher
@@ -105,6 +107,12 @@ object FamilyModule {
     @Provides
     @Singleton
     fun providePushHubApi(client: HubClient): PushHubApi = client
+
+    @Provides
+    @Singleton
+    fun provideAnnouncedRoomsStore(
+        @ApplicationContext context: Context,
+    ): AnnouncedRoomsStore = DataStoreAnnouncedRoomsStore(context.dataStore)
 
     @Provides
     @Singleton

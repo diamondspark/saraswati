@@ -56,6 +56,7 @@ import com.metrolist.music.constants.OpenRouterBaseUrlKey
 import com.metrolist.music.constants.ParivaarMixKey
 import com.metrolist.music.constants.ParivaarPlaylistIdKey
 import com.metrolist.music.constants.ParivaarTopSongsSyncedAtKey
+import com.metrolist.music.constants.SangatAnnouncedRoomsKey
 import com.metrolist.music.constants.SangatCarRoomCodeKey
 import com.metrolist.music.constants.SangatPushRegisteredAtKey
 import com.metrolist.music.constants.SangatPushDigestKey
@@ -176,6 +177,8 @@ object BackupPolicy {
                 // hash would stop a new phone from ever registering its own token.
                 SangatPushDigestKey,
                 SangatPushRegisteredAtKey,
+                // SARASWATI: Sangat push — which live rooms this phone has announced is live state, like the car room code above.
+                SangatAnnouncedRoomsKey,
             )
 
     // Preference keys the coverage test's wider regex flags as

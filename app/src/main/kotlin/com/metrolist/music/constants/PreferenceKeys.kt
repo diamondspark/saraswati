@@ -813,6 +813,9 @@ val HasSeenAskVoiceExplanationKey = booleanPreferencesKey("saraswatiHasSeenAskVo
 val SangatPushDigestKey = stringPreferencesKey("saraswatiSangatPushDigest")
 val SangatPushRegisteredAtKey = longPreferencesKey("saraswatiSangatPushRegisteredAt")
 
+// SARASWATI: Sangat push — the room codes already announced on this phone (see AnnouncedRoomsStore). Live room state, so never backed up.
+val SangatAnnouncedRoomsKey = stringSetPreferencesKey("saraswatiSangatAnnouncedRooms")
+
 // SARASWATI: battery-optimization nudge — set once the one-time "keep playing with the screen off" prompt has been
 // acknowledged (any dismissal counts). Describes this phone's own battery settings, so it is never backed up.
 val BatteryOptimizationNudgeDismissedKey = booleanPreferencesKey("saraswatiBatteryOptimizationNudgeDismissed")

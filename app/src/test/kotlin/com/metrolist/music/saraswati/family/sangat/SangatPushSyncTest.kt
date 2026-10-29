@@ -8,6 +8,10 @@ package com.metrolist.music.saraswati.family.sangat
 
 import com.metrolist.music.saraswati.family.HubException
 import com.metrolist.music.saraswati.family.sangat.SangatPushSync.Outcome
+import com.metrolist.music.saraswati.family.FamilyFeature
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -47,6 +51,7 @@ class SangatPushSyncTest {
     private val store = MemoryStore()
     private var configured = true
     private var session: String? = "sess"
+    private var device: String? = "dev-1"
     private var sangatOn = true
     private var token: String? = "tok-1"
     private var now = 1_000_000L
@@ -57,6 +62,7 @@ class SangatPushSyncTest {
             hub = hub,
             store = store,
             sessionToken = { session },
+            deviceId = { device },
             sangatEnabled = { sangatOn },
             fetchToken = { token },
             clock = { now },
@@ -102,7 +108,7 @@ class SangatPushSyncTest {
         runBlocking {
             assertEquals(Outcome.REGISTERED, sync().ensureRegistered())
             assertEquals(listOf("sess" to "tok-1"), hub.registered)
-            assertEquals(PushRegistration(SangatPushSync.sha256Hex("tok-1"), now), store.value)
+            assertEquals(PushRegistration(SangatPushSync.fingerprintOf("dev-1", "tok-1"), now), store.value)
         }
 
     @Test
@@ -135,7 +141,7 @@ class SangatPushSyncTest {
             now += 1_000
             assertEquals(Outcome.REGISTERED, sync.ensureRegistered())
             assertEquals(listOf("tok-1", "tok-2"), hub.registered.map { it.second })
-            assertEquals(SangatPushSync.sha256Hex("tok-2"), store.value?.tokenHash)
+            assertEquals(SangatPushSync.fingerprintOf("dev-1", "tok-2"), store.value?.tokenHash)
         }
 
     @Test
@@ -160,7 +166,45 @@ class SangatPushSyncTest {
             sync.ensureRegistered()
             assertEquals(Outcome.REGISTERED, sync.onNewToken("tok-9"))
             assertEquals("tok-9", hub.registered.last().second)
-            assertEquals(SangatPushSync.sha256Hex("tok-9"), store.value?.tokenHash)
+            assertEquals(SangatPushSync.fingerprintOf("dev-1", "tok-9"), store.value?.tokenHash)
+        }
+
+    @Test
+    fun `the same token under a new device id is registered again within seven days`() =
+        runBlocking {
+            val sync = sync()
+            sync.ensureRegistered()
+            device = "dev-2" // re-paired: the hub dropped the old device and its token
+            now += 1_000
+            assertEquals(Outcome.REGISTERED, sync.ensureRegistered())
+            assertEquals(2, hub.registered.size)
+            assertEquals(SangatPushSync.fingerprintOf("dev-2", "tok-1"), store.value?.tokenHash)
+        }
+
+    @Test
+    fun `the fingerprint depends on both the device id and the token`() {
+        val a = SangatPushSync.fingerprintOf("dev-1", "tok")
+        assertEquals(a, SangatPushSync.fingerprintOf("dev-1", "tok"))
+        assertFalse(a == SangatPushSync.fingerprintOf("dev-2", "tok"))
+        assertFalse(a == SangatPushSync.fingerprintOf("dev-1", "tok2"))
+        assertFalse(a == SangatPushSync.fingerprintOf(null, "tok"))
+    }
+
+    @Test
+    fun `Sangat turning on registers again, but the starting value and staying on do not`() =
+        runBlocking {
+            fun map(on: Boolean) = FamilyFeature.entries.associateWith { it != FamilyFeature.SANGAT || on }
+            val gate = MutableStateFlow(map(true))
+            val seen = mutableListOf<Unit>()
+            val job = launch(Dispatchers.Unconfined) { SangatPushSync.sangatTurnedOn(gate).collect { seen += it } }
+            assertEquals(0, seen.size)
+            gate.value = map(false)
+            assertEquals(0, seen.size)
+            gate.value = map(true)
+            assertEquals(1, seen.size)
+            gate.value = FamilyFeature.entries.associateWith { true }
+            assertEquals(1, seen.size)
+            job.cancel()
         }
 
     @Test
@@ -176,7 +220,7 @@ class SangatPushSyncTest {
     fun `a throwing session or gate reads as not eligible, never as a crash`() =
         runBlocking {
             val sync =
-                SangatPushSync(true, hub, store, { throw IllegalStateException("keystore") }, { true }, { token }, { now })
+                SangatPushSync(true, hub, store, { throw IllegalStateException("keystore") }, { device }, { true }, { token }, { now })
             assertEquals(Outcome.NOT_PAIRED, sync.ensureRegistered())
             assertTrue(hub.registered.isEmpty())
         }

@@ -43,6 +43,7 @@ import com.metrolist.music.constants.SmartDownloadLedgerKey
 import com.metrolist.music.constants.StationOfflineSetsKey
 import com.metrolist.music.constants.ParivaarPlaylistIdKey
 import com.metrolist.music.constants.ParivaarTopSongsSyncedAtKey
+import com.metrolist.music.constants.SangatAnnouncedRoomsKey
 import com.metrolist.music.constants.SangatPushRegisteredAtKey
 import com.metrolist.music.constants.SangatPushDigestKey
 import com.metrolist.music.constants.ProxyPasswordKey
@@ -445,5 +446,14 @@ class BackupPolicyTest {
         assertTrue(SangatPushRegisteredAtKey in BackupPolicy.NEVER_EXPORT_OR_RESTORE)
         assertNull(BackupPolicy.sanitize(planted)[SangatPushDigestKey])
         assertNull(BackupPolicy.sanitize(planted)[SangatPushRegisteredAtKey])
+    }
+
+    // SARASWATI: Sangat push — the announced live rooms are this phone's own state.
+    @Test
+    fun `a backup cannot plant the announced rooms`() {
+        val planted = mutablePreferencesOf(SangatAnnouncedRoomsKey to setOf("AAAA"), SongSortTypeKey to "NAME").toPreferences()
+
+        assertTrue(SangatAnnouncedRoomsKey in BackupPolicy.NEVER_EXPORT_OR_RESTORE)
+        assertNull(BackupPolicy.sanitize(planted)[SangatAnnouncedRoomsKey])
     }
 }

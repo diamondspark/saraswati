@@ -32,7 +32,19 @@ class SangatPushHandlerTest {
         }
     }
 
+    private class MemoryRooms(
+        var codes: Set<String> = emptySet(),
+    ) : AnnouncedRoomsStore {
+        override suspend fun read() = codes
+
+        override suspend fun update(transform: (Set<String>) -> Set<String>) {
+            codes = transform(codes)
+        }
+    }
+
     private val shade = FakeShade()
+    private val stored = MemoryRooms()
+    private val order = mutableListOf<String>()
     private var live: List<LiveSangatRoom>? = emptyList()
     private var self: String? = "me"
     private var here: String? = null
@@ -42,13 +54,18 @@ class SangatPushHandlerTest {
 
     private fun handler() =
         SangatPushHandler(
-            fetchLive = { live },
+            awaitGate = { order += "gate" },
+            fetchLive = {
+                order += "fetch"
+                live
+            },
             claimUnannounced = { rooms -> rooms.filter { announced.add(it.roomCode) } },
             selfDeviceId = { self },
             currentRoomCode = { here },
             dismissed = { dismissed },
             isSaral = { saral },
             notifier = shade,
+            announcedRooms = stored,
         )
 
     private fun room(
@@ -174,5 +191,61 @@ class SangatPushHandlerTest {
             live = listOf(room("AAAA", host = "me"))
             handler().onSangatChanged()
             assertEquals(listOf("AAAA"), shade.posts)
+        }
+
+    @Test
+    fun `the feature gate is awaited before the hub is asked`() =
+        runBlocking {
+            handler().onSangatChanged()
+            assertEquals(listOf("gate", "fetch"), order)
+        }
+
+    @Test
+    fun `a room announced in an earlier run is not posted again, whether or not it is still in the shade`() =
+        runBlocking {
+            stored.codes = setOf("AAAA")
+            live = listOf(room("AAAA"), room("BBBB"))
+            handler().onSangatChanged()
+            assertEquals(listOf("BBBB"), shade.posts)
+        }
+
+    @Test
+    fun `posted rooms are remembered and ended ones forgotten`() =
+        runBlocking {
+            stored.codes = setOf("OLD", "BBBB")
+            live = listOf(room("AAAA"), room("BBBB"), room("CCCC", host = "me"))
+            handler().onSangatChanged()
+            assertEquals(setOf("AAAA", "BBBB"), stored.codes)
+        }
+
+    @Test
+    fun `a dismissed room is remembered while it is live`() =
+        runBlocking {
+            dismissed = setOf("AAAA")
+            live = listOf(room("AAAA"))
+            handler().onSangatChanged()
+            assertTrue(shade.posts.isEmpty())
+            assertEquals(setOf("AAAA"), stored.codes)
+        }
+
+    @Test
+    fun `a failed fetch leaves the remembered rooms alone`() =
+        runBlocking {
+            stored.codes = setOf("AAAA")
+            live = null
+            handler().onSangatChanged()
+            assertEquals(setOf("AAAA"), stored.codes)
+        }
+
+    @Test
+    fun `a swiped room stays quiet across a restart while it is live, and a room started meanwhile posts`() =
+        runBlocking {
+            live = listOf(room("AAAA"))
+            handler().onSangatChanged()
+            shade.shown.clear()
+            announced.clear() // a new process: nothing is remembered in memory
+            live = listOf(room("AAAA"), room("BBBB"))
+            handler().onSangatChanged()
+            assertEquals(listOf("AAAA", "BBBB"), shade.posts)
         }
 }

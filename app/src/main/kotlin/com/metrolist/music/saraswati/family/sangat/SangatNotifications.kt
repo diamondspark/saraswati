@@ -56,12 +56,17 @@ class SangatNotifications
         private val watcher: SangatLiveWatcher,
         private val dismissals: SangatDismissals,
         private val port: SangatRoomPort,
+        // SARASWATI: Sangat push — rooms announced before, across restarts.
+        private val announcedRooms: AnnouncedRoomsStore,
     ) : SangatNotifier {
         /** Posts a notification for each room the watcher announces. Called once, from the application scope. */
         fun start(scope: CoroutineScope) {
             scope.launch {
                 watcher.carPrompts.collect { room ->
-                    SangatNotifyPolicy.toNotify(listOf(room), dismissals.dismissed.value, port.currentRoomCode.first()).forEach(::post)
+                    SangatNotifyPolicy
+                        .toNotify(listOf(room), dismissals.dismissed.value, port.currentRoomCode.first(), announcedRooms.read())
+                        .forEach(::post)
+                    announcedRooms.update { it + room.roomCode } // SARASWATI: Sangat push — a later push does not post it again
                 }
             }
             scope.launch {
@@ -136,15 +141,20 @@ object SangatJoinRequests {
     private val pending = MutableStateFlow<Pair<String, Long>?>(null)
     val requests: StateFlow<Pair<String, Long>?> = pending.asStateFlow()
 
-    /** Holds the join an incoming intent asks for, if it is a Sangat join; any other intent is left alone. */
+    /**
+     * Holds the join an incoming intent asks for, if it is a Sangat join; any other intent is left alone. True when the
+     * intent was a Sangat join (even a blank one, which holds nothing), so the caller can bring the Home screen up, where
+     * the join is taken.
+     */
     fun offerFrom(
         intent: Intent,
         now: Long,
-    ) {
-        if (intent.action != ACTION_JOIN) return
+    ): Boolean {
+        if (intent.action != ACTION_JOIN) return false
         intent.getStringExtra(EXTRA_ROOM_CODE)?.takeIf { it.isNotBlank() }?.let { pending.value = it to now }
         intent.action = null
         intent.removeExtra(EXTRA_ROOM_CODE)
+        return true
     }
 
     /** Takes the held join, or null when none is held or it is too old to act on. */

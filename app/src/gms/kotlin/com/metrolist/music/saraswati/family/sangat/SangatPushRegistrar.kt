@@ -56,12 +56,28 @@ class SangatPushRegistrar
                 hub = hub,
                 store = DataStorePushRegistrationStore(context),
                 sessionToken = identity::sessionToken,
+                deviceId = identity::deviceId,
                 sangatEnabled = {
                     gate.awaitHydrated()
                     gate.isEnabled(FamilyFeature.SANGAT)
                 },
                 fetchToken = ::fetchToken,
             )
+
+        /**
+         * Called once from the main process's Application.onCreate. Firebase is initialised here, at once and whatever
+         * the pairing or the Sangat switch, because the SDK's message path asks for the default FirebaseApp and
+         * FirebaseInitProvider is removed. Then, off the main thread, the token is registered if it needs to be, and
+         * again each time Sangat goes from off to on (a registration the switch kept from happening).
+         */
+        fun start(appScope: CoroutineScope) {
+            if (!isConfigured) return
+            firebaseApp()
+            appScope.launch(Dispatchers.IO) {
+                ensureRegistered()
+                SangatPushSync.sangatTurnedOn(gate.enabled).collect { ensureRegistered() }
+            }
+        }
 
         /** Registers this phone's token with the hub if it is paired, Sangat is on, and the token is new or a week old. */
         suspend fun ensureRegistered() {
