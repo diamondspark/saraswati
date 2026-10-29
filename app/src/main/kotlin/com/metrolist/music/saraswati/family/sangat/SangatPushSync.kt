@@ -7,8 +7,9 @@
 // decisions are unit tested. It registers when the phone is paired and Sangat is on, and the registration is new (the
 // SHA-256 of this phone's hub device id and the token differs from the one last registered, so a re-pair registers
 // again at once) or the last successful registration is older than
-// [REREGISTER_AFTER_MS]. The hash and time are stored only after the hub answered success. The token is never
-// stored, logged or put in an error.
+// [REREGISTER_AFTER_MS] (a day, so a token the hub dropped by pruning or a restore is back within a day). The hash and
+// time are stored only after the hub answered success. The token is never stored, logged or put in an error. A Saral
+// phone never registers (it ignores every push) and, if it had registered before, tells the hub to forget its token once.
 package com.metrolist.music.saraswati.family.sangat
 
 import com.metrolist.music.saraswati.family.FamilyFeature
@@ -32,6 +33,8 @@ interface PushRegistrationStore {
     suspend fun read(): PushRegistration?
 
     suspend fun write(registration: PushRegistration)
+
+    suspend fun clear()
 }
 
 /** Whether this build may use Firebase at all: every id filled in, and one of the two family application ids. */
@@ -56,14 +59,16 @@ class SangatPushSync(
     private val sangatEnabled: suspend () -> Boolean,
     private val fetchToken: suspend () -> String?,
     private val clock: () -> Long = System::currentTimeMillis,
+    private val isSaral: () -> Boolean = { false },
 ) {
-    enum class Outcome { NOT_CONFIGURED, NOT_PAIRED, SANGAT_OFF, NO_TOKEN, UP_TO_DATE, REGISTERED, FAILED }
+    enum class Outcome { NOT_CONFIGURED, SARAL, NOT_PAIRED, SANGAT_OFF, NO_TOKEN, UP_TO_DATE, REGISTERED, FAILED }
 
     private val lock = Mutex()
 
     /** Registers the current token if it is new or the last registration is old. Never throws (but cancellation). */
     suspend fun ensureRegistered(): Outcome =
         lock.withLock {
+            saralRefusal()?.let { return@withLock it }
             val session = session() ?: return@withLock refusal()
             val token = safely { fetchToken() } ?: return@withLock Outcome.NO_TOKEN
             val hash = fingerprint(token)
@@ -77,9 +82,22 @@ class SangatPushSync(
     /** Firebase handed out a new token: registers it at once, whatever was registered before. */
     suspend fun onNewToken(token: String): Outcome =
         lock.withLock {
+            saralRefusal()?.let { return@withLock it }
             val session = session() ?: return@withLock refusal()
             register(session, token, fingerprint(token))
         }
+
+    // SARASWATI: Sangat push — a Saral phone spends none of the family push budget. If it had registered before it was
+    // switched to Saral, the hub is told to forget the token and the stored fingerprint goes; a failed call leaves the
+    // fingerprint, so the next try asks again. With nothing stored there is no call at all.
+    private suspend fun saralRefusal(): Outcome? {
+        if (!configured || !isSaral()) return null
+        if (safely { store.read() } != null) {
+            val session = safely { sessionToken() }
+            if (session != null && safely { hub.unregisterPushToken(session) }?.isSuccess == true) safely { store.clear() }
+        }
+        return Outcome.SARAL
+    }
 
     private suspend fun register(
         session: String,
@@ -118,7 +136,7 @@ class SangatPushSync(
         }
 
     companion object {
-        const val REREGISTER_AFTER_MS = 7L * 24 * 60 * 60 * 1000
+        const val REREGISTER_AFTER_MS = 24L * 60 * 60 * 1000
 
         /** SHA-256 (hex) of `deviceId + "\n" + token`; a phone with no device id yet hashes an empty one. */
         fun fingerprintOf(

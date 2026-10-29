@@ -497,9 +497,8 @@ class MainActivity : FragmentActivity() {
             return
         }
         val sangatJoin = SangatJoinRequests.offerFrom(intent, System.currentTimeMillis()) // SARASWATI: Phase 4 Task 9 — a tap on the Sangat notification
-        // SARASWATI: Sangat push — the join is taken by the Sangat view model on Home, so a tap from any other screen goes there at once.
+        // SARASWATI: Sangat push — the composition below sees the tick, closes the Account dialog and brings Home up.
         if (sangatJoin) sangatJoinTaps.intValue++
-        if (sangatJoin && ::navController.isInitialized) showHomeForSangatJoin(navController)
         if (::navController.isInitialized) {
             handleWidgetTargetIntent(intent, navController)
             // SARASWATI (audit A9.3): a malformed link (e.g. a non-hierarchical
@@ -1230,7 +1229,14 @@ class MainActivity : FragmentActivity() {
                 var showAccountDialog by remember { mutableStateOf(false) }
                 // SARASWATI: Sangat push — a join tap closes the dialog so the Sangat screen is what the person sees.
                 val joinTaps = sangatJoinTaps.intValue
-                LaunchedEffect(joinTaps) { if (joinTaps > 0) showAccountDialog = false }
+                // The join is taken by the Sangat view model on Home, so a tap from any other screen goes there at once.
+                // This composition's navController, not the activity's lateinit one (which is never assigned).
+                LaunchedEffect(joinTaps) {
+                    if (joinTaps > 0) {
+                        showAccountDialog = false
+                        showHomeForSangatJoin(navController)
+                    }
+                }
 
                 val pauseListenHistory by rememberPreference(PauseListenHistoryKey, defaultValue = false)
                 val eventCount by database.eventCount().collectAsStateWithLifecycle(initialValue = 0)

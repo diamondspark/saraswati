@@ -39,4 +39,18 @@ class AnnouncedRoomsStoreTest {
             store.update { it.filterTo(HashSet()) { code -> code == "BBBB" } }
             assertEquals(setOf("BBBB"), store.read())
         }
+
+    @Test
+    fun `pruneTo keeps only the codes still live`() =
+        runBlocking {
+            val file = folder.newFile("prune.preferences_pb")
+            val store = DataStoreAnnouncedRoomsStore(PreferenceDataStoreFactory.create(scope = scope) { file })
+            store.update { it + setOf("AAAA", "BBBB", "CCCC") }
+
+            store.pruneTo(setOf("BBBB", "DDDD"))
+            assertEquals(setOf("BBBB"), store.read())
+
+            store.pruneTo(emptySet())
+            assertEquals(emptySet<String>(), store.read())
+        }
 }

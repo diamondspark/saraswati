@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.launch
@@ -75,6 +76,10 @@ class SangatNotifications
                     // poll), which says nothing about whether a room has ended.
                     if (answered == null) emptySet() else SangatNotifyPolicy.toCancel(postedRoomCodes(), answered, here, dismissed)
                 }.collect { codes -> codes.forEach(::cancel) }
+            }
+            scope.launch {
+                // SARASWATI: Sangat push — the hub answered, so the announced set forgets the rooms that ended (the push handler does the same).
+                watcher.answeredLive.filterNotNull().collect { answered -> announcedRooms.pruneTo(answered.mapTo(HashSet()) { it.roomCode }) }
             }
         }
 

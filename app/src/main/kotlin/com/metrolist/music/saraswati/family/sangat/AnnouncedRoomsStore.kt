@@ -5,7 +5,7 @@
 
 // SARASWATI: Sangat push — the room codes this phone has already announced (a notification posted, or deliberately not),
 // kept across process restarts so a notification the person swiped away is not posted again for a room that is still
-// going. It holds codes only, pruned to the rooms the hub lists as live every time the push handler hears from the hub.
+// going. It holds codes only, pruned to the rooms the hub lists as live every time the push handler or the foreground poll hears from the hub.
 package com.metrolist.music.saraswati.family.sangat
 
 import androidx.datastore.core.DataStore
@@ -22,6 +22,9 @@ interface AnnouncedRoomsStore {
     /** Replaces the set with [transform] of it, atomically. A storage failure is swallowed: announcing twice beats crashing. */
     suspend fun update(transform: (Set<String>) -> Set<String>)
 }
+
+/** Forgets every announced code not in [liveCodes]: the rooms that have ended. */
+suspend fun AnnouncedRoomsStore.pruneTo(liveCodes: Set<String>) = update { stored -> stored.filterTo(HashSet()) { it in liveCodes } }
 
 class DataStoreAnnouncedRoomsStore(
     private val dataStore: DataStore<Preferences>,

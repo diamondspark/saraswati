@@ -1,6 +1,6 @@
 // SARASWATI: Sangat push (gms flavor). Owns Firebase for this app: it is initialised here, by hand, from the ids in
 // BuildConfig (app/firebase.properties), and only when every id is filled in and the application id is one of the
-// family's own; otherwise nothing here touches Firebase. The decisions (paired, Sangat on, token new or a week old)
+// family's own; otherwise nothing here touches Firebase. The decisions (paired, Sangat on, token new or a day old)
 // are SangatPushSync's. Failures are silent: the tag is logged, never the token.
 package com.metrolist.music.saraswati.family.sangat
 
@@ -15,6 +15,7 @@ import com.metrolist.music.constants.SangatPushDigestKey
 import com.metrolist.music.saraswati.family.FamilyFeature
 import com.metrolist.music.saraswati.family.FamilyFeatureGate
 import com.metrolist.music.saraswati.family.HubIdentity
+import com.metrolist.music.saraswati.saral.SaralActive
 import com.metrolist.music.utils.dataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -62,6 +63,7 @@ class SangatPushRegistrar
                     gate.isEnabled(FamilyFeature.SANGAT)
                 },
                 fetchToken = ::fetchToken,
+                isSaral = { SaralActive.on },
             )
 
         /**
@@ -74,12 +76,14 @@ class SangatPushRegistrar
             if (!isConfigured) return
             firebaseApp()
             appScope.launch(Dispatchers.IO) {
+                // App.onCreate sets SaralActive right after this call; read the cached role here too so a Saral phone never registers.
+                SaralActive.initFrom(context.dataStore)
                 ensureRegistered()
                 SangatPushSync.sangatTurnedOn(gate.enabled).collect { ensureRegistered() }
             }
         }
 
-        /** Registers this phone's token with the hub if it is paired, Sangat is on, and the token is new or a week old. */
+        /** Registers this phone's token with the hub if it is paired, Sangat is on, and the token is new or a day old. */
         suspend fun ensureRegistered() {
             if (!isConfigured) return
             log(withContext(Dispatchers.IO) { sync.ensureRegistered() })
@@ -152,6 +156,13 @@ private class DataStorePushRegistrationStore(
         dataStore.edit {
             it[SangatPushDigestKey] = registration.tokenHash
             it[SangatPushRegisteredAtKey] = registration.registeredAt
+        }
+    }
+
+    override suspend fun clear() {
+        dataStore.edit {
+            it.remove(SangatPushDigestKey)
+            it.remove(SangatPushRegisteredAtKey)
         }
     }
 }

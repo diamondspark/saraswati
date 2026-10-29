@@ -69,10 +69,17 @@ class SangatPushWiringSourceTest {
         val onNewIntent = bodyOf(mainActivity, "override fun onNewIntent(intent: Intent)")
         val saral = onNewIntent.indexOf("dropIntentsForSaral(intent)")
         val offer = onNewIntent.indexOf("SangatJoinRequests.offerFrom(")
-        val home = onNewIntent.indexOf("showHomeForSangatJoin(navController)")
+        val tick = onNewIntent.indexOf("sangatJoinTaps.intValue++")
         assertTrue(saral in 0 until offer)
-        assertTrue(offer in 0 until home)
+        assertTrue(offer in 0 until tick)
+        // The activity's lateinit navController is never assigned, so Home must be brought up from the composition.
+        assertFalse(onNewIntent.contains("showHomeForSangatJoin"))
+        val effect = mainActivity.substring(mainActivity.indexOf("LaunchedEffect(joinTaps)"))
+        val effectBody = effect.substring(0, effect.indexOf("\n                }\n"))
+        assertTrue(effectBody.contains("if (joinTaps > 0)"))
+        assertTrue(effectBody.contains("showAccountDialog = false"))
+        assertTrue(effectBody.contains("showHomeForSangatJoin(navController)"))
         assertTrue(bodyOf(mainActivity, "private fun showHomeForSangatJoin").contains("popBackStack(Screens.Home.route"))
-        assertFalse("a cold start already opens on Home", bodyOf(mainActivity, "override fun onCreate(savedInstanceState: Bundle?)").contains("showHomeForSangatJoin"))
+        assertFalse("only onNewIntent ticks; a cold start already opens on Home", mainActivity.contains("sangatJoinTaps.intValue = "))
     }
 }

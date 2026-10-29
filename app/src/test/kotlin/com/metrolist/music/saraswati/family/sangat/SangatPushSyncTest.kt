@@ -32,7 +32,13 @@ class SangatPushSyncTest {
             return answer
         }
 
-        override suspend fun unregisterPushToken(sessionToken: String): Result<Unit> = Result.success(Unit)
+        val unregistered = mutableListOf<String>()
+        var unregisterAnswer: Result<Unit> = Result.success(Unit)
+
+        override suspend fun unregisterPushToken(sessionToken: String): Result<Unit> {
+            unregistered += sessionToken
+            return unregisterAnswer
+        }
     }
 
     private class MemoryStore : PushRegistrationStore {
@@ -45,6 +51,10 @@ class SangatPushSyncTest {
             writes++
             value = registration
         }
+
+        override suspend fun clear() {
+            value = null
+        }
     }
 
     private val hub = FakePushHub()
@@ -55,6 +65,7 @@ class SangatPushSyncTest {
     private var sangatOn = true
     private var token: String? = "tok-1"
     private var now = 1_000_000L
+    private var saral = false
 
     private fun sync() =
         SangatPushSync(
@@ -66,6 +77,7 @@ class SangatPushSyncTest {
             sangatEnabled = { sangatOn },
             fetchToken = { token },
             clock = { now },
+            isSaral = { saral },
         )
 
     @Test
@@ -112,7 +124,7 @@ class SangatPushSyncTest {
         }
 
     @Test
-    fun `the same token within seven days is not registered again`() =
+    fun `the same token within a day is not registered again`() =
         runBlocking {
             val sync = sync()
             sync.ensureRegistered()
@@ -122,7 +134,7 @@ class SangatPushSyncTest {
         }
 
     @Test
-    fun `the same token after seven days is registered again`() =
+    fun `the same token after a day is registered again`() =
         runBlocking {
             val sync = sync()
             sync.ensureRegistered()
@@ -130,6 +142,65 @@ class SangatPushSyncTest {
             assertEquals(Outcome.REGISTERED, sync.ensureRegistered())
             assertEquals(2, hub.registered.size)
             assertEquals(now, store.value?.registeredAt)
+        }
+
+    @Test
+    fun `the re-registration interval is 24 hours`() {
+        assertEquals(24L * 60 * 60 * 1000, SangatPushSync.REREGISTER_AFTER_MS)
+    }
+
+    @Test
+    fun `a Saral phone never registers`() =
+        runBlocking {
+            saral = true
+            assertEquals(Outcome.SARAL, sync().ensureRegistered())
+            assertEquals(Outcome.SARAL, sync().onNewToken("t"))
+            assertTrue(hub.registered.isEmpty())
+            assertTrue(hub.unregistered.isEmpty())
+            assertNull(store.value)
+        }
+
+    @Test
+    fun `a phone switched to Saral after registering tells the hub once and clears the fingerprint`() =
+        runBlocking {
+            val sync = sync()
+            sync.ensureRegistered()
+            assertEquals(1, hub.registered.size)
+            saral = true
+            assertEquals(Outcome.SARAL, sync.ensureRegistered())
+            assertEquals(listOf("sess"), hub.unregistered)
+            assertNull(store.value)
+            assertEquals(Outcome.SARAL, sync.ensureRegistered())
+            assertEquals(Outcome.SARAL, sync.onNewToken("t"))
+            assertEquals(1, hub.unregistered.size)
+            assertEquals(1, hub.registered.size)
+        }
+
+    @Test
+    fun `a failed unregister keeps the fingerprint so the next try asks again`() =
+        runBlocking {
+            val sync = sync()
+            sync.ensureRegistered()
+            saral = true
+            hub.unregisterAnswer = Result.failure(HubException(500, "x"))
+            sync.ensureRegistered()
+            assertTrue(store.value != null)
+            hub.unregisterAnswer = Result.success(Unit)
+            sync.ensureRegistered()
+            assertEquals(2, hub.unregistered.size)
+            assertNull(store.value)
+        }
+
+    @Test
+    fun `leaving Saral registers again`() =
+        runBlocking {
+            val sync = sync()
+            sync.ensureRegistered()
+            saral = true
+            sync.ensureRegistered()
+            saral = false
+            assertEquals(Outcome.REGISTERED, sync.ensureRegistered())
+            assertEquals(2, hub.registered.size)
         }
 
     @Test
@@ -170,7 +241,7 @@ class SangatPushSyncTest {
         }
 
     @Test
-    fun `the same token under a new device id is registered again within seven days`() =
+    fun `the same token under a new device id is registered again within a day`() =
         runBlocking {
             val sync = sync()
             sync.ensureRegistered()
