@@ -81,7 +81,7 @@ class PendingInstallTest {
     @Test
     fun `an attempt is pending as soon as it starts, before any status arrives`() {
         val prefs = FakeSharedPreferences()
-        PendingInstall.markAttemptStarted(prefs)
+        PendingInstall.markAttemptStarted(prefs, TARGET)
         assertTrue(PendingInstall.isAttemptPending(prefs))
         // Still waiting on the user inside the system confirmation dialog —
         // this is the exact window the CRITICAL finding was about: paused,
@@ -92,7 +92,7 @@ class PendingInstallTest {
     @Test
     fun `a recorded terminal status is consumed exactly once`() {
         val prefs = FakeSharedPreferences()
-        PendingInstall.markAttemptStarted(prefs)
+        PendingInstall.markAttemptStarted(prefs, TARGET)
         PendingInstall.recordTerminalStatus(prefs, 0)
 
         assertEquals(0, PendingInstall.consumeTerminalStatus(prefs))
@@ -109,7 +109,7 @@ class PendingInstallTest {
     @Test
     fun `clear resolves the attempt fully`() {
         val prefs = FakeSharedPreferences()
-        PendingInstall.markAttemptStarted(prefs)
+        PendingInstall.markAttemptStarted(prefs, TARGET)
         PendingInstall.recordTerminalStatus(prefs, 2)
 
         PendingInstall.clear(prefs)
@@ -123,7 +123,7 @@ class PendingInstallTest {
         // PackageInstaller.STATUS_SUCCESS is 0 — a naive "0 means absent"
         // sentinel would silently swallow every successful install.
         val prefs = FakeSharedPreferences()
-        PendingInstall.markAttemptStarted(prefs)
+        PendingInstall.markAttemptStarted(prefs, TARGET)
         PendingInstall.recordTerminalStatus(prefs, 0)
         assertEquals(0, PendingInstall.consumeTerminalStatus(prefs))
     }
@@ -163,18 +163,55 @@ class PendingInstallTest {
         )
     }
 
+    // SARASWATI: relaunch with a pending attempt and the checkpoint reset to
+    // Checking: the recorded target decides success vs. "re-check".
+
     @Test
-    fun `Checking with an attempt pending is recovered as a crash`() {
+    fun `relaunch with the target now installed is recovered as succeeded`() {
+        // The Updater's own self-update kills the process; the new build's version >= target.
         assertEquals(
-            InstallRecoveryAction.RecoverAsCrashed,
-            decideInstallRecovery(UiState.Checking, isAttemptPending = true, knownStatus = null),
+            InstallRecoveryAction.RecoverAsSucceeded("9"),
+            decideInstallRecovery(UiState.Checking, true, null, TARGET, installedTargetVersionCode = 9L),
         )
-        // Even when a status happens to be known, Checking has no manifest
-        // left to thread it through reduce with — still recovers version-less.
         assertEquals(
-            InstallRecoveryAction.RecoverAsCrashed,
-            decideInstallRecovery(UiState.Checking, isAttemptPending = true, knownStatus = 0),
+            InstallRecoveryAction.RecoverAsSucceeded("9"),
+            decideInstallRecovery(UiState.Checking, true, null, TARGET, installedTargetVersionCode = 12L),
         )
+    }
+
+    @Test
+    fun `relaunch with the target not installed is a plain re-check, not a crash prompt`() {
+        assertEquals(
+            InstallRecoveryAction.Recheck,
+            decideInstallRecovery(UiState.Checking, true, null, TARGET, installedTargetVersionCode = 8L),
+        )
+        assertEquals(
+            InstallRecoveryAction.Recheck,
+            decideInstallRecovery(UiState.Checking, true, null, TARGET, installedTargetVersionCode = null),
+        )
+        // A status that happens to be known does not change the decision.
+        assertEquals(
+            InstallRecoveryAction.Recheck,
+            decideInstallRecovery(UiState.Checking, true, 2, TARGET, installedTargetVersionCode = 8L),
+        )
+    }
+
+    @Test
+    fun `relaunch with an attempt recorded by an older build re-checks`() {
+        assertEquals(
+            InstallRecoveryAction.Recheck,
+            decideInstallRecovery(UiState.Checking, true, null),
+        )
+    }
+
+    @Test
+    fun `the attempt target is recorded and cleared with the attempt`() {
+        val prefs = FakeSharedPreferences()
+        assertNull(PendingInstall.peekTarget(prefs))
+        PendingInstall.markAttemptStarted(prefs, TARGET)
+        assertEquals(TARGET, PendingInstall.peekTarget(prefs))
+        PendingInstall.clear(prefs)
+        assertNull(PendingInstall.peekTarget(prefs))
     }
 
     @Test
@@ -199,6 +236,8 @@ class PendingInstallTest {
             decideInstallRecovery(UiState.Installing, isAttemptPending = true, knownStatus = null),
         )
     }
+
+    private val TARGET = PendingTarget("dev.diamondspark.saraswati.updater", 9L, "9")
 
     private fun manifest(): UpdateManifest = UpdateManifest(
         schema = 1,

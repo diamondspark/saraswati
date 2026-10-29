@@ -53,19 +53,26 @@ sealed interface UiState {
     data class NeedsInstallPermission(val manifest: UpdateManifest) : UiState
     data class ReadyToInstall(val manifest: UpdateManifest) : UiState
     object Installing : UiState
-    data class TurnPermissionOff(val version: String?) : UiState
+    // SARASWATI: [after] is where the flow lands once the permission is off
+    // when there is no [version] to report as Done (e.g. the UpToDate that
+    // was showing when the permission turned out to be left on); null keeps
+    // the original failed/cancelled-install behaviour (retryable Error).
+    data class TurnPermissionOff(val version: String?, val after: UiState? = null) : UiState
     data class Done(val version: String) : UiState
     data class Error(val message: String, val canRetry: Boolean) : UiState
 }
 
 sealed interface Event {
-    data class ManifestLoaded(val manifest: UpdateManifest, val installed: Long?) : Event
+    // SARASWATI: [followUpQueued] — the caller knows another install (the
+    // Updater's own self-update) is still to come in this run, so the
+    // permission must stay on: no TurnPermissionOff until the last install.
+    data class ManifestLoaded(val manifest: UpdateManifest, val installed: Long?, val followUpQueued: Boolean = false) : Event
     data class ManifestFailed(val reason: String) : Event
     data class DownloadProgress(val percent: Int) : Event
     data class DownloadFinished(val verified: VerifyResult) : Event
     object UserTappedUpdate : Event
     data class PermissionChecked(val canInstall: Boolean) : Event
-    data class InstallStatus(val code: Int) : Event
+    data class InstallStatus(val code: Int, val followUpQueued: Boolean = false) : Event
     object Retry : Event
 }
 
@@ -87,11 +94,12 @@ fun reduce(state: UiState, event: Event, canInstallNow: Boolean): UiState {
     // not depend on which event arrives.
     if (state is UiState.TurnPermissionOff) {
         if (canInstallNow) return state
-        return if (state.version != null) {
-            UiState.Done(state.version)
-        } else {
-            UiState.Error(INSTALL_NOT_FINISHED_MESSAGE, canRetry = true)
-        }
+        return state.after
+            ?: if (state.version != null) {
+                UiState.Done(state.version)
+            } else {
+                UiState.Error(INSTALL_NOT_FINISHED_MESSAGE, canRetry = true)
+            }
     }
 
     return when (event) {
@@ -104,8 +112,9 @@ fun reduce(state: UiState, event: Event, canInstallNow: Boolean): UiState {
         // exception to the pattern.
         is Event.ManifestLoaded -> when (state) {
             UiState.Checking -> when (val decision = UpdateDecider.decide(event.installed, event.manifest)) {
-                is Decision.UpToDate -> UiState.UpToDate(event.installed ?: event.manifest.versionCode)
-                is Decision.AlreadyAhead -> UiState.AlreadyAhead(decision.installed)
+                is Decision.UpToDate ->
+                    endOfRun(UiState.UpToDate(event.installed ?: event.manifest.versionCode), canInstallNow, event.followUpQueued)
+                is Decision.AlreadyAhead -> endOfRun(UiState.AlreadyAhead(decision.installed), canInstallNow, event.followUpQueued)
                 is Decision.UpdateAvailable -> UiState.UpdateReady(decision.manifest)
                 is Decision.Rejected -> UiState.Error(decision.reason, canRetry = true)
             }
@@ -129,7 +138,7 @@ fun reduce(state: UiState, event: Event, canInstallNow: Boolean): UiState {
                 } else {
                     UiState.NeedsInstallPermission(state.manifest)
                 }
-                is VerifyResult.Failed -> UiState.Error(verified.reason, canRetry = false)
+                is VerifyResult.Failed -> endOfRun(UiState.Error(verified.reason, canRetry = false), canInstallNow, followUpQueued = false)
             }
             else -> state
         }
@@ -152,7 +161,10 @@ fun reduce(state: UiState, event: Event, canInstallNow: Boolean): UiState {
         is Event.InstallStatus -> when (state) {
             is UiState.ReadyToInstall -> {
                 val version = if (event.code == INSTALL_STATUS_SUCCESS) state.manifest.versionName else null
-                UiState.TurnPermissionOff(version)
+                // SARASWATI: a successful install with another one still queued
+                // keeps the permission on (Done is transient: the caller moves
+                // straight on to the queued install).
+                if (version != null && event.followUpQueued) UiState.Done(version) else UiState.TurnPermissionOff(version)
             }
             else -> state
         }
@@ -163,6 +175,12 @@ fun reduce(state: UiState, event: Event, canInstallNow: Boolean): UiState {
         }
     }
 }
+
+// SARASWATI: invariant — a run that ends with nothing left to install while
+// the permission is still on asks, once, for it to be switched off. Never
+// when another install is queued, so "off" is never followed by "on" again.
+private fun endOfRun(terminal: UiState, canInstallNow: Boolean, followUpQueued: Boolean): UiState =
+    if (canInstallNow && !followUpQueued) UiState.TurnPermissionOff(version = null, after = terminal) else terminal
 
 /** What UpdateActivity does when a new Intent reaches its already-running instance. */
 enum class NewIntentAction {
