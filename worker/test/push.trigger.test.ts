@@ -59,10 +59,13 @@ afterEach(async () => {
 const settle = () => runInDurableObject(hub(), (instance) => (instance as any).settlePushes() as Promise<void>);
 
 /** Calls the hub's trigger directly, as a hook does. */
-const trigger = (excludeDeviceId: string) =>
+const trigger = (excludeDeviceId: string, reason: "started" | "ended" = "started") =>
   runInDurableObject(hub(), (instance) => {
-    (instance as any).notifySangatChanged(excludeDeviceId);
+    (instance as any).notifySangatChanged(excludeDeviceId, reason);
   });
+
+const rateCount = (key: string) =>
+  sql(hub(), (db) => db.exec<{ count: number }>("SELECT count FROM rate_limits WHERE key = ?", key).toArray()[0]?.count);
 
 const registerToken = (device: Device, token = `fcm-${device.deviceId}`) =>
   sql(hub(), (db) => {
@@ -192,6 +195,23 @@ describe("a Sangat in the car", () => {
 
     expect(reply.status).toBe(200);
     expect(google.sentTo().sort()).toEqual([f.tokens.b, f.tokens.c].sort());
+  });
+
+  it("repeating carMode true on a room that is already a car room does not push again", async () => {
+    const { f, room } = await roomInCar();
+    await markCar(f.host, room.code, true);
+    await forgetPushes();
+
+    const again = await markCar(f.host, room.code, true);
+    await settle();
+
+    expect(again.status).toBe(200);
+    expect(google.calls).toHaveLength(0);
+    // Switching off and on again is a new change.
+    await markCar(f.host, room.code, false);
+    await markCar(f.host, room.code, true);
+    await settle();
+    expect(google.sends()).toHaveLength(2);
   });
 
   it("carMode false does not push", async () => {
@@ -420,15 +440,15 @@ describe("when the hub stays quiet", () => {
 });
 
 describe("send limits", () => {
-  it("one phone may trigger 10 pushes per 10 minutes", async () => {
+  it("one phone may start 6 pushes per 10 minutes", async () => {
     const f = await family();
 
-    for (let i = 0; i < 12; i++) await trigger(f.host.deviceId);
+    for (let i = 0; i < 9; i++) await trigger(f.host.deviceId);
     await settle();
 
     // Two recipients each time.
-    expect(google.sends()).toHaveLength(20);
-    expect(await sql(hub(), (db) => db.exec("SELECT count FROM rate_limits WHERE key = ?", `push-send:${f.host.deviceId}`).one().count)).toBe(10);
+    expect(google.sends()).toHaveLength(12);
+    expect(await rateCount(`push-send:${f.host.deviceId}`)).toBe(6);
   });
 
   it("the family may have 30 per 10 minutes, whoever triggers them", async () => {
@@ -440,7 +460,7 @@ describe("send limits", () => {
     // Three approved phones have a token (pending and revoked ones are not pushed to), none of
     // them excluded: three recipients each time.
     expect(google.sends()).toHaveLength(30 * 3);
-    expect(await sql(hub(), (db) => db.exec("SELECT count FROM rate_limits WHERE key = 'push-send:family'").one().count)).toBe(30);
+    expect(await rateCount("push-send:family")).toBe(30);
   });
 
   it("a phone that has spent its own limit does not use up the family's", async () => {
@@ -449,21 +469,77 @@ describe("send limits", () => {
     for (let i = 0; i < 15; i++) await trigger(f.host.deviceId);
     await settle();
 
-    expect(await sql(hub(), (db) => db.exec("SELECT count FROM rate_limits WHERE key = 'push-send:family'").one().count)).toBe(10);
+    expect(await rateCount("push-send:family")).toBe(6);
+  });
+
+  it("a refusal by the family limit does not cost the phone its own budget", async () => {
+    const f = await family();
+    for (let i = 0; i < 30; i++) await trigger(`other-phone-${i}`);
+    await settle();
+    google.calls.length = 0;
+
+    await trigger(f.host.deviceId);
+    await settle();
+
+    expect(google.calls).toHaveLength(0);
+    expect(await rateCount(`push-send:${f.host.deviceId}`)).toBeUndefined();
+    expect(await rateCount("push-send:family")).toBe(30);
+  });
+
+  it("an ended push is never limited, and spends nothing", async () => {
+    const f = await family();
+    for (let i = 0; i < 6; i++) await trigger(f.host.deviceId);
+    await settle();
+    google.calls.length = 0;
+    await trigger(f.host.deviceId);
+    await settle();
+    expect(google.calls).toHaveLength(0);
+
+    await trigger(f.host.deviceId, "ended");
+    await settle();
+
+    expect(google.sentTo().sort()).toEqual([f.tokens.b, f.tokens.c].sort());
+    expect(await rateCount(`push-send:${f.host.deviceId}`)).toBe(6);
+
+    // Not even with the family's budget gone.
+    for (let i = 0; i < 30; i++) await trigger(`other-phone-${i}`);
+    await settle();
+    google.calls.length = 0;
+    await trigger(f.host.deviceId, "ended");
+    await settle();
+    expect(google.sends()).toHaveLength(2);
+  });
+
+  it("a host leaving still pushes after the phone's start budget is spent", async () => {
+    const f = await family();
+    for (let i = 0; i < 6; i++) await trigger(f.host.deviceId);
+    await settle();
+    const room = await createRoom(hub(), f.host);
+    await settle();
+    // The start was refused by the limit...
+    expect(google.sends()).toHaveLength(12);
+    google.calls.length = 0;
+
+    await room.client.send("leave_room");
+    await sleep(100);
+    await settle();
+
+    // ...the end was not.
+    expect(google.sentTo().sort()).toEqual([f.tokens.b, f.tokens.c].sort());
   });
 
   it("starts over once the window has passed", async () => {
     const f = await family();
-    for (let i = 0; i < 10; i++) await trigger(f.host.deviceId);
+    for (let i = 0; i < 6; i++) await trigger(f.host.deviceId);
     await trigger(f.host.deviceId);
     await settle();
-    expect(google.sends()).toHaveLength(20);
+    expect(google.sends()).toHaveLength(12);
 
     await sql(hub(), (db) => db.exec("UPDATE rate_limits SET windowStart = windowStart - 601000 WHERE key LIKE 'push-send:%'"));
     await trigger(f.host.deviceId);
     await settle();
 
-    expect(google.sends()).toHaveLength(22);
+    expect(google.sends()).toHaveLength(14);
   });
 });
 

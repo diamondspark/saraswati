@@ -29,7 +29,7 @@ token is deleted when:
 
 - the phone is revoked;
 - the phone unregisters;
-- another phone registers the same token (an app install belongs to one phone);
+- another phone registers the same token (an app install belongs to one phone, so a phone that registers a token already held by another phone takes it over; the token is only an address, not a secret that grants anything);
 - FCM reports the token as dead (app uninstalled or token expired).
 
 Only approved phones are ever pushed to.
@@ -55,11 +55,17 @@ phones can register ahead of time), and nothing else changes.
 
 ## Limits
 
-- Per phone that starts things: 10 pushes per 10 minutes.
-- Whole family: 30 pushes per 10 minutes. Over either limit the push is skipped quietly.
+- Pushes about a Sangat starting (a new room, or a phone going into car mode): at most 6 per
+  phone and 30 for the whole family per 10 minutes. Both limits are checked before either is
+  used, so a refusal by one never costs the other. Over a limit the push is skipped quietly.
+- Switching car mode on for a room that is already in car mode sends nothing.
+- Pushes about a Sangat ending (the host leaves and the room empties, or a revoked car phone)
+  have no limit, so passengers always get the chance to clear their notification.
 - Token registration: 20 per hour per phone.
 - Each request to Google has a 5 second limit. The hub never waits for a push before answering
   the phone or handling a socket message, and a failed push is not retried.
 - Messages are high priority and expire after 5 minutes; a newer one replaces an older one
   that has not been delivered yet.
+- A token FCM calls unregistered, or one that belongs to a different sender, is deleted. A
+  plain "not found" (for example a wrong project id in the secret) deletes nothing.
 - Nothing is sent while the `sangat` feature switch is off.

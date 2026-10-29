@@ -336,13 +336,23 @@ export class Sangat {
 
   /** Car mode is the host device's to switch, for PUT /sangat/car. */
   setCarMode(roomCode: string, deviceId: string, carMode: boolean): "ok" | "not_found" | "not_host" {
+    return this.applyCarMode(roomCode, deviceId, carMode).result;
+  }
+
+  /** setCarMode, and whether the room's car mode really changed (false when it already had that value). */
+  applyCarMode(
+    roomCode: string,
+    deviceId: string,
+    carMode: boolean,
+  ): { result: "ok" | "not_found" | "not_host"; changed: boolean } {
     this.reconcileNow();
     const room = this.store.getOpenRoom(roomCode);
-    if (!room) return "not_found";
-    if (room.hostDeviceId !== deviceId) return "not_host";
+    if (!room) return { result: "not_found", changed: false };
+    if (room.hostDeviceId !== deviceId) return { result: "not_host", changed: false };
+    const changed = room.carMode !== carMode;
     room.carMode = carMode;
     this.store.saveRoom(room);
-    return "ok";
+    return { result: "ok", changed };
   }
 
   /**

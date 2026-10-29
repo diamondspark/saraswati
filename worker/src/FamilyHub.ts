@@ -47,11 +47,13 @@ const MAX_STATIONS = 6;
 const MAX_CAR_BODY_BYTES = 1024;
 const MAX_CAR_ROOM_CODE_LENGTH = 32;
 
-// FCM push to the other phones when a Sangat starts or ends. The whole family shares one
-// budget, and the phone that triggered it has its own, so one phone cannot spend the family's.
+// FCM push to the other phones when a Sangat starts. The whole family shares one budget, and
+// the phone that triggered it has its own, so one phone cannot spend the family's. A push
+// that a Sangat has ended is not limited: room creation already bounds it, and holding it
+// back would leave passengers with a stale notification.
 const PUSH_WINDOW_SECONDS = 10 * 60;
 const PUSH_FAMILY_MAX = 30;
-const PUSH_DEVICE_MAX = 10;
+const PUSH_DEVICE_MAX = 6;
 
 // /health: at most one accepted report per device per 5 minutes.
 const HEALTH_WINDOW_SECONDS = 5 * 60;
@@ -302,8 +304,8 @@ export class FamilyHub extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sangat = new Sangat(ctx, {
-      roomStarted: (hostDeviceId) => this.notifySangatChanged(hostDeviceId),
-      roomEnded: (hostDeviceId) => this.notifySangatChanged(hostDeviceId),
+      roomStarted: (hostDeviceId) => this.notifySangatChanged(hostDeviceId, "started"),
+      roomEnded: (hostDeviceId) => this.notifySangatChanged(hostDeviceId, "ended"),
     });
     this.hubContext = {
       sql: ctx.storage.sql,
@@ -338,9 +340,9 @@ export class FamilyHub extends DurableObject<Env> {
    * Sangat, so its app wakes and asks GET /sangat/live. Fire and forget: it returns at once
    * and never throws, and the push itself carries no content. Call it only outside a storage
    * transaction (Sangat calls its hooks after the commit). Skipped quietly when Sangat is off,
-   * FCM is not set up, nobody else has a token, or a send limit is used up.
+   * FCM is not set up, nobody else has a token, or (for "started" only) a send limit is used up.
    */
-  private notifySangatChanged(excludeDeviceId: string): void {
+  private notifySangatChanged(excludeDeviceId: string, reason: "started" | "ended"): void {
     try {
       if (!this.readKillSwitches().sangat || !this.fcm.isConfigured(this.env)) {
         return;
@@ -354,12 +356,18 @@ export class FamilyHub extends DurableObject<Env> {
       if (rows.length === 0) {
         return;
       }
-      // The trigger's own budget first, so a phone that floods cannot use up the family's.
-      if (
-        !this.rateLimit(`push-send:${excludeDeviceId}`, PUSH_WINDOW_SECONDS, PUSH_DEVICE_MAX) ||
-        !this.rateLimit("push-send:family", PUSH_WINDOW_SECONDS, PUSH_FAMILY_MAX)
-      ) {
-        return;
+      if (reason === "started") {
+        // Both budgets are looked at before either is spent, so a refusal by one never costs
+        // the other. Nothing is awaited between the look and the spend.
+        const deviceKey = `push-send:${excludeDeviceId}`;
+        if (
+          !this.rateHasRoom(deviceKey, PUSH_WINDOW_SECONDS, PUSH_DEVICE_MAX) ||
+          !this.rateHasRoom("push-send:family", PUSH_WINDOW_SECONDS, PUSH_FAMILY_MAX)
+        ) {
+          return;
+        }
+        this.rateLimit(deviceKey, PUSH_WINDOW_SECONDS, PUSH_DEVICE_MAX);
+        this.rateLimit("push-send:family", PUSH_WINDOW_SECONDS, PUSH_FAMILY_MAX);
       }
 
       const send = this.fcm
@@ -460,6 +468,14 @@ export class FamilyHub extends DurableObject<Env> {
     }
 
     return null;
+  }
+
+  /** Whether rateLimit(key, windowSeconds, maxCount) would allow a call now. Writes nothing. */
+  private rateHasRoom(key: string, windowSeconds: number, maxCount: number): boolean {
+    const row = this.ctx.storage.sql
+      .exec<RateLimitRow>("SELECT windowStart, count FROM rate_limits WHERE key = ?", key)
+      .toArray()[0];
+    return !row || Date.now() - row.windowStart >= windowSeconds * 1000 || row.count < maxCount;
   }
 
   /**
@@ -936,7 +952,7 @@ export class FamilyHub extends DurableObject<Env> {
     // A revoked car phone that was hosting ended its room: tell the family, so a passenger's
     // notification does not outlive it. Only then; any other revoke changes nothing for them.
     if (endedARoom) {
-      this.notifySangatChanged(deviceId);
+      this.notifySangatChanged(deviceId, "ended");
     }
 
     return json({ deviceId, status: "revoked" });
@@ -1222,7 +1238,7 @@ export class FamilyHub extends DurableObject<Env> {
       return json({ error: "roomCode and a boolean carMode are required" }, 400);
     }
 
-    const result = this.sangat.setCarMode(roomCode, auth.deviceId, carMode);
+    const { result, changed } = this.sangat.applyCarMode(roomCode, auth.deviceId, carMode);
     if (result === "not_found") {
       return json({ error: "room not found" }, 404);
     }
@@ -1230,9 +1246,10 @@ export class FamilyHub extends DurableObject<Env> {
       return json({ error: "only the host device can change car mode" }, 403);
     }
 
-    if (carMode) {
-      // The car phone is now the host of a Sangat the family may want to join.
-      this.notifySangatChanged(auth.deviceId);
+    if (carMode && changed) {
+      // The car phone is now the host of a Sangat the family may want to join. Only when it
+      // really went into car mode: a repeated request (an app retry) says nothing new.
+      this.notifySangatChanged(auth.deviceId, "started");
     }
 
     const room = this.sangat.roomView(roomCode);

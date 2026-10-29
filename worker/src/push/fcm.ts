@@ -116,12 +116,9 @@ async function classify(response: Response): Promise<Outcome> {
     discard(response);
     return "ok";
   }
-  if (response.status === 401 || response.status === 403) {
-    discard(response);
-    return "auth";
-  }
-  // Not even a 404 is proof: a wrong project_id answers 404 NOT_FOUND too, and treating that as
-  // a dead token would wipe every registration. Only FCM's own words count.
+  // Nothing is taken from the HTTP status alone: a wrong project_id answers 404 NOT_FOUND and a
+  // token from another sender answers 403, and neither should wipe the registrations or the
+  // access token. Only FCM's own words in the error body count.
   let error: Record<string, unknown> | null = null;
   try {
     const text = (await response.text()).slice(0, MAX_ERROR_BODY_CHARS);
@@ -129,18 +126,32 @@ async function classify(response: Response): Promise<Outcome> {
     const inner = (parsed as { error?: unknown } | null)?.error;
     error = typeof inner === "object" && inner !== null ? (inner as Record<string, unknown>) : null;
   } catch {
-    return "other";
+    // an unreadable body says nothing
+  }
+  if (response.status === 401) {
+    return "auth";
   }
   if (!error) {
     return "other";
   }
   const details = Array.isArray(error.details) ? (error.details as unknown[]) : [];
+  const hasErrorCode = (code: string) =>
+    error.status === code ||
+    details.some((detail) => (detail as { errorCode?: unknown } | null)?.errorCode === code);
+  // The token belongs to another sender (an old project's, say): it can never be pushed to.
+  // Checked before the auth case, since FCM sends it as 403 PERMISSION_DENIED.
+  if (hasErrorCode("SENDER_ID_MISMATCH")) {
+    return "dead";
+  }
   if (
     details.some(
       (detail) => (detail as { errorCode?: unknown } | null)?.errorCode === "UNREGISTERED",
     )
   ) {
     return "dead";
+  }
+  if (response.status === 403 && (error.status === "PERMISSION_DENIED" || error.status === "UNAUTHENTICATED")) {
+    return "auth";
   }
   if (
     error.status === "INVALID_ARGUMENT" &&

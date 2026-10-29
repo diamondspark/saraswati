@@ -149,10 +149,15 @@ describe("the OAuth exchange", () => {
     expect(google.tokenRequests()).toHaveLength(2);
   });
 
-  it.each([401, 403])("drops the cached access token when FCM answers %i", async (status) => {
+  it.each([
+    ["401", 401, { error: { code: 401, status: "UNAUTHENTICATED" } }],
+    ["401 with no body", 401, undefined],
+    ["403 PERMISSION_DENIED", 403, { error: { code: 403, status: "PERMISSION_DENIED", message: "denied" } }],
+    ["403 UNAUTHENTICATED", 403, { error: { code: 403, status: "UNAUTHENTICATED" } }],
+  ])("drops the cached access token when FCM answers %s", async (_label, status, body) => {
     const account = await fakeAccount();
     let reject = true;
-    const google = fakeGoogle({ answer: () => (reject ? { status } : undefined) });
+    const google = fakeGoogle({ answer: () => (reject ? { status, body } : undefined) });
     const client = new FcmClient({ fetchFn: google.fn });
     const env = { FCM_SERVICE_ACCOUNT: account.json };
 
@@ -162,6 +167,50 @@ describe("the OAuth exchange", () => {
 
     expect(google.tokenRequests()).toHaveLength(2);
     expect((google.sends()[1].init.headers as Record<string, string>).Authorization).toBe("Bearer at-2");
+  });
+
+  it("403 SENDER_ID_MISMATCH prunes the token and keeps the access token", async () => {
+    const account = await fakeAccount();
+    const mismatch = {
+      error: {
+        code: 403,
+        message: "SenderId mismatch",
+        status: "PERMISSION_DENIED",
+        details: [
+          { "@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError", errorCode: "SENDER_ID_MISMATCH" },
+        ],
+      },
+    };
+    const google = fakeGoogle({ answer: (t) => (t === "foreign" ? { status: 403, body: mismatch } : undefined) });
+    const client = new FcmClient({ fetchFn: google.fn });
+    const env = { FCM_SERVICE_ACCOUNT: account.json };
+
+    expect(await client.send(env, ["foreign", "mine"])).toEqual(["foreign"]);
+    await client.send(env, ["mine"]);
+
+    expect(google.tokenRequests()).toHaveLength(1);
+    // The same code in error.status alone counts too.
+    const bare = fakeGoogle({ answer: () => ({ status: 403, body: { error: { status: "SENDER_ID_MISMATCH" } } }) });
+    expect(await new FcmClient({ fetchFn: bare.fn }).send(env, ["foreign"])).toEqual(["foreign"]);
+  });
+
+  it("a 403 that is not an auth failure leaves the access token and the token alone", async () => {
+    const account = await fakeAccount();
+    const google = fakeGoogle({
+      answer: () => ({ status: 403, body: { error: { code: 403, status: "SOMETHING_ELSE" } } }),
+    });
+    const client = new FcmClient({ fetchFn: google.fn });
+    const env = { FCM_SERVICE_ACCOUNT: account.json };
+
+    expect(await client.send(env, ["t1"])).toEqual([]);
+    expect(await client.send(env, ["t2"])).toEqual([]);
+    const unreadable = fakeGoogle({ answer: () => ({ status: 403 }) });
+    const other = new FcmClient({ fetchFn: unreadable.fn });
+    await other.send(env, ["t1"]);
+    await other.send(env, ["t2"]);
+
+    expect(google.tokenRequests()).toHaveLength(1);
+    expect(unreadable.tokenRequests()).toHaveLength(1);
   });
 });
 
