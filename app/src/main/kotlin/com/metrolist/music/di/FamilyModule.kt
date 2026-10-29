@@ -53,8 +53,13 @@ import com.metrolist.music.saraswati.family.sangat.WatcherSangatFeed
 import com.metrolist.music.saraswati.family.sangat.ListenTogetherCarRoom
 import com.metrolist.music.saraswati.family.sangat.DataStoreCarRoomStore
 import com.metrolist.music.saraswati.family.sangat.SangatCarMode
+import com.metrolist.music.saraswati.family.sangat.AnnouncedRoomsStore
+import com.metrolist.music.saraswati.family.sangat.DataStoreAnnouncedRoomsStore
+import com.metrolist.music.saraswati.family.sangat.PushHubApi
 import com.metrolist.music.saraswati.family.sangat.SangatForeground
 import com.metrolist.music.saraswati.family.sangat.SangatLiveWatcher
+import com.metrolist.music.saraswati.family.sangat.SangatNotifications
+import com.metrolist.music.saraswati.family.sangat.SangatNotifier
 import com.metrolist.music.saraswati.security.SaraswatiVault
 import com.metrolist.music.utils.dataStore
 import com.metrolist.music.utils.get
@@ -97,6 +102,21 @@ object FamilyModule {
     @Provides
     @Singleton
     fun provideHubApi(client: HubClient): HubApi = client
+
+    // SARASWATI: Sangat push — the push token routes, and the notifications as the push handler sees them.
+    @Provides
+    @Singleton
+    fun providePushHubApi(client: HubClient): PushHubApi = client
+
+    @Provides
+    @Singleton
+    fun provideAnnouncedRoomsStore(
+        @ApplicationContext context: Context,
+    ): AnnouncedRoomsStore = DataStoreAnnouncedRoomsStore(context.dataStore)
+
+    @Provides
+    @Singleton
+    fun provideSangatNotifier(notifications: SangatNotifications): SangatNotifier = notifications
 
     @Provides
     @Singleton

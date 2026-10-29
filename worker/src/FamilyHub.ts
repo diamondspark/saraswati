@@ -12,6 +12,7 @@ import {
 } from "./http";
 import { mirrorToGitHub } from "./feedback/githubIssue";
 import { migrate } from "./migrations";
+import { FcmClient } from "./push/fcm";
 import { bearerToken, matchRoute } from "./routes";
 import { tooLarge } from "./routes/common";
 import {
@@ -22,6 +23,7 @@ import {
 import { handleAsk } from "./routes/ask";
 import { listFeedback, postFeedback, setFeedbackStatus } from "./routes/feedback";
 import { listParivaarPlaylists, putParivaarPlaylist } from "./routes/parivaar";
+import { deletePushToken, putPushToken } from "./routes/push";
 import { CLOSE_DEVICE_REVOKED, CLOSE_SANGAT_DISABLED } from "./sangat/limits";
 import { Sangat, type LiveRoom } from "./sangat/Sangat";
 import { normalizeRoomCode } from "./sangat/sanitize";
@@ -44,6 +46,14 @@ const MAX_STATIONS = 6;
 // is normalized (which cuts it to 10 bytes), so a huge string is never cleaned.
 const MAX_CAR_BODY_BYTES = 1024;
 const MAX_CAR_ROOM_CODE_LENGTH = 32;
+
+// FCM push to the other phones when a Sangat starts. The whole family shares one budget, and
+// the phone that triggered it has its own, so one phone cannot spend the family's. A push
+// that a Sangat has ended is not limited: room creation already bounds it, and holding it
+// back would leave passengers with a stale notification.
+const PUSH_WINDOW_SECONDS = 10 * 60;
+const PUSH_FAMILY_MAX = 30;
+const PUSH_DEVICE_MAX = 6;
 
 // /health: at most one accepted report per device per 5 minutes.
 const HEALTH_WINDOW_SECONDS = 5 * 60;
@@ -125,6 +135,11 @@ interface ClaimStatusRow extends Record<string, SqlStorageValue> {
   status: string;
   pendingSessionToken: string | null;
   claimSecretHash: string | null;
+}
+
+interface PushTokenRow extends Record<string, SqlStorageValue> {
+  deviceId: string;
+  token: string;
 }
 
 interface RosterIdRow extends Record<string, SqlStorageValue> {
@@ -281,10 +296,17 @@ function liveRoomJson(room: LiveRoom) {
 export class FamilyHub extends DurableObject<Env> {
   private readonly sangat: Sangat;
   private readonly hubContext: HubContext;
+  private readonly fcm = new FcmClient();
+  // The sends in flight. A Durable Object has no waitUntil, but it keeps running after the
+  // response while a fetch is outstanding; the set lets a test wait for them (settlePushes).
+  private readonly pushesInFlight = new Set<Promise<void>>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    this.sangat = new Sangat(ctx);
+    this.sangat = new Sangat(ctx, {
+      roomStarted: (hostDeviceId) => this.notifySangatChanged(hostDeviceId, "started"),
+      roomEnded: (hostDeviceId) => this.notifySangatChanged(hostDeviceId, "ended"),
+    });
     this.hubContext = {
       sql: ctx.storage.sql,
       rateLimit: (key, windowSeconds, max) =>
@@ -311,6 +333,70 @@ export class FamilyHub extends DurableObject<Env> {
         );
       }
     });
+  }
+
+  /**
+   * Tells every other approved phone that has registered a token that "something changed" in
+   * Sangat, so its app wakes and asks GET /sangat/live. Fire and forget: it returns at once
+   * and never throws, and the push itself carries no content. Call it only outside a storage
+   * transaction (Sangat calls its hooks after the commit). Skipped quietly when FCM is not set up,
+   * nobody else has a token, for "started" when Sangat is off, or (for "started" only) when a send
+   * limit is used up.
+   */
+  private notifySangatChanged(excludeDeviceId: string, reason: "started" | "ended"): void {
+    try {
+      // "Ended" goes out even with Sangat off (the owner just closed every room): it carries no
+      // content and lets phones clear a "started" notification. "Started" stays gated.
+      if ((reason === "started" && !this.readKillSwitches().sangat) || !this.fcm.isConfigured(this.env)) {
+        return;
+      }
+      const rows = this.ctx.storage.sql
+        .exec<PushTokenRow>(
+          "SELECT p.deviceId, p.token FROM push_tokens p JOIN roster r ON r.deviceId = p.deviceId WHERE r.status = 'approved' AND p.deviceId != ?",
+          excludeDeviceId,
+        )
+        .toArray();
+      if (rows.length === 0) {
+        return;
+      }
+      if (reason === "started") {
+        // Both budgets are looked at before either is spent, so a refusal by one never costs
+        // the other. Nothing is awaited between the look and the spend.
+        const deviceKey = `push-send:${excludeDeviceId}`;
+        if (
+          !this.rateHasRoom(deviceKey, PUSH_WINDOW_SECONDS, PUSH_DEVICE_MAX) ||
+          !this.rateHasRoom("push-send:family", PUSH_WINDOW_SECONDS, PUSH_FAMILY_MAX)
+        ) {
+          return;
+        }
+        this.rateLimit(deviceKey, PUSH_WINDOW_SECONDS, PUSH_DEVICE_MAX);
+        this.rateLimit("push-send:family", PUSH_WINDOW_SECONDS, PUSH_FAMILY_MAX);
+      }
+
+      const send = this.fcm
+        .send(
+          this.env,
+          rows.map((row) => row.token),
+        )
+        .then((dead) => {
+          // By token, not by device: the phone may have registered a fresh one meanwhile.
+          for (const token of dead) {
+            this.ctx.storage.sql.exec("DELETE FROM push_tokens WHERE token = ?", token);
+          }
+        })
+        .catch(() => undefined);
+      this.pushesInFlight.add(send);
+      void send.finally(() => this.pushesInFlight.delete(send));
+    } catch {
+      // A push is never worth failing the request or message that caused it.
+    }
+  }
+
+  /** Resolves once every push started so far has finished. For tests; nothing in the hub calls it. */
+  async settlePushes(): Promise<void> {
+    while (this.pushesInFlight.size > 0) {
+      await Promise.all([...this.pushesInFlight]);
+    }
   }
 
   /**
@@ -385,6 +471,14 @@ export class FamilyHub extends DurableObject<Env> {
     }
 
     return null;
+  }
+
+  /** Whether rateLimit(key, windowSeconds, maxCount) would allow a call now. Writes nothing. */
+  private rateHasRoom(key: string, windowSeconds: number, maxCount: number): boolean {
+    const row = this.ctx.storage.sql
+      .exec<RateLimitRow>("SELECT windowStart, count FROM rate_limits WHERE key = ?", key)
+      .toArray()[0];
+    return !row || Date.now() - row.windowStart >= windowSeconds * 1000 || row.count < maxCount;
   }
 
   /**
@@ -849,13 +943,20 @@ export class FamilyHub extends DurableObject<Env> {
     // The same turn as the update, with nothing awaited in between: no upgrade can
     // authenticate the device in the gap. Its sockets close at once (4001) and its seats,
     // and with them its reconnect tokens, go; waiting for a reconnect would be too late.
-    this.sangat.closeDevice(deviceId, CLOSE_DEVICE_REVOKED, "revoked");
+    const endedARoom = this.sangat.closeDevice(deviceId, CLOSE_DEVICE_REVOKED, "revoked");
     // Its Parivaar row goes too (the list hides it anyway). Its family playlists stay: they
     // belong to the family, and only the admin can remove them now.
     this.ctx.storage.sql.exec(
       "DELETE FROM parivaar_playlists WHERE deviceId = ?",
       deviceId,
     );
+    // And its push token, so a revoked phone is never pushed to again.
+    this.ctx.storage.sql.exec("DELETE FROM push_tokens WHERE deviceId = ?", deviceId);
+    // A revoked car phone that was hosting ended its room: tell the family, so a passenger's
+    // notification does not outlive it. Only then; any other revoke changes nothing for them.
+    if (endedARoom) {
+      this.notifySangatChanged(deviceId, "ended");
+    }
 
     return json({ deviceId, status: "revoked" });
   }
@@ -990,7 +1091,12 @@ export class FamilyHub extends DurableObject<Env> {
     // Switching Sangat off ends it now: every socket closes (4003, which the app does
     // not retry) and every room goes, so a re-enable starts with none.
     if (changes.some(([key, enabled]) => key === "sangat" && !enabled)) {
-      this.sangat.closeAll(CLOSE_SANGAT_DISABLED, "sangat disabled");
+      const endedRooms = this.sangat.closeAll(CLOSE_SANGAT_DISABLED, "sangat disabled");
+      // One push for the whole family, to every approved phone (the hosts too; their rooms are
+      // gone as well). "Ended" is still sent with the feature off: it carries nothing.
+      if (endedRooms) {
+        this.notifySangatChanged("", "ended");
+      }
     }
 
     return json(this.readKillSwitches());
@@ -1140,12 +1246,18 @@ export class FamilyHub extends DurableObject<Env> {
       return json({ error: "roomCode and a boolean carMode are required" }, 400);
     }
 
-    const result = this.sangat.setCarMode(roomCode, auth.deviceId, carMode);
+    const { result, changed } = this.sangat.applyCarMode(roomCode, auth.deviceId, carMode);
     if (result === "not_found") {
       return json({ error: "room not found" }, 404);
     }
     if (result === "not_host") {
       return json({ error: "only the host device can change car mode" }, 403);
+    }
+
+    if (carMode && changed) {
+      // The car phone is now the host of a Sangat the family may want to join. Only when it
+      // really went into car mode: a repeated request (an app retry) says nothing new.
+      this.notifySangatChanged(auth.deviceId, "started");
     }
 
     const room = this.sangat.roomView(roomCode);
@@ -1249,6 +1361,10 @@ export class FamilyHub extends DurableObject<Env> {
         return this.handleSangatLive(request);
       case "sangatCar":
         return this.handleSangatCar(request);
+      case "pushTokenPut":
+        return this.runRoute(request, "device", putPushToken);
+      case "pushTokenDelete":
+        return this.runRoute(request, "device", deletePushToken);
       case "parivaarPlaylistPut":
         return this.runRoute(request, "device", putParivaarPlaylist);
       case "parivaarPlaylistsList":

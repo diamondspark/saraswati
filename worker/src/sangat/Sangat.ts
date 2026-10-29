@@ -58,7 +58,7 @@ import {
 } from "./rooms";
 import { Store, type Room } from "./store";
 import { handleApproveSuggestion, handleRejectSuggestion, handleSuggestTrack } from "./suggestions";
-import type { Attachment, Conn, Handler, Out, PreHashed, Runtime } from "./types";
+import type { Attachment, Conn, Handler, Out, PreHashed, Runtime, SangatHooks } from "./types";
 import { sha256Hex } from "../secrets";
 
 export type LiveRoom = {
@@ -142,7 +142,10 @@ export class Sangat {
   // Socket side effects a handler asked for; they run only once its changes are committed.
   private effects: (() => void)[] = [];
 
-  constructor(private readonly ctx: DurableObjectState) {
+  constructor(
+    private readonly ctx: DurableObjectState,
+    private readonly hooks: SangatHooks = {},
+  ) {
     this.store = new Store(ctx.storage);
     this.runtime = {
       store: this.store,
@@ -151,7 +154,22 @@ export class Sangat {
         this.effects.push(() => this.detachSocket(userId, code, reason));
       },
       allowSyncResponse: (userId, now) => this.allowSyncResponse(userId, now),
+      roomStarted: (hostDeviceId) => {
+        this.effects.push(() => this.notifyHook(() => this.hooks.roomStarted?.(hostDeviceId)));
+      },
+      roomEnded: (hostDeviceId) => {
+        this.effects.push(() => this.notifyHook(() => this.hooks.roomEnded?.(hostDeviceId)));
+      },
     };
+  }
+
+  // A hook is the hub's business; whatever it does, it must not stop the effects after it or the flush.
+  private notifyHook(call: () => void): void {
+    try {
+      call();
+    } catch (error) {
+      console.error("sangat: hook failed", errorName(error));
+    }
   }
 
   // The hub's entry points
@@ -262,12 +280,20 @@ export class Sangat {
         const outs: Out[] = [];
         // Each piece of work is its own transaction: one that fails (a room whose
         // state cannot be read, say) must not undo the others' expiries.
+        // Effects a piece of work asked for (a hook to the hub) run once it has committed, and
+        // are dropped if it did not.
         const attempt = (work: () => Out[]) => {
+          let committed: Out[] | undefined;
           try {
-            outs.push(...this.store.transaction(work));
+            committed = this.store.transaction(work);
           } catch (error) {
             failed = true;
             console.error("sangat: alarm work failed", errorName(error));
+          }
+          const effects = this.effects.splice(0);
+          if (committed) {
+            outs.push(...committed);
+            for (const effect of effects) effect();
           }
         };
         attempt(() => disconnectOrphans(this.runtime, this.liveUserIds()));
@@ -318,13 +344,23 @@ export class Sangat {
 
   /** Car mode is the host device's to switch, for PUT /sangat/car. */
   setCarMode(roomCode: string, deviceId: string, carMode: boolean): "ok" | "not_found" | "not_host" {
+    return this.applyCarMode(roomCode, deviceId, carMode).result;
+  }
+
+  /** setCarMode, and whether the room's car mode really changed (false when it already had that value). */
+  applyCarMode(
+    roomCode: string,
+    deviceId: string,
+    carMode: boolean,
+  ): { result: "ok" | "not_found" | "not_host"; changed: boolean } {
     this.reconcileNow();
     const room = this.store.getOpenRoom(roomCode);
-    if (!room) return "not_found";
-    if (room.hostDeviceId !== deviceId) return "not_host";
+    if (!room) return { result: "not_found", changed: false };
+    if (room.hostDeviceId !== deviceId) return { result: "not_host", changed: false };
+    const changed = room.carMode !== carMode;
     room.carMode = carMode;
     this.store.saveRoom(room);
-    return "ok";
+    return { result: "ok", changed };
   }
 
   /**
@@ -340,8 +376,11 @@ export class Sangat {
    * The storage work is split so that one failure costs only its own part: the
    * device's join requests and suggestions, in every room, are one step, and each
    * seat's removal from its room is another.
+   *
+   * True when the device was the host of a room and its going ended that room (nobody left,
+   * or a car room, which ends with its host); the caller can then tell the family.
    */
-  closeDevice(deviceId: string, code: number, reason: string): void {
+  closeDevice(deviceId: string, code: number, reason: string): boolean {
     // Members whose sockets died with an earlier instance are still marked connected;
     // settle that before a host is chosen from among them.
     this.reconcileNow();
@@ -362,20 +401,27 @@ export class Sangat {
     );
 
     const seats = this.attempt("listing a closed device's seats", () => this.store.membersOfDevice(deviceId)) ?? [];
+    let endedARoom = false;
     for (const member of seats) {
       const removed = this.attempt("removing a closed device from a room", () =>
         this.store.transaction(() => {
           const room = this.store.getRoom(member.roomCode);
           if (!room || room.emptySince !== null) {
             this.store.deleteMember(member.userId);
-            return [];
+            return { outs: [], ended: false };
           }
-          return removeFromRoom(this.store, room, member, now);
+          const wasHost = member.isHost || room.hostUserId === member.userId;
+          const outs = removeFromRoom(this.store, room, member, now);
+          return { outs, ended: wasHost && room.emptySince !== null };
         }),
       );
-      if (removed) outs.push(...removed);
+      if (removed) {
+        outs.push(...removed.outs);
+        if (removed.ended) endedARoom = true;
+      }
     }
     this.announce(outs);
+    return endedARoom;
   }
 
   /** Runs one piece of storage work whose failure must not stop the rest: logs it and returns undefined. */
@@ -388,8 +434,15 @@ export class Sangat {
     }
   }
 
-  /** Closes every socket with `code` and deletes every room. The sockets go first, as in closeDevice. */
-  closeAll(code: number, reason: string): void {
+  /**
+   * Closes every socket with `code` and deletes every room. The sockets go first, as in closeDevice.
+   * True when a room with a host (connected, or inside its reconnect grace) went, so the caller can
+   * tell the family: those rooms may have a notification out that nothing else will clear.
+   */
+  closeAll(code: number, reason: string): boolean {
+    const hadHostedRoom = this.attempt("listing the rooms before closing them", () =>
+      this.store.openRooms().some((room) => room.hostUserId !== ""),
+    );
     for (const ws of this.ctx.getWebSockets()) {
       const att = this.attachmentOf(ws);
       if (att) this.closeSocket(ws, att, code, reason);
@@ -402,6 +455,7 @@ export class Sangat {
     }
     this.lastSyncAt.clear();
     this.announce([]);
+    return hadHostedRoom === true;
   }
 
   // Serialization

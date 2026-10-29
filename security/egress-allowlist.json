@@ -195,7 +195,9 @@
     { "name": "lrclib.net", "subdomains": false },
     { "name": "lyrics-api.boidu.dev", "subdomains": false },
     { "name": "diamondspark.github.io", "subdomains": false },
-    { "name": "saraswati-sangat.pandey-mohitk.workers.dev", "subdomains": false }
+    { "name": "saraswati-sangat.pandey-mohitk.workers.dev", "subdomains": false },
+    { "name": "firebaseinstallations.googleapis.com", "subdomains": false },
+    { "name": "fcmregistrations.googleapis.com", "subdomains": false }
   ],
   "forbidden_hosts": [
     "discord.com",

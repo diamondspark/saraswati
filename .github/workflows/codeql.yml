@@ -68,7 +68,17 @@ jobs:
       - name: Build (gms debug, no tests)
         run: ./gradlew :app:assembleGmsDebug -x test
 
+      # The Gradle and Kotlin daemons (4 GB heap each, gradle.properties) outlive the build, while the
+      # analysis sizes itself to the runner's whole RAM; together they got the runner OOM-killed
+      # ("The runner has received a shutdown signal") twice on PR #32. Stop them first, and leave the
+      # runner itself some headroom.
+      - name: Stop build daemons
+        run: |
+          ./gradlew --stop
+          pkill -f KotlinCompileDaemon || true
+
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           category: "/language:java-kotlin"
+          ram: 12288

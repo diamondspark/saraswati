@@ -85,3 +85,12 @@ cf5639c2699ba920df393de140fed708097127ed:worker/test/roster.test.ts:generic-api-
 # ("ghp_FAKEfake...") to prove the token never appears in a response. Not a credential;
 # the real fine-grained token was only ever uploaded with `wrangler secret put`.
 7ed3919a1e976ce3565d8df99774868e137e0f2b:worker/test/feedbackMirror.test.ts:github-pat:9
+# Sangat push (2026-10-29): the Firebase *client* API key for project saraswati-family. Public by
+# design (it ships inside every APK) and restricted in Google Cloud to the Firebase Installations
+# API and the FCM Registration API only. The hub's sending credential is a separate service-account
+# key held only as the Worker secret FCM_SERVICE_ACCOUNT and never committed.
+d8c4e2f2182552168766d56412d97e8343275632:app/firebase.properties:gcp-api-key:8
+# Sangat push (2026-10-29): worker push-trigger tests pass the hub's fixture ADMIN_KEY (64 hex chars of
+# "0123456789abcdef" repeated) to call /roster/{id}/revoke. Test-only, not a credential.
+b2a0d53c640309fcb90ab04d5404e888ee830a64:worker/test/push.trigger.test.ts:generic-api-key:318
+d1aa591047aa083eb094fa2326ee44089b8c694e:worker/test/push.trigger.test.ts:generic-api-key:316

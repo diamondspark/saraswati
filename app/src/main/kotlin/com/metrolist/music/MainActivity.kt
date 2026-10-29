@@ -153,6 +153,7 @@ import com.metrolist.music.saraswati.family.parivaar.ParivaarMemberName
 import com.metrolist.music.saraswati.family.parivaar.ParivaarMixRefresher
 import com.metrolist.music.saraswati.family.parivaar.TopSongsPlaylistSync
 import com.metrolist.music.saraswati.family.sangat.SangatForeground
+import com.metrolist.music.saraswati.family.sangat.SangatPushRegistrar
 import com.metrolist.music.saraswati.family.sangat.SangatJoinRequests
 import com.metrolist.music.saraswati.family.PairingInbox
 import com.metrolist.music.saraswati.family.StationsCache
@@ -350,10 +351,17 @@ class MainActivity : FragmentActivity() {
     @Inject
     lateinit var sangatForeground: SangatForeground
 
+    // SARASWATI: Sangat push
+    @Inject
+    lateinit var sangatPushRegistrar: SangatPushRegistrar
+
     // The owner's own phone pairs itself here (ensureSelfPaired) so it has the device session Sangat needs.
     private val familyViewModel: FamilyViewModel by viewModels()
 
     private lateinit var navController: NavHostController
+
+    // SARASWATI: Sangat push — ticks on each Sangat join tap, so an open Account dialog closes over the join.
+    private val sangatJoinTaps = androidx.compose.runtime.mutableIntStateOf(0)
     private var pendingIntent: Intent? = null
 
     // SARASWATI: Task 9 — a cache of the role the hub holds for this phone
@@ -411,6 +419,7 @@ class MainActivity : FragmentActivity() {
     override fun onStart() {
         super.onStart()
         sangatForeground.activityStarted() // SARASWATI: Phase 4 Task 9 — counted per process (review fix M13)
+        sangatPushRegistrar.ensureRegisteredAsync() // SARASWATI: Sangat push — retries a registration that failed; a no-op when it is up to date
         // Request notification permission on Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -487,7 +496,9 @@ class MainActivity : FragmentActivity() {
             dropIntentsForSaral(intent)
             return
         }
-        SangatJoinRequests.offerFrom(intent, System.currentTimeMillis()) // SARASWATI: Phase 4 Task 9 — a tap on the Sangat notification
+        val sangatJoin = SangatJoinRequests.offerFrom(intent, System.currentTimeMillis()) // SARASWATI: Phase 4 Task 9 — a tap on the Sangat notification
+        // SARASWATI: Sangat push — the composition below sees the tick, closes the Account dialog and brings Home up.
+        if (sangatJoin) sangatJoinTaps.intValue++
         if (::navController.isInitialized) {
             handleWidgetTargetIntent(intent, navController)
             // SARASWATI (audit A9.3): a malformed link (e.g. a non-hierarchical
@@ -1216,6 +1227,16 @@ class MainActivity : FragmentActivity() {
                     }
 
                 var showAccountDialog by remember { mutableStateOf(false) }
+                // SARASWATI: Sangat push — a join tap closes the dialog so the Sangat screen is what the person sees.
+                val joinTaps = sangatJoinTaps.intValue
+                // The join is taken by the Sangat view model on Home, so a tap from any other screen goes there at once.
+                // This composition's navController, not the activity's lateinit one (which is never assigned).
+                LaunchedEffect(joinTaps) {
+                    if (joinTaps > 0) {
+                        showAccountDialog = false
+                        showHomeForSangatJoin(navController)
+                    }
+                }
 
                 val pauseListenHistory by rememberPreference(PauseListenHistoryKey, defaultValue = false)
                 val eventCount by database.eventCount().collectAsStateWithLifecycle(initialValue = 0)
@@ -1803,6 +1824,17 @@ class MainActivity : FragmentActivity() {
         } ?: return
 
         navController.navigate(targetRoute.route)
+    }
+
+    // SARASWATI: Sangat push — back to Home without losing the other tabs' saved state, as the bottom bar does. A cold start
+    // (onCreate) already opens on Home, so only onNewIntent needs this.
+    private fun showHomeForSangatJoin(navController: NavHostController) {
+        if (navController.popBackStack(Screens.Home.route, inclusive = false)) return
+        navController.navigate(Screens.Home.route) {
+            popUpTo(navController.graph.startDestinationId) { saveState = true }
+            launchSingleTop = true
+            restoreState = true
+        }
     }
 
     private fun handleDeepLinkIntent(

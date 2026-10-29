@@ -27,6 +27,7 @@ package com.metrolist.music.saraswati.family
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.metrolist.music.saraswati.family.sangat.SangatPushRegistrar
 import com.metrolist.music.saraswati.saral.GrandparentRoleSync
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
@@ -90,10 +91,27 @@ class JoinFamilyViewModel
         private val pollIntervalMs: Long,
         private val maxWaitMs: Long = MAX_WAIT_MS,
         private val now: () -> Long = { System.nanoTime() / 1_000_000 },
+        // SARASWATI: Sangat push — runs once pairing has stored the session, so this phone's push token reaches the hub.
+        private val onPaired: () -> Unit = {},
     ) : ViewModel(scope) {
         @Inject
-        constructor(hub: HubApi, store: FamilyStore, config: HubConfig, inbox: PairingInbox, roleSync: GrandparentRoleSync) :
-            this(hub, store, config, inbox, roleSync, CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate), POLL_INTERVAL_MS)
+        constructor(
+            hub: HubApi,
+            store: FamilyStore,
+            config: HubConfig,
+            inbox: PairingInbox,
+            roleSync: GrandparentRoleSync,
+            pushRegistrar: SangatPushRegistrar,
+        ) : this(
+            hub,
+            store,
+            config,
+            inbox,
+            roleSync,
+            CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+            POLL_INTERVAL_MS,
+            onPaired = pushRegistrar::ensureRegisteredAsync,
+        )
 
         private val _state = MutableStateFlow<JoinUiState>(JoinUiState.Idle)
         val state: StateFlow<JoinUiState> = _state.asStateFlow()
@@ -285,6 +303,7 @@ class JoinFamilyViewModel
             sessionToken: String,
         ) {
             if (!guardedWrite { store.completeClaim(claim.deviceId, sessionToken) }) return
+            onPaired() // SARASWATI: Sangat push
             // The first authenticated call also lets the hub drop the claim secret. Not throttled: it is what
             // caches the role, and a resume refresh may have run a moment ago with no session to ask with.
             val role = roleSync.refresh(force = true) ?: chosenRole

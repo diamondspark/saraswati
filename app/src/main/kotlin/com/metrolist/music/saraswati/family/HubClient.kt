@@ -39,6 +39,7 @@ import com.metrolist.music.saraswati.family.feedback.FeedbackListWire
 import com.metrolist.music.saraswati.family.feedback.FeedbackStatus
 import com.metrolist.music.saraswati.family.feedback.FeedbackStatusWire
 import com.metrolist.music.saraswati.family.feedback.FeedbackSubmitWire
+import com.metrolist.music.saraswati.family.sangat.PushHubApi
 import com.metrolist.music.saraswati.family.sangat.SangatHubApi
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.SerializationException
@@ -82,6 +83,7 @@ class HubClient(
     client: OkHttpClient,
 ) : HubApi,
     SangatHubApi,
+    PushHubApi, // SARASWATI: Sangat push — the two /push/token routes below
     AskHub,
     FeedbackHub { // SARASWATI: feedback — the feedback routes below
     // Shares the caller's connection pool, dispatcher and timeouts; only the
@@ -229,6 +231,14 @@ class HubClient(
             sessionToken,
             json.encodeToString(HealthReportRequest(deviceId, versionCode, versionName, timezone)),
         ) { }
+
+    // SARASWATI: Sangat push — the FCM token for this phone (device bearer only). 204 both ways; 429 past 20 an hour.
+    override suspend fun registerPushToken(
+        sessionToken: String,
+        token: String,
+    ): Result<Unit> = send("PUT", listOf("push", "token"), sessionToken, json.encodeToString(PushTokenRequest(token))) { }
+
+    override suspend fun unregisterPushToken(sessionToken: String): Result<Unit> = send("DELETE", listOf("push", "token"), sessionToken, null) { }
 
     override suspend fun getHealth(adminKey: String): Result<List<DeviceHealth>> =
         send("GET", listOf("health"), adminKey, null) {

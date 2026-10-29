@@ -32,17 +32,38 @@ package dev.diamondspark.saraswati.updater
 import android.content.Context
 import android.content.SharedPreferences
 
+data class PendingTarget(val packageName: String, val versionCode: Long, val versionName: String)
+
 object PendingInstall {
     private const val PREFS_NAME = "saraswati_updater"
     private const val KEY_ATTEMPTED = "pending_install_attempted"
     private const val KEY_STATUS = "pending_install_status"
+    private const val KEY_TARGET_PACKAGE = "pending_install_target_package"
+    private const val KEY_TARGET_VERSION_CODE = "pending_install_target_version_code"
+    private const val KEY_TARGET_VERSION_NAME = "pending_install_target_version_name"
 
     fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     /** Called right before a PackageInstaller session is ever opened — before any use of REQUEST_INSTALL_PACKAGES begins. */
-    fun markAttemptStarted(prefs: SharedPreferences) {
-        prefs.edit().putBoolean(KEY_ATTEMPTED, true).apply()
+    // SARASWATI: also records WHAT is being installed, so a relaunch that lost the
+    // terminal status (the Updater's own self-update kills this process) can
+    // tell "it succeeded" from "it didn't" by comparing installed versions.
+    fun markAttemptStarted(prefs: SharedPreferences, target: PendingTarget) {
+        prefs.edit()
+            .putBoolean(KEY_ATTEMPTED, true)
+            .putString(KEY_TARGET_PACKAGE, target.packageName)
+            .putLong(KEY_TARGET_VERSION_CODE, target.versionCode)
+            .putString(KEY_TARGET_VERSION_NAME, target.versionName)
+            .apply()
+    }
+
+    /** The recorded target of the pending attempt; null if none, or if written by an older Updater build. */
+    fun peekTarget(prefs: SharedPreferences): PendingTarget? {
+        val pkg = prefs.getString(KEY_TARGET_PACKAGE, null) ?: return null
+        val name = prefs.getString(KEY_TARGET_VERSION_NAME, null) ?: return null
+        if (!prefs.contains(KEY_TARGET_VERSION_CODE)) return null
+        return PendingTarget(pkg, prefs.getLong(KEY_TARGET_VERSION_CODE, 0L), name)
     }
 
     /** Called by InstallResultReceiver the instant a terminal status arrives, independent of any Activity's lifecycle. */
@@ -73,7 +94,10 @@ object PendingInstall {
 
     /** Called once the attempt is fully resolved: the permission has been confirmed off. */
     fun clear(prefs: SharedPreferences) {
-        prefs.edit().remove(KEY_ATTEMPTED).remove(KEY_STATUS).apply()
+        prefs.edit()
+            .remove(KEY_ATTEMPTED).remove(KEY_STATUS)
+            .remove(KEY_TARGET_PACKAGE).remove(KEY_TARGET_VERSION_CODE).remove(KEY_TARGET_VERSION_NAME)
+            .apply()
     }
 }
 
@@ -88,8 +112,15 @@ sealed interface InstallRecoveryAction {
     /** [UiState.ReadyToInstall] survived but the user is still inside the system confirmation dialog — nothing to do yet. */
     object WaitForStatus : InstallRecoveryAction
 
-    /** A genuine process death (checkpoint reset to [UiState.Checking]) with no manifest left: recover honestly with version=null. */
-    object RecoverAsCrashed : InstallRecoveryAction
+    /** Process death, and the recorded target is now installed: the install SUCCEEDED, so report Done (after the permission is off). */
+    data class RecoverAsSucceeded(val versionName: String) : InstallRecoveryAction
+
+    /**
+     * Process death and the install did not (provably) complete: drop the
+     * stale attempt and re-check from scratch. Never demands the permission
+     * be switched off first; that is asked once, when nothing is left to install.
+     */
+    object Recheck : InstallRecoveryAction
 }
 
 // SARASWATI: Task 5 (fix round 2, dedicated re-review) — extracted as a
@@ -106,7 +137,13 @@ sealed interface InstallRecoveryAction {
 // "Install didn't finish" instead of "Done on version X" for what was
 // actually a successful update (self-correcting via Retry, never reopening
 // the permission-left-on gap — not a repeat of the CRITICAL finding).
-fun decideInstallRecovery(checkpoint: UiState, isAttemptPending: Boolean, knownStatus: Int?): InstallRecoveryAction {
+fun decideInstallRecovery(
+    checkpoint: UiState,
+    isAttemptPending: Boolean,
+    knownStatus: Int?,
+    target: PendingTarget? = null,
+    installedTargetVersionCode: Long? = null,
+): InstallRecoveryAction {
     if (!isAttemptPending) return InstallRecoveryAction.None
     return when {
         checkpoint is UiState.ReadyToInstall -> if (knownStatus != null) {
@@ -114,7 +151,12 @@ fun decideInstallRecovery(checkpoint: UiState, isAttemptPending: Boolean, knownS
         } else {
             InstallRecoveryAction.WaitForStatus
         }
-        checkpoint == UiState.Checking -> InstallRecoveryAction.RecoverAsCrashed
+        checkpoint == UiState.Checking ->
+            if (target != null && installedTargetVersionCode != null && installedTargetVersionCode >= target.versionCode) {
+                InstallRecoveryAction.RecoverAsSucceeded(target.versionName)
+            } else {
+                InstallRecoveryAction.Recheck
+            }
         else -> InstallRecoveryAction.None
     }
 }

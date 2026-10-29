@@ -18,6 +18,9 @@ export interface Env {
   // GITHUB_FEEDBACK_TOKEN`); with it unset nothing is mirrored. The repo is a var in wrangler.toml.
   GITHUB_FEEDBACK_TOKEN?: string;
   GITHUB_FEEDBACK_REPO?: string;
+  // Optional FCM push for "a Sangat started". The Google service-account JSON, as a secret: set
+  // with `npx wrangler secret put FCM_SERVICE_ACCOUNT < key.json`. With it unset no push is sent.
+  FCM_SERVICE_ACCOUNT?: string;
 }
 
 function json(body: unknown, status: number): Response {

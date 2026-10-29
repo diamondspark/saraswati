@@ -122,6 +122,39 @@
             android:permission="android.permission.BIND_JOB_SERVICE"
             android:exported="false" />
 
+        <!-- SARASWATI: Sangat push (FCM). The app initialises Firebase by hand with the ids in BuildConfig
+             (app/firebase.properties), so the auto-init provider goes, and Analytics, token auto-init and
+             delivery-metrics export stay off. Only the push receiver/service declared by firebase-messaging
+             and by SangatPushService below remain. -->
+        <provider
+            android:name="com.google.firebase.provider.FirebaseInitProvider"
+            android:authorities="${applicationId}.firebaseinitprovider"
+            tools:node="remove" />
+
+        <meta-data
+            android:name="firebase_messaging_auto_init_enabled"
+            android:value="false" />
+        <meta-data
+            android:name="firebase_analytics_collection_deactivated"
+            android:value="true" />
+        <meta-data
+            android:name="delivery_metrics_exported_to_big_query_enabled"
+            android:value="false" />
+        <!-- SARASWATI: Sangat push — never let the SDK hand a notification-type message to the system tray itself;
+             the app shows its own Sangat notification from a data message only (see SangatPushService.handleIntent). -->
+        <meta-data
+            android:name="firebase_messaging_notification_delegation_enabled"
+            android:value="false" />
+
+        <!-- Not exported: only Google Play services' FirebaseInstanceIdReceiver hands it messages. -->
+        <service
+            android:name="com.metrolist.music.saraswati.family.sangat.SangatPushService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
     </application>
 
 </manifest>

@@ -37,6 +37,13 @@ class SangatNotifyPolicyTest {
         assertEquals(listOf("BBBB"), out.map { it.roomCode })
     }
 
+    // SARASWATI: Sangat push — a room announced in an earlier run stays quiet.
+    @Test
+    fun `a room announced before does not notify again, and the others still do`() {
+        val out = SangatNotifyPolicy.toNotify(listOf(room("AAAA"), room("BBBB")), emptySet(), seen = setOf("AAAA"))
+        assertEquals(listOf("BBBB"), out.map { it.roomCode })
+    }
+
     @Test
     fun `a posted room that has ended is cancelled`() {
         assertEquals(setOf("AAAA"), SangatNotifyPolicy.toCancel(setOf("AAAA", "BBBB"), listOf(room("BBBB")), null, emptySet()))

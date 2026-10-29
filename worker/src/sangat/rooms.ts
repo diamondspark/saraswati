@@ -122,6 +122,7 @@ export const handleCreateRoom: Handler = (rt, conn, payload, pre) => {
   });
   conn.att.started = true;
   conn.dirty = true;
+  rt.roomStarted(conn.att.deviceId);
   return [send(me, "room_created", RoomCreatedPayloadSchema, { roomCode: code, userId: me, sessionToken })];
 };
 
@@ -234,7 +235,13 @@ export const handleLeaveRoom: Handler = (rt, conn) => {
     store.deletePendingJoinsOfUser(me);
     return [];
   }
-  return removeFromRoom(store, current.room, current.member, rt.now());
+  const { room, member } = current;
+  const hostLeaving = member.isHost || room.hostUserId === member.userId;
+  const outs = removeFromRoom(store, room, member, rt.now());
+  // removeFromRoom empties the room when no one is left, and also when a car room's host goes.
+  // A host who leaves a room that carries on (another member takes over) ends nothing.
+  if (hostLeaving && room.emptySince !== null) rt.roomEnded(member.deviceId);
+  return outs;
 };
 
 // Only a connected member can be kicked: a seat inside its reconnect grace is

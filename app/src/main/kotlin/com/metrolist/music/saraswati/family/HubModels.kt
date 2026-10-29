@@ -339,6 +339,12 @@ internal data class HealthReportRequest(
     val timezone: String,
 )
 
+// SARASWATI: Sangat push — PUT /push/token. The FCM token is a delivery address for this phone only.
+@Serializable
+internal data class PushTokenRequest(
+    val token: String,
+)
+
 // SARASWATI: Phase 6 Task 10 — POST /ask. The question is the person's own words; the hub gets nothing else
 // about them. The reply's intent is read as a raw object and checked by ask/AskModels.kt.
 @Serializable
