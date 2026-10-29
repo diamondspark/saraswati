@@ -36,6 +36,10 @@ import java.util.concurrent.atomic.AtomicInteger
 class SmartDownloadsSettingViewModelTest {
     @get:Rule val folder = TemporaryFolder()
 
+    private companion object {
+        const val AWAIT_MS = 30_000L
+    }
+
     private lateinit var scope: CoroutineScope
     private lateinit var dataStore: DataStore<Preferences>
     private lateinit var ledger: SmartDownloadLedger
@@ -76,9 +80,13 @@ class SmartDownloadsSettingViewModelTest {
             scope = scope,
         )
 
+    // SARASWATI: these waits are for real work on Dispatchers.IO (DataStore writes, the view model's launch) that
+    // runs cold on the first test of the class; on a loaded CI runner that took longer than the old 5 s bound
+    // (TimeoutCancellationException). The wait returns the moment the condition holds, so a generous bound costs
+    // nothing when the machine is fast and only decides how slow a machine may be before the test gives up.
     private fun eventually(check: () -> Boolean) =
         runBlocking {
-            withTimeout(5_000) {
+            withTimeout(AWAIT_MS) {
                 while (!check()) delay(10)
             }
         }
@@ -96,7 +104,7 @@ class SmartDownloadsSettingViewModelTest {
 
         eventually { armed == listOf(false) && executor.stopPendingCalls.get() == 1 }
         assertEquals(false, runBlocking { dataStore.data.first()[SmartDownloadsEnabledKey] })
-        assertEquals("off", runBlocking { withTimeout(5_000) { vm.status.first { it == "off" } } })
+        assertEquals("off", runBlocking { withTimeout(AWAIT_MS) { vm.status.first { it == "off" } } })
     }
 
     @Test
@@ -114,14 +122,14 @@ class SmartDownloadsSettingViewModelTest {
     fun `status shows last night's count`() {
         seedLedger(LedgerSnapshot(night = "2026-10-19", doneTonight = 37, lastNightCount = 4))
 
-        val status = runBlocking { withTimeout(5_000) { viewModel().status.first { it != "never" } } }
+        val status = runBlocking { withTimeout(AWAIT_MS) { viewModel().status.first { it != "never" } } }
 
         assertEquals("last:37", status)
     }
 
     @Test
     fun `status shows never-run before the first night`() {
-        val status = runBlocking { withTimeout(5_000) { viewModel().status.first { it == "never" } } }
+        val status = runBlocking { withTimeout(AWAIT_MS) { viewModel().status.first { it == "never" } } }
 
         assertEquals("never", status)
     }
@@ -130,7 +138,7 @@ class SmartDownloadsSettingViewModelTest {
     fun `status shows zero when the last run is older than yesterday`() {
         seedLedger(LedgerSnapshot(night = "2026-10-15", doneTonight = 30))
 
-        val status = runBlocking { withTimeout(5_000) { viewModel().status.first { it != "never" } } }
+        val status = runBlocking { withTimeout(AWAIT_MS) { viewModel().status.first { it != "never" } } }
 
         assertEquals("last:0", status)
     }
