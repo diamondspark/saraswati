@@ -269,6 +269,8 @@ class UpdateActivity : Activity() {
         if (!updatingSelf && (next is UiState.UpToDate || next is UiState.AlreadyAhead || next is UiState.Done)) {
             lastFetchedManifest?.let(::maybeStartSelfUpdateCheck)
         }
+        // SARASWATI: the self-update chain continues without a tap.
+        nextQueuedStep(next, updatingSelf)?.let(::dispatch)
     }
 
     // SARASWATI: supplies the one fact reduce can't know: is the Updater's own self-update still to come in this run?
@@ -283,10 +285,10 @@ class UpdateActivity : Activity() {
 
     private fun runSideEffects(source: UiState, event: Event, next: UiState) {
         when {
-            event == Event.UserTappedUpdate && next is UiState.Downloading && source is UiState.UpdateReady ->
+            (event == Event.UserTappedUpdate || event == Event.ContinueQueued) && next is UiState.Downloading && source is UiState.UpdateReady ->
                 startDownload(source.manifest)
 
-            event == Event.UserTappedUpdate && next == UiState.Installing && source is UiState.ReadyToInstall ->
+            (event == Event.UserTappedUpdate || event == Event.ContinueQueued) && next == UiState.Installing && source is UiState.ReadyToInstall ->
                 startInstall(source.manifest)
 
             event is Event.InstallStatus && source is UiState.ReadyToInstall ->
@@ -372,7 +374,7 @@ class UpdateActivity : Activity() {
                 }
             } catch (e: Exception) {
                 target.delete()
-                postToMain { dispatch(Event.ManifestFailed(getString(R.string.cant_reach_update_server))) }
+                postToMain { dispatch(Event.DownloadFailed(getString(R.string.cant_reach_update_server))) }
                 return@execute
             }
 

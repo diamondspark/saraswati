@@ -70,7 +70,11 @@ sealed interface Event {
     data class ManifestFailed(val reason: String) : Event
     data class DownloadProgress(val percent: Int) : Event
     data class DownloadFinished(val verified: VerifyResult) : Event
+    data class DownloadFailed(val reason: String) : Event
     object UserTappedUpdate : Event
+
+    // SARASWATI: same transitions as UserTappedUpdate, but issued by the Activity for the queued self-update chain (see nextQueuedStep), not by a tap.
+    object ContinueQueued : Event
     data class PermissionChecked(val canInstall: Boolean) : Event
     data class InstallStatus(val code: Int, val followUpQueued: Boolean = false) : Event
     object Retry : Event
@@ -116,13 +120,20 @@ fun reduce(state: UiState, event: Event, canInstallNow: Boolean): UiState {
                     endOfRun(UiState.UpToDate(event.installed ?: event.manifest.versionCode), canInstallNow, event.followUpQueued)
                 is Decision.AlreadyAhead -> endOfRun(UiState.AlreadyAhead(decision.installed), canInstallNow, event.followUpQueued)
                 is Decision.UpdateAvailable -> UiState.UpdateReady(decision.manifest)
-                is Decision.Rejected -> UiState.Error(decision.reason, canRetry = true)
+                is Decision.Rejected -> endOfRun(UiState.Error(decision.reason, canRetry = true), canInstallNow, followUpQueued = false)
             }
             else -> state
         }
 
         is Event.ManifestFailed -> when (state) {
-            UiState.Checking -> UiState.Error(event.reason, canRetry = true)
+            UiState.Checking -> endOfRun(UiState.Error(event.reason, canRetry = true), canInstallNow, followUpQueued = false)
+            else -> state
+        }
+
+        // SARASWATI: a failed download ends the run like any other failure; without this it was a no-op and the user was stuck.
+        is Event.DownloadFailed -> when (state) {
+            is UiState.UpdateReady, is UiState.Downloading ->
+                endOfRun(UiState.Error(event.reason, canRetry = true), canInstallNow, followUpQueued = false)
             else -> state
         }
 
@@ -143,7 +154,7 @@ fun reduce(state: UiState, event: Event, canInstallNow: Boolean): UiState {
             else -> state
         }
 
-        Event.UserTappedUpdate -> when (state) {
+        Event.UserTappedUpdate, Event.ContinueQueued -> when (state) {
             is UiState.UpdateReady -> UiState.Downloading(0)
             is UiState.ReadyToInstall -> UiState.Installing
             else -> state
@@ -181,6 +192,13 @@ fun reduce(state: UiState, event: Event, canInstallNow: Boolean): UiState {
 // when another install is queued, so "off" is never followed by "on" again.
 private fun endOfRun(terminal: UiState, canInstallNow: Boolean, followUpQueued: Boolean): UiState =
     if (canInstallNow && !followUpQueued) UiState.TurnPermissionOff(version = null, after = terminal) else terminal
+
+// SARASWATI: the queued self-update runs on its own (download, then the install
+// session; the system confirmation dialog still asks the user), so the permission
+// is never left on waiting for a tap. Pure so the chain is unit-testable; the
+// Activity issues whatever this returns.
+fun nextQueuedStep(state: UiState, chainActive: Boolean): Event? =
+    if (chainActive && (state is UiState.UpdateReady || state is UiState.ReadyToInstall)) Event.ContinueQueued else null
 
 /** What UpdateActivity does when a new Intent reaches its already-running instance. */
 enum class NewIntentAction {

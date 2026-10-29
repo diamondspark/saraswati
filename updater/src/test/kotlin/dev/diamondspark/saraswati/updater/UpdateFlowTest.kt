@@ -229,6 +229,54 @@ class UpdateFlowTest {
         assertEquals(err, reduce(ask, Event.PermissionChecked(false), canInstallNow = false))
     }
 
+    // SARASWATI: failed checks/downloads end the run like any other, and the self-update chain runs without taps.
+
+    @Test
+    fun `failed manifest check with the permission on asks to turn it off, then shows the retryable Error`() {
+        val err = UiState.Error("offline", canRetry = true)
+        val ask = reduce(UiState.Checking, Event.ManifestFailed("offline"), canInstallNow = true)
+        assertEquals(UiState.TurnPermissionOff(null, after = err), ask)
+        assertEquals(err, reduce(ask, Event.PermissionChecked(false), canInstallNow = false))
+    }
+
+    @Test
+    fun `download failure is no longer a no-op`() {
+        val m = manifest()
+        val err = UiState.Error("offline", canRetry = true)
+        assertEquals(err, reduce(UiState.UpdateReady(m), Event.DownloadFailed("offline"), canInstallNow = false))
+        assertEquals(err, reduce(UiState.Downloading(40), Event.DownloadFailed("offline"), canInstallNow = false))
+        assertEquals(UiState.Installing, reduce(UiState.Installing, Event.DownloadFailed("offline"), canInstallNow = false))
+    }
+
+    @Test
+    fun `chain auto-continues from the queued self-update to Installing with no tap`() {
+        val self = manifest(versionCode = 7, versionName = "7")
+        val events = mutableListOf<Event>()
+        fun step(state: UiState, e: Event): UiState = reduce(state, e, canInstallNow = true).also { events += e }
+
+        var s = step(UiState.ReadyToInstall(manifest()), Event.InstallStatus(0, followUpQueued = true))
+        assertEquals(UiState.Done("1.42"), s)
+        assertEquals(null, nextQueuedStep(s, chainActive = true))
+        s = step(UiState.Checking, Event.ManifestLoaded(self, installed = 6L))
+        assertEquals(UiState.UpdateReady(self), s)
+        s = step(s, nextQueuedStep(s, chainActive = true)!!)
+        assertEquals(UiState.Downloading(0), s)
+        s = step(UiState.UpdateReady(self), Event.DownloadFinished(VerifyResult.Ok))
+        assertEquals(UiState.ReadyToInstall(self), s)
+        s = step(s, nextQueuedStep(s, chainActive = true)!!)
+        assertEquals(UiState.Installing, s)
+        assertTrue(events.none { it == Event.UserTappedUpdate })
+        assertEquals(null, nextQueuedStep(UiState.UpdateReady(self), chainActive = false))
+    }
+
+    @Test
+    fun `chain download failure with the permission on asks to turn it off, then shows the Error`() {
+        val err = UiState.Error("offline", canRetry = true)
+        val ask = reduce(UiState.Downloading(10), Event.DownloadFailed("offline"), canInstallNow = true)
+        assertEquals(UiState.TurnPermissionOff(null, after = err), ask)
+        assertEquals(err, reduce(ask, Event.PermissionChecked(false), canInstallNow = false))
+    }
+
     @Test
     fun `TurnPermissionOff stays until the permission is off`() {
         val pending = UiState.TurnPermissionOff("1.42")
