@@ -12,6 +12,7 @@ import {
 } from "./http";
 import { mirrorToGitHub } from "./feedback/githubIssue";
 import { migrate } from "./migrations";
+import { FcmClient } from "./push/fcm";
 import { bearerToken, matchRoute } from "./routes";
 import { tooLarge } from "./routes/common";
 import {
@@ -22,6 +23,7 @@ import {
 import { handleAsk } from "./routes/ask";
 import { listFeedback, postFeedback, setFeedbackStatus } from "./routes/feedback";
 import { listParivaarPlaylists, putParivaarPlaylist } from "./routes/parivaar";
+import { deletePushToken, putPushToken } from "./routes/push";
 import { CLOSE_DEVICE_REVOKED, CLOSE_SANGAT_DISABLED } from "./sangat/limits";
 import { Sangat, type LiveRoom } from "./sangat/Sangat";
 import { normalizeRoomCode } from "./sangat/sanitize";
@@ -44,6 +46,12 @@ const MAX_STATIONS = 6;
 // is normalized (which cuts it to 10 bytes), so a huge string is never cleaned.
 const MAX_CAR_BODY_BYTES = 1024;
 const MAX_CAR_ROOM_CODE_LENGTH = 32;
+
+// FCM push to the other phones when a Sangat starts or ends. The whole family shares one
+// budget, and the phone that triggered it has its own, so one phone cannot spend the family's.
+const PUSH_WINDOW_SECONDS = 10 * 60;
+const PUSH_FAMILY_MAX = 30;
+const PUSH_DEVICE_MAX = 10;
 
 // /health: at most one accepted report per device per 5 minutes.
 const HEALTH_WINDOW_SECONDS = 5 * 60;
@@ -125,6 +133,11 @@ interface ClaimStatusRow extends Record<string, SqlStorageValue> {
   status: string;
   pendingSessionToken: string | null;
   claimSecretHash: string | null;
+}
+
+interface PushTokenRow extends Record<string, SqlStorageValue> {
+  deviceId: string;
+  token: string;
 }
 
 interface RosterIdRow extends Record<string, SqlStorageValue> {
@@ -281,10 +294,17 @@ function liveRoomJson(room: LiveRoom) {
 export class FamilyHub extends DurableObject<Env> {
   private readonly sangat: Sangat;
   private readonly hubContext: HubContext;
+  private readonly fcm = new FcmClient();
+  // The sends in flight. A Durable Object has no waitUntil, but it keeps running after the
+  // response while a fetch is outstanding; the set lets a test wait for them (settlePushes).
+  private readonly pushesInFlight = new Set<Promise<void>>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    this.sangat = new Sangat(ctx);
+    this.sangat = new Sangat(ctx, {
+      roomStarted: (hostDeviceId) => this.notifySangatChanged(hostDeviceId),
+      roomEnded: (hostDeviceId) => this.notifySangatChanged(hostDeviceId),
+    });
     this.hubContext = {
       sql: ctx.storage.sql,
       rateLimit: (key, windowSeconds, max) =>
@@ -311,6 +331,61 @@ export class FamilyHub extends DurableObject<Env> {
         );
       }
     });
+  }
+
+  /**
+   * Tells every other approved phone that has registered a token that "something changed" in
+   * Sangat, so its app wakes and asks GET /sangat/live. Fire and forget: it returns at once
+   * and never throws, and the push itself carries no content. Call it only outside a storage
+   * transaction (Sangat calls its hooks after the commit). Skipped quietly when Sangat is off,
+   * FCM is not set up, nobody else has a token, or a send limit is used up.
+   */
+  private notifySangatChanged(excludeDeviceId: string): void {
+    try {
+      if (!this.readKillSwitches().sangat || !this.fcm.isConfigured(this.env)) {
+        return;
+      }
+      const rows = this.ctx.storage.sql
+        .exec<PushTokenRow>(
+          "SELECT p.deviceId, p.token FROM push_tokens p JOIN roster r ON r.deviceId = p.deviceId WHERE r.status = 'approved' AND p.deviceId != ?",
+          excludeDeviceId,
+        )
+        .toArray();
+      if (rows.length === 0) {
+        return;
+      }
+      // The trigger's own budget first, so a phone that floods cannot use up the family's.
+      if (
+        !this.rateLimit(`push-send:${excludeDeviceId}`, PUSH_WINDOW_SECONDS, PUSH_DEVICE_MAX) ||
+        !this.rateLimit("push-send:family", PUSH_WINDOW_SECONDS, PUSH_FAMILY_MAX)
+      ) {
+        return;
+      }
+
+      const send = this.fcm
+        .send(
+          this.env,
+          rows.map((row) => row.token),
+        )
+        .then((dead) => {
+          // By token, not by device: the phone may have registered a fresh one meanwhile.
+          for (const token of dead) {
+            this.ctx.storage.sql.exec("DELETE FROM push_tokens WHERE token = ?", token);
+          }
+        })
+        .catch(() => undefined);
+      this.pushesInFlight.add(send);
+      void send.finally(() => this.pushesInFlight.delete(send));
+    } catch {
+      // A push is never worth failing the request or message that caused it.
+    }
+  }
+
+  /** Resolves once every push started so far has finished. For tests; nothing in the hub calls it. */
+  async settlePushes(): Promise<void> {
+    while (this.pushesInFlight.size > 0) {
+      await Promise.all([...this.pushesInFlight]);
+    }
   }
 
   /**
@@ -856,6 +931,8 @@ export class FamilyHub extends DurableObject<Env> {
       "DELETE FROM parivaar_playlists WHERE deviceId = ?",
       deviceId,
     );
+    // And its push token, so a revoked phone is never pushed to again.
+    this.ctx.storage.sql.exec("DELETE FROM push_tokens WHERE deviceId = ?", deviceId);
 
     return json({ deviceId, status: "revoked" });
   }
@@ -1148,6 +1225,11 @@ export class FamilyHub extends DurableObject<Env> {
       return json({ error: "only the host device can change car mode" }, 403);
     }
 
+    if (carMode) {
+      // The car phone is now the host of a Sangat the family may want to join.
+      this.notifySangatChanged(auth.deviceId);
+    }
+
     const room = this.sangat.roomView(roomCode);
     return room ? json(liveRoomJson(room)) : json({ error: "room not found" }, 404);
   }
@@ -1249,6 +1331,10 @@ export class FamilyHub extends DurableObject<Env> {
         return this.handleSangatLive(request);
       case "sangatCar":
         return this.handleSangatCar(request);
+      case "pushTokenPut":
+        return this.runRoute(request, "device", putPushToken);
+      case "pushTokenDelete":
+        return this.runRoute(request, "device", deletePushToken);
       case "parivaarPlaylistPut":
         return this.runRoute(request, "device", putParivaarPlaylist);
       case "parivaarPlaylistsList":

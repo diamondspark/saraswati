@@ -30,7 +30,9 @@ import { sha256Hex } from "./secrets";
 //       it up minutes later.
 //   v6  the feedback inbox (`feedback`): bug reports and ideas the family sends from the
 //       app. Nothing else changes, so a v5 hub keeps every row.
-export const LATEST_SCHEMA_VERSION = 6;
+//   v7  FCM push (`push_tokens`): one registration token per device, so the hub can wake a
+//       closed app when a Sangat starts. Nothing else changes, so a v6 hub keeps every row.
+export const LATEST_SCHEMA_VERSION = 7;
 
 type Row = Record<string, SqlStorageValue>;
 
@@ -327,6 +329,28 @@ function applyV6(storage: DurableObjectStorage): void {
 }
 
 /**
+ * Idempotent, like v3, v4 and v6. One FCM registration token per device. The token is UNIQUE
+ * because a token belongs to one app install: when it moves to another device row, the old
+ * row is deleted first (see putPushToken).
+ */
+function applyV7(storage: DurableObjectStorage): void {
+  const sql = storage.sql;
+  storage.transactionSync(() => {
+    // Checked again inside the transaction that does the work.
+    if (readVersion(sql) !== 6) {
+      return;
+    }
+
+    sql.exec(`CREATE TABLE IF NOT EXISTS push_tokens (
+      deviceId TEXT PRIMARY KEY,
+      token TEXT NOT NULL UNIQUE,
+      updatedAt INTEGER NOT NULL
+    )`);
+    writeVersion(sql, 7);
+  });
+}
+
+/**
  * Brings the database up to LATEST_SCHEMA_VERSION. Safe to call on every
  * start: a database already at (or beyond) the latest version is not touched.
  */
@@ -349,5 +373,8 @@ export async function migrate(storage: DurableObjectStorage): Promise<void> {
   }
   if (version < 6) {
     applyV6(storage);
+  }
+  if (version < 7) {
+    applyV7(storage);
   }
 }

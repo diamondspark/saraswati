@@ -52,6 +52,23 @@ export interface Runtime {
   detachSocket(userId: string, code: number, reason: string): void;
   /** False when `userId` was answered a request_sync less than a second ago. */
   allowSyncResponse(userId: string, now: number): boolean;
+  /**
+   * A room was just created by a member on `hostDeviceId`. Like detachSocket it happens once
+   * the handler's changes are committed, never inside the transaction.
+   */
+  roomStarted(hostDeviceId: string): void;
+  /** The host on `hostDeviceId` left on purpose and that ended or emptied its room. After the commit, too. */
+  roomEnded(hostDeviceId: string): void;
+}
+
+/**
+ * What the hub wants to hear about, called after the change is committed (so never inside a
+ * storage transaction) and expected not to throw or to wait. Optional: tests build a Sangat
+ * without it.
+ */
+export interface SangatHooks {
+  roomStarted?(hostDeviceId: string): void;
+  roomEnded?(hostDeviceId: string): void;
 }
 
 /**

@@ -58,7 +58,7 @@ import {
 } from "./rooms";
 import { Store, type Room } from "./store";
 import { handleApproveSuggestion, handleRejectSuggestion, handleSuggestTrack } from "./suggestions";
-import type { Attachment, Conn, Handler, Out, PreHashed, Runtime } from "./types";
+import type { Attachment, Conn, Handler, Out, PreHashed, Runtime, SangatHooks } from "./types";
 import { sha256Hex } from "../secrets";
 
 export type LiveRoom = {
@@ -142,7 +142,10 @@ export class Sangat {
   // Socket side effects a handler asked for; they run only once its changes are committed.
   private effects: (() => void)[] = [];
 
-  constructor(private readonly ctx: DurableObjectState) {
+  constructor(
+    private readonly ctx: DurableObjectState,
+    private readonly hooks: SangatHooks = {},
+  ) {
     this.store = new Store(ctx.storage);
     this.runtime = {
       store: this.store,
@@ -151,7 +154,22 @@ export class Sangat {
         this.effects.push(() => this.detachSocket(userId, code, reason));
       },
       allowSyncResponse: (userId, now) => this.allowSyncResponse(userId, now),
+      roomStarted: (hostDeviceId) => {
+        this.effects.push(() => this.notifyHook(() => this.hooks.roomStarted?.(hostDeviceId)));
+      },
+      roomEnded: (hostDeviceId) => {
+        this.effects.push(() => this.notifyHook(() => this.hooks.roomEnded?.(hostDeviceId)));
+      },
     };
+  }
+
+  // A hook is the hub's business; whatever it does, it must not stop the effects after it or the flush.
+  private notifyHook(call: () => void): void {
+    try {
+      call();
+    } catch (error) {
+      console.error("sangat: hook failed", errorName(error));
+    }
   }
 
   // The hub's entry points

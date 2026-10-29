@@ -21,6 +21,8 @@ export type RouteName =
   | "sangatSocket"
   | "sangatLive"
   | "sangatCar"
+  | "pushTokenPut"
+  | "pushTokenDelete"
   | "parivaarPlaylistPut"
   | "parivaarPlaylistsList"
   | "familyPlaylistsList"
@@ -119,6 +121,12 @@ export function matchRoute(method: string, pathname: string): Route | null {
       return method === "PUT"
         ? { name: "sangatCar", needsBearer: true }
         : null;
+    case "/push/token":
+      if (method === "PUT") return { name: "pushTokenPut", needsBearer: true };
+      if (method === "DELETE") {
+        return { name: "pushTokenDelete", needsBearer: true };
+      }
+      return null;
     case "/parivaar/playlist":
       return method === "PUT"
         ? { name: "parivaarPlaylistPut", needsBearer: true }
