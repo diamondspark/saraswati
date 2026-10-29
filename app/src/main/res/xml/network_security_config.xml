@@ -345,4 +345,16 @@
             <certificates src="system" />
         </trust-anchors>
     </domain-config>
+    <!-- SARASWATI: Sangat push (FCM, gms flavor, saraswati/family/sangat). The Firebase SDK in
+         the app process registers the phone with exactly these two Google hosts: Installations
+         (a per-app install id) and FCM Registrations (the push token). Exact hosts only, never
+         googleapis.com broadly. The push messages themselves reach the phone over Google Play
+         services, not through this app's network stack. -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="false">firebaseinstallations.googleapis.com</domain>
+        <domain includeSubdomains="false">fcmregistrations.googleapis.com</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
 </network-security-config>

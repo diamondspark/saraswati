@@ -1,3 +1,4 @@
+import com.android.build.api.variant.BuildConfigField
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.util.Properties
 
@@ -345,6 +346,9 @@ dependencies {
     "gmsImplementation"(libs.mediarouter)
     "gmsImplementation"(libs.cast.framework)
 
+    // SARASWATI: Sangat push - FCM only (no BOM, no Analytics, no google-services plugin), gms flavor only.
+    "gmsImplementation"(libs.firebase.messaging)
+
     implementation(libs.room.runtime)
     implementation(libs.kuromoji.ipadic)
     implementation(libs.tinypinyin)
@@ -462,6 +466,10 @@ android {
     productFlavors {
         getByName("foss") {
             buildConfigField("String", "HUB_BASE_URL", "\"\"")
+            buildConfigField("String", "FIREBASE_PROJECT_ID", "\"\"")
+            buildConfigField("String", "FIREBASE_SENDER_ID", "\"\"")
+            buildConfigField("String", "FIREBASE_API_KEY", "\"\"")
+            buildConfigField("String", "FIREBASE_APP_ID", "\"\"")
         }
         getByName("gms") {
             buildConfigField("Boolean", "UPDATER_AVAILABLE", "false")
@@ -470,6 +478,36 @@ android {
         }
         getByName("izzy") {
             buildConfigField("String", "HUB_BASE_URL", "\"\"")
+            buildConfigField("String", "FIREBASE_PROJECT_ID", "\"\"")
+            buildConfigField("String", "FIREBASE_SENDER_ID", "\"\"")
+            buildConfigField("String", "FIREBASE_API_KEY", "\"\"")
+            buildConfigField("String", "FIREBASE_APP_ID", "\"\"")
+        }
+    }
+}
+
+// SARASWATI: Sangat push (FCM, gms flavor only) — the Firebase identifiers come from the checked-in
+// app/firebase.properties (not secrets; every APK carries them). The app id differs per applicationId,
+// so the debug build type reads appId.debug and every other build type appId.release. A missing file
+// or key is an empty string, never a build failure: push then stays unconfigured. foss and izzy get
+// empty strings above and carry no Firebase code.
+val firebaseProperties =
+    Properties().apply {
+        val file = file("firebase.properties")
+        if (file.exists()) file.inputStream().use { load(it) }
+    }
+
+androidComponents {
+    onVariants(selector().withFlavor("variant" to "gms")) { variant ->
+        val appIdKey = if (variant.buildType == "debug") "appId.debug" else "appId.release"
+        mapOf(
+            "FIREBASE_PROJECT_ID" to "projectId",
+            "FIREBASE_SENDER_ID" to "senderId",
+            "FIREBASE_API_KEY" to "apiKey",
+            "FIREBASE_APP_ID" to appIdKey,
+        ).forEach { (field, key) ->
+            val value = firebaseProperties.getProperty(key, "").trim().replace("\\", "\\\\").replace("\"", "\\\"")
+            variant.buildConfigFields?.put(field, BuildConfigField("String", "\"$value\"", null))
         }
     }
 }
