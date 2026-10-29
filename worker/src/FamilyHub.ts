@@ -339,12 +339,15 @@ export class FamilyHub extends DurableObject<Env> {
    * Tells every other approved phone that has registered a token that "something changed" in
    * Sangat, so its app wakes and asks GET /sangat/live. Fire and forget: it returns at once
    * and never throws, and the push itself carries no content. Call it only outside a storage
-   * transaction (Sangat calls its hooks after the commit). Skipped quietly when Sangat is off,
-   * FCM is not set up, nobody else has a token, or (for "started" only) a send limit is used up.
+   * transaction (Sangat calls its hooks after the commit). Skipped quietly when FCM is not set up,
+   * nobody else has a token, for "started" when Sangat is off, or (for "started" only) when a send
+   * limit is used up.
    */
   private notifySangatChanged(excludeDeviceId: string, reason: "started" | "ended"): void {
     try {
-      if (!this.readKillSwitches().sangat || !this.fcm.isConfigured(this.env)) {
+      // "Ended" goes out even with Sangat off (the owner just closed every room): it carries no
+      // content and lets phones clear a "started" notification. "Started" stays gated.
+      if ((reason === "started" && !this.readKillSwitches().sangat) || !this.fcm.isConfigured(this.env)) {
         return;
       }
       const rows = this.ctx.storage.sql
@@ -1088,7 +1091,12 @@ export class FamilyHub extends DurableObject<Env> {
     // Switching Sangat off ends it now: every socket closes (4003, which the app does
     // not retry) and every room goes, so a re-enable starts with none.
     if (changes.some(([key, enabled]) => key === "sangat" && !enabled)) {
-      this.sangat.closeAll(CLOSE_SANGAT_DISABLED, "sangat disabled");
+      const endedRooms = this.sangat.closeAll(CLOSE_SANGAT_DISABLED, "sangat disabled");
+      // One push for the whole family, to every approved phone (the hosts too; their rooms are
+      // gone as well). "Ended" is still sent with the feature off: it carries nothing.
+      if (endedRooms) {
+        this.notifySangatChanged("", "ended");
+      }
     }
 
     return json(this.readKillSwitches());

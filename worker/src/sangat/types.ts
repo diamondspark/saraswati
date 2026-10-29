@@ -57,7 +57,7 @@ export interface Runtime {
    * the handler's changes are committed, never inside the transaction.
    */
   roomStarted(hostDeviceId: string): void;
-  /** The host on `hostDeviceId` left on purpose and that ended or emptied its room. After the commit, too. */
+  /** The room hosted from `hostDeviceId` stopped being live for good: its host left on purpose, or its grace ran out with no one to take over. After the commit, too. */
   roomEnded(hostDeviceId: string): void;
 }
 

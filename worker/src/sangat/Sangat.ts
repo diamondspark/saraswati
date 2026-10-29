@@ -280,12 +280,20 @@ export class Sangat {
         const outs: Out[] = [];
         // Each piece of work is its own transaction: one that fails (a room whose
         // state cannot be read, say) must not undo the others' expiries.
+        // Effects a piece of work asked for (a hook to the hub) run once it has committed, and
+        // are dropped if it did not.
         const attempt = (work: () => Out[]) => {
+          let committed: Out[] | undefined;
           try {
-            outs.push(...this.store.transaction(work));
+            committed = this.store.transaction(work);
           } catch (error) {
             failed = true;
             console.error("sangat: alarm work failed", errorName(error));
+          }
+          const effects = this.effects.splice(0);
+          if (committed) {
+            outs.push(...committed);
+            for (const effect of effects) effect();
           }
         };
         attempt(() => disconnectOrphans(this.runtime, this.liveUserIds()));
@@ -426,8 +434,15 @@ export class Sangat {
     }
   }
 
-  /** Closes every socket with `code` and deletes every room. The sockets go first, as in closeDevice. */
-  closeAll(code: number, reason: string): void {
+  /**
+   * Closes every socket with `code` and deletes every room. The sockets go first, as in closeDevice.
+   * True when a room with a host (connected, or inside its reconnect grace) went, so the caller can
+   * tell the family: those rooms may have a notification out that nothing else will clear.
+   */
+  closeAll(code: number, reason: string): boolean {
+    const hadHostedRoom = this.attempt("listing the rooms before closing them", () =>
+      this.store.openRooms().some((room) => room.hostUserId !== ""),
+    );
     for (const ws of this.ctx.getWebSockets()) {
       const att = this.attachmentOf(ws);
       if (att) this.closeSocket(ws, att, code, reason);
@@ -440,6 +455,7 @@ export class Sangat {
     }
     this.lastSyncAt.clear();
     this.announce([]);
+    return hadHostedRoom === true;
   }
 
   // Serialization

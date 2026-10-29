@@ -3,7 +3,7 @@
 // token, never on a dropped or restored connection, and only with FCM configured, Sangat on
 // and the send limits not spent. FCM itself is a stand-in fetch.
 
-import { runInDurableObject } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeAccount, fakeGoogle, UNREGISTERED_BODY } from "./push.helpers";
 import { call, setSwitch } from "./registry.helpers";
@@ -232,6 +232,7 @@ describe("a Sangat in the car", () => {
     expect((await markCar(f.b, room.code, true)).status).toBe(403);
     expect((await markCar(f.host, "NOPE", true)).status).toBe(404);
     await setSwitch(hub(), "sangat", false);
+    await forgetPushes(); // closing the room with the switch pushed "ended"; the refusal below must add nothing
     expect((await markCar(f.host, room.code, true)).status).toBe(503);
     await settle();
 
@@ -392,6 +393,154 @@ describe("revoking a phone", () => {
 
     expect(google.calls).toHaveLength(0);
     expect(guest.userId).toBeTruthy();
+  });
+});
+
+describe("a room ending without the host leaving", () => {
+  const GRACE_PLUS = 15 * 60_000 + 60_000;
+  /** Makes the user's reconnect grace run out, as the lifecycle tests do. */
+  const expireGrace = (userId: string) =>
+    sql(hub(), (db) =>
+      db.exec("UPDATE sangat_members SET disconnectedAt = ? WHERE userId = ?", Date.now() - GRACE_PLUS, userId),
+    );
+
+  it("a host who stays gone past the grace ends the room: one push to the others, none for the drop itself", async () => {
+    const f = await family();
+    const room = await createRoom(hub(), f.host);
+    await forgetPushes();
+
+    room.client.close();
+    await sleep(150);
+    await runDurableObjectAlarm(hub());
+    await settle();
+    expect(google.calls).toHaveLength(0);
+
+    await expireGrace(room.userId);
+    await runDurableObjectAlarm(hub());
+    await settle();
+    expect(google.sentTo().sort()).toEqual([f.tokens.b, f.tokens.c].sort());
+    expect(google.sends()).toHaveLength(2);
+
+    // The emptied room's later cleanup, and any further alarm, say nothing more.
+    google.calls.length = 0;
+    await sql(hub(), (db) => db.exec("UPDATE sangat_rooms SET emptySince = ? WHERE code = ?", 1, room.code));
+    await runDurableObjectAlarm(hub());
+    await settle();
+    expect(google.calls).toHaveLength(0);
+  });
+
+  it("a host who reconnects within the grace pushes nothing, then or when the alarm next runs", async () => {
+    const f = await family();
+    const room = await createRoom(hub(), f.host);
+    await forgetPushes();
+
+    room.client.close();
+    await sleep(150);
+    const back = await SangatClient.connect(hub(), f.host.token);
+    await back.send("reconnect", { session_token: room.token });
+    await back.next("reconnected");
+    await runDurableObjectAlarm(hub());
+    await settle();
+
+    expect(google.calls).toHaveLength(0);
+  });
+
+  it("a host whose grace runs out while another member can take over ends nothing", async () => {
+    const f = await family();
+    const room = await createRoom(hub(), f.host);
+    await joinAndApprove(hub(), room.client, room.code, f.b, "Bharat");
+    await room.client.next("user_joined");
+    await forgetPushes();
+
+    room.client.close();
+    await sleep(150);
+    await expireGrace(room.userId);
+    await runDurableObjectAlarm(hub());
+    await settle();
+
+    expect(google.calls).toHaveLength(0);
+  });
+
+  it("a car room whose host stays gone ends with it", async () => {
+    const f = await family();
+    const room = await createRoom(hub(), f.host);
+    const guest = await joinAndApprove(hub(), room.client, room.code, f.b, "Bharat");
+    await room.client.next("user_joined");
+    await call(hub(), "PUT", "/sangat/car", { token: f.host.token, body: { roomCode: room.code, carMode: true } });
+    await forgetPushes();
+
+    room.client.close();
+    await guest.client.next("user_disconnected");
+    await expireGrace(room.userId);
+    await runDurableObjectAlarm(hub());
+    await settle();
+
+    expect(google.sentTo().sort()).toEqual([f.tokens.b, f.tokens.c].sort());
+  });
+
+  it("a host who is back for good after a failed reconnect (grace over) is pushed about once", async () => {
+    const f = await family();
+    const room = await createRoom(hub(), f.host);
+    await forgetPushes();
+
+    room.client.close();
+    await sleep(150);
+    await expireGrace(room.userId);
+    const back = await SangatClient.connect(hub(), f.host.token);
+    await back.send("reconnect", { session_token: room.token });
+    expect((await back.next("error")).payload.code).toBe("session_expired");
+    await runDurableObjectAlarm(hub());
+    await settle();
+
+    expect(google.sends()).toHaveLength(2);
+  });
+});
+
+describe("the Sangat kill switch", () => {
+  it("switching Sangat off with a live room sends one ended push to every approved phone", async () => {
+    const f = await family();
+    await createRoom(hub(), f.host);
+    await forgetPushes();
+
+    expect((await setSwitch(hub(), "sangat", false)).status).toBe(200);
+    await settle();
+
+    expect(google.sentTo().sort()).toEqual([f.tokens.host, f.tokens.b, f.tokens.c].sort());
+    expect(google.sends()).toHaveLength(3);
+  });
+
+  it("switching Sangat off with no room sends nothing", async () => {
+    await family();
+    await forgetPushes();
+
+    expect((await setSwitch(hub(), "sangat", false)).status).toBe(200);
+    await settle();
+
+    expect(google.calls).toHaveLength(0);
+  });
+
+  it("switching another feature off sends nothing", async () => {
+    const f = await family();
+    await createRoom(hub(), f.host);
+    await forgetPushes();
+
+    expect((await setSwitch(hub(), "parivaar_mix", false)).status).toBe(200);
+    await settle();
+
+    expect(google.calls).toHaveLength(0);
+  });
+
+  it("a started push is still blocked while the switch is off, an ended one is not", async () => {
+    const f = await family();
+    await sql(hub(), (db) => db.exec("UPDATE killswitches SET enabled = 0 WHERE key = 'sangat'"));
+
+    await trigger(f.host.deviceId, "started");
+    await settle();
+    expect(google.calls).toHaveLength(0);
+
+    await trigger(f.host.deviceId, "ended");
+    await settle();
+    expect(google.sentTo().sort()).toEqual([f.tokens.b, f.tokens.c].sort());
   });
 });
 

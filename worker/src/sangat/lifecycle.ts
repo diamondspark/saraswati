@@ -79,14 +79,22 @@ export function disconnectOrphans(rt: Runtime, liveUserIds: Set<string>): Out[] 
   return outs;
 }
 
-/** A member whose grace has run out leaves the room for good. */
-export function expireMember(store: Store, member: Member, now: number): Out[] {
+/**
+ * A member whose grace has run out leaves the room for good. A host whose going takes the
+ * room off the live list (emptied, or left with no host) tells the hub, once: this is the
+ * only place a host's grace is spent. A host who is handed over to another member ends nothing.
+ */
+export function expireMember(rt: Runtime, member: Member, now: number): Out[] {
+  const { store } = rt;
   const room = store.getRoom(member.roomCode);
   if (!room || room.emptySince !== null) {
     store.deleteMember(member.userId);
     return [];
   }
-  return removeFromRoom(store, room, member, now);
+  const wasHost = member.isHost || room.hostUserId === member.userId;
+  const outs = removeFromRoom(store, room, member, now);
+  if (wasHost && (room.emptySince !== null || room.hostUserId === "")) rt.roomEnded(member.deviceId);
+  return outs;
 }
 
 /** The rooms with something due at `now`: an expired seat, nobody left in them, or a cleanup deadline. */
@@ -106,9 +114,10 @@ export function dueRooms(store: Store, now: number): string[] {
 export function sweepRoom(rt: Runtime, code: string, now: number): Out[] {
   const { store } = rt;
   const outs: Out[] = [];
-  for (const member of store.expiredMembers(now, code)) outs.push(...expireMember(store, member, now));
+  for (const member of store.expiredMembers(now, code)) outs.push(...expireMember(rt, member, now));
   let room = store.getRoom(code);
   if (room && room.emptySince === null && store.memberCount(code) === 0) {
+    if (room.hostUserId !== "") rt.roomEnded(room.hostDeviceId);
     outs.push(...emptyRoom(store, room, now));
     room = store.getRoom(code);
   }
@@ -139,7 +148,7 @@ export const handleReconnect: Handler = (rt, conn, payload, pre) => {
 
   const now = rt.now();
   if (!member.connected && isGraceOver(member.disconnectedAt, now)) {
-    return [fail(me, "session_expired", "Session has expired"), ...expireMember(store, member, now)];
+    return [fail(me, "session_expired", "Session has expired"), ...expireMember(rt, member, now)];
   }
   const room = store.getOpenRoom(member.roomCode);
   if (!room) {
