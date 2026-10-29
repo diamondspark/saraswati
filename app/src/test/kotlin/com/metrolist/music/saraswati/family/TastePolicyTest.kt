@@ -141,26 +141,38 @@ class TastePolicyTest {
     private fun source(path: String): String =
         listOf(File(path), File("app/$path")).firstOrNull { it.isFile }?.readText() ?: error("cannot find $path")
 
-    @Test fun `onPlaybackStatsReady gates both the local row and registerPlayback on the plan`() {
+    @Test fun `the local row and the YouTube history report both ask the same taste verdict`() {
         val text = source("src/main/kotlin/com/metrolist/music/playback/MusicService.kt")
         val start = text.indexOf("override fun onPlaybackStatsReady")
         val end = text.indexOf("private fun saveQueueToDisk")
         val body = text.substring(start, end)
         assertTrue(body.contains("PlaybackStatsPlan.of("))
-        assertTrue(body.contains("TastePolicy.resolve("))
         assertTrue(body.contains("plan.writeLocalEvent"))
-        assertTrue(body.contains("plan.registerWithYouTube"))
-        assertFalse("the raw threshold must not gate registerPlayback any more", body.contains("totalPlayTimeMs >= historyDurationMs"))
+        assertTrue("the verdict is the shared playCounts helper", Regex("""counts\s*=\s*playCounts\(mediaItem\)""").containsMatchIn(body))
+
+        val verdictStart = text.indexOf("private fun playCounts(")
+        val verdictEnd = text.indexOf("override fun onPlaybackStatsReady")
+        val verdict = text.substring(verdictStart, verdictEnd)
+        assertTrue(verdict.contains("TastePolicy.resolve("))
         assertTrue(
             "the verdict comes from the setting and the resolved context",
-            Regex("""counts\s*=\s*TastePolicy\.counts\(playContext,\s*dataStore\.get\(CountSharedPlaysKey,\s*false\)\)""").containsMatchIn(body),
+            Regex("""TastePolicy\.counts\(playContext,\s*dataStore\.get\(CountSharedPlaysKey,\s*false\)\)""").containsMatchIn(verdict),
         )
         assertTrue(
             "the mix is read from the played item, never from the queue held at stats time",
-            Regex("""itemIsParivaarMix\s*=\s*mediaItem\.metadata\?\.fromParivaarMix\s*==\s*true""").containsMatchIn(body),
+            Regex("""itemIsParivaarMix\s*=\s*mediaItem\.metadata\?\.fromParivaarMix\s*==\s*true""").containsMatchIn(verdict),
         )
-        assertFalse(body.contains("currentQueue"))
-        assertTrue(Regex("""inRoom\s*=\s*listenTogetherManager\.isInRoom""").containsMatchIn(body))
-        assertTrue(Regex("""suggestedBy\s*=\s*mediaItem\.metadata\?\.suggestedBy""").containsMatchIn(body))
+        assertFalse(verdict.contains("currentQueue"))
+        assertTrue(Regex("""inRoom\s*=\s*listenTogetherManager\.isInRoom""").containsMatchIn(verdict))
+        assertTrue(Regex("""suggestedBy\s*=\s*mediaItem\.metadata\?\.suggestedBy""").containsMatchIn(verdict))
+
+        // upstream registers with YouTube from YouTubeHistoryReporter; the fork's gate must stay wired into it
+        assertTrue(
+            "a local song or a non-counting play is never reported",
+            Regex("""fun mayRegisterWithYouTube\(mediaItem: MediaItem\): Boolean =\s*!LocalSongIds\.isLocal\(mediaItem\.mediaId\)\s*&&\s*playCounts\(mediaItem\)""").containsMatchIn(text),
+        )
+        assertTrue(Regex("""mayReport\s*=\s*\{\s*item\s*->\s*mayRegisterWithYouTube\(item\)\s*\}""").containsMatchIn(text))
+        val reporter = source("src/main/kotlin/com/metrolist/music/playback/YouTubeHistoryReporter.kt")
+        assertTrue(reporter.contains("!listen.mayReport"))
     }
 }

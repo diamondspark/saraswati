@@ -55,7 +55,12 @@ junit = "4.13.2"
 timber = "5.0.1"
 materialKolor = "5.0.1"
 kuromojiIpadic = "0.9.0"
-innertubex = "v0.8.4"
+# SARASWATI: pinned to v0.10.0, not upstream's v0.11.0 (upstream 6d085042). v0.11.0 swaps the in-process JS engine
+# (io.github.dokar3:quickjs-kt, Maven Central, already hash-pinned here) for MetrolistGroup's own
+# com.github.MetrolistGroup.quackjs:quackjs:0.1.0, a brand-new native library served from JitPack, a group our
+# settings.gradle.kts JitPack filter deliberately does not admit. v0.10.0 has every API the merged playback and
+# history-reporting code calls. Revisit when QuackJS has been reviewed and the owner approves adding its group.
+innertubex = "v0.10.0"
 # SARASWATI: supply-chain hardening (Task 9) — pinned to 2.0.1, not upstream's
 # 2.0.3: JitPack's build is dead for 2.0.3 under every coordinate spelling
 # (confirmed via jitpack.io/api/builds/com.github.promeG/tinypinyin, status
