@@ -57,6 +57,8 @@ import com.metrolist.music.constants.ParivaarMixKey
 import com.metrolist.music.constants.ParivaarPlaylistIdKey
 import com.metrolist.music.constants.ParivaarTopSongsSyncedAtKey
 import com.metrolist.music.constants.SangatCarRoomCodeKey
+import com.metrolist.music.constants.SangatPushRegisteredAtKey
+import com.metrolist.music.constants.SangatPushDigestKey
 import com.metrolist.music.constants.SmartDownloadLedgerKey
 import com.metrolist.music.constants.StationOfflineSetsKey
 import com.metrolist.music.constants.VisitorDataKey
@@ -170,6 +172,10 @@ object BackupPolicy {
                 // SARASWATI: battery-optimization nudge — a restored backup must not hide the nudge on a phone whose own
                 // battery settings have never been checked.
                 BatteryOptimizationNudgeDismissedKey,
+                // SARASWATI: Sangat push — which FCM token this phone last registered with the hub, and when. A restored
+                // hash would stop a new phone from ever registering its own token.
+                SangatPushDigestKey,
+                SangatPushRegisteredAtKey,
             )
 
     // Preference keys the coverage test's wider regex flags as

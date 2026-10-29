@@ -43,6 +43,8 @@ import com.metrolist.music.constants.SmartDownloadLedgerKey
 import com.metrolist.music.constants.StationOfflineSetsKey
 import com.metrolist.music.constants.ParivaarPlaylistIdKey
 import com.metrolist.music.constants.ParivaarTopSongsSyncedAtKey
+import com.metrolist.music.constants.SangatPushRegisteredAtKey
+import com.metrolist.music.constants.SangatPushDigestKey
 import com.metrolist.music.constants.ProxyPasswordKey
 import com.metrolist.music.constants.ProxyUrlKey
 import com.metrolist.music.constants.SongSortTypeKey
@@ -431,5 +433,17 @@ class BackupPolicyTest {
         val planted = mutablePreferencesOf(BatteryOptimizationNudgeDismissedKey to true, SongSortTypeKey to "NAME").toPreferences()
 
         assertNull(BackupPolicy.sanitize(planted)[BatteryOptimizationNudgeDismissedKey])
+    }
+
+    // SARASWATI: Sangat push — which FCM token this phone registered is its own delivery state.
+    @Test
+    fun `a backup cannot plant the push registration state`() {
+        val planted =
+            mutablePreferencesOf(SangatPushDigestKey to "abc", SangatPushRegisteredAtKey to 1L, SongSortTypeKey to "NAME").toPreferences()
+
+        assertTrue(SangatPushDigestKey in BackupPolicy.NEVER_EXPORT_OR_RESTORE)
+        assertTrue(SangatPushRegisteredAtKey in BackupPolicy.NEVER_EXPORT_OR_RESTORE)
+        assertNull(BackupPolicy.sanitize(planted)[SangatPushDigestKey])
+        assertNull(BackupPolicy.sanitize(planted)[SangatPushRegisteredAtKey])
     }
 }

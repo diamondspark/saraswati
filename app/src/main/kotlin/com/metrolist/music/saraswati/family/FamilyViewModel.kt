@@ -31,6 +31,7 @@ package com.metrolist.music.saraswati.family
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.metrolist.music.saraswati.family.sangat.SangatPushRegistrar
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -108,17 +109,26 @@ class FamilyViewModel
         // SARASWATI: Phase 4 review fix (M7, M12) — asks the feature gate to read the kill-switches again: after
         // the owner phone's own self-pairing (it had no session to ask with before) and after its own toggle.
         private val refreshGate: suspend () -> Unit = {},
+        // SARASWATI: Sangat push — runs after the owner phone's self-pairing, so its push token reaches the hub.
+        private val onPaired: () -> Unit = {},
     ) : ViewModel(scope) {
         @Inject
-        constructor(hub: HubApi, store: FamilyStore, config: HubConfig, stationsCache: StationsCache, gate: FamilyFeatureGate) :
-            this(
-                hub,
-                store,
-                config,
-                stationsCache,
-                CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
-                refreshGate = { gate.refresh() },
-            )
+        constructor(
+            hub: HubApi,
+            store: FamilyStore,
+            config: HubConfig,
+            stationsCache: StationsCache,
+            gate: FamilyFeatureGate,
+            pushRegistrar: SangatPushRegistrar,
+        ) : this(
+            hub,
+            store,
+            config,
+            stationsCache,
+            CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+            refreshGate = { gate.refresh() },
+            onPaired = pushRegistrar::ensureRegisteredAsync,
+        )
 
         private val _pairingState = MutableStateFlow<PairingUiState>(PairingUiState.Idle)
         val pairingState: StateFlow<PairingUiState> = _pairingState.asStateFlow()
@@ -226,6 +236,7 @@ class FamilyViewModel
                     store.completeClaim(claim.deviceId, approved.sessionToken)
                     kept = true
                     refreshGateQuietly()
+                    onPaired() // SARASWATI: Sangat push
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
