@@ -9,6 +9,8 @@
 // SangatJoinRequests, and the Sangat view model joins that room the same way the banner does.
 // SARASWATI: device fix F2 — each notification is tagged with its room code, so a room that has ended, one this phone is
 // in, or one dismissed is found again in the shade (even after the process died) and cancelled.
+// SARASWATI: Sangat push — with the app closed the same notification is posted and cancelled by SangatPushHandler,
+// when the hub's "a Sangat changed" message arrives.
 package com.metrolist.music.saraswati.family.sangat
 
 import android.Manifest
@@ -36,6 +38,16 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
+// SARASWATI: Sangat push — what the push handler needs of the notifications, so it runs against a plain fake in JUnit.
+interface SangatNotifier {
+    /** The room codes of the Sangat notifications still in the shade. */
+    fun postedRoomCodes(): Set<String>
+
+    fun post(room: LiveSangatRoom)
+
+    fun cancel(roomCode: String)
+}
+
 @Singleton
 class SangatNotifications
     @Inject
@@ -44,12 +56,17 @@ class SangatNotifications
         private val watcher: SangatLiveWatcher,
         private val dismissals: SangatDismissals,
         private val port: SangatRoomPort,
-    ) {
+        // SARASWATI: Sangat push — rooms announced before, across restarts.
+        private val announcedRooms: AnnouncedRoomsStore,
+    ) : SangatNotifier {
         /** Posts a notification for each room the watcher announces. Called once, from the application scope. */
         fun start(scope: CoroutineScope) {
             scope.launch {
                 watcher.carPrompts.collect { room ->
-                    SangatNotifyPolicy.toNotify(listOf(room), dismissals.dismissed.value, port.currentRoomCode.first()).forEach(::post)
+                    SangatNotifyPolicy
+                        .toNotify(listOf(room), dismissals.dismissed.value, port.currentRoomCode.first(), announcedRooms.read())
+                        .forEach(::post)
+                    announcedRooms.update { it + room.roomCode } // SARASWATI: Sangat push — a later push does not post it again
                 }
             }
             scope.launch {
@@ -57,12 +74,12 @@ class SangatNotifications
                     // Null is "the hub has not answered while we ran" (not polled yet, app in the background, or a failed
                     // poll), which says nothing about whether a room has ended.
                     if (answered == null) emptySet() else SangatNotifyPolicy.toCancel(postedRoomCodes(), answered, here, dismissed)
-                }.collect { codes -> codes.forEach { NotificationManagerCompat.from(context).cancel(it, NOTIFICATION_ID) } }
+                }.collect { codes -> codes.forEach(::cancel) }
             }
         }
 
         /** The room codes of the Sangat notifications still in the shade, read back from the system. */
-        private fun postedRoomCodes(): Set<String> =
+        override fun postedRoomCodes(): Set<String> =
             context
                 .getSystemService(NotificationManager::class.java)
                 ?.activeNotifications
@@ -71,8 +88,10 @@ class SangatNotifications
                 .mapNotNull { it.tag }
                 .toSet()
 
+        override fun cancel(roomCode: String) = NotificationManagerCompat.from(context).cancel(roomCode, NOTIFICATION_ID)
+
         @SuppressLint("MissingPermission")
-        private fun post(room: LiveSangatRoom) {
+        override fun post(room: LiveSangatRoom) {
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
             val launch = context.packageManager.getLaunchIntentForPackage(context.packageName) ?: return
             val tap =
@@ -102,6 +121,8 @@ class SangatNotifications
                     .setContentText(context.getString(R.string.family_sangat_notify_text))
                     .setContentIntent(pending)
                     .setAutoCancel(true)
+                    // SARASWATI: Sangat push — the same room posted again (the push, then the foreground poll) never alerts twice.
+                    .setOnlyAlertOnce(true)
                     .build()
             NotificationManagerCompat.from(context).notify(room.roomCode, NOTIFICATION_ID, notification)
         }
@@ -120,15 +141,20 @@ object SangatJoinRequests {
     private val pending = MutableStateFlow<Pair<String, Long>?>(null)
     val requests: StateFlow<Pair<String, Long>?> = pending.asStateFlow()
 
-    /** Holds the join an incoming intent asks for, if it is a Sangat join; any other intent is left alone. */
+    /**
+     * Holds the join an incoming intent asks for, if it is a Sangat join; any other intent is left alone. True when the
+     * intent was a Sangat join (even a blank one, which holds nothing), so the caller can bring the Home screen up, where
+     * the join is taken.
+     */
     fun offerFrom(
         intent: Intent,
         now: Long,
-    ) {
-        if (intent.action != ACTION_JOIN) return
+    ): Boolean {
+        if (intent.action != ACTION_JOIN) return false
         intent.getStringExtra(EXTRA_ROOM_CODE)?.takeIf { it.isNotBlank() }?.let { pending.value = it to now }
         intent.action = null
         intent.removeExtra(EXTRA_ROOM_CODE)
+        return true
     }
 
     /** Takes the held join, or null when none is held or it is too old to act on. */

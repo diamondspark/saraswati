@@ -153,6 +153,13 @@ class SangatLiveWatcher(
         }
     }
 
+    /**
+     * Marks [rooms] as announced, for a notification posted outside the poll (the push), and returns those not announced
+     * before. The foreground poll then does not announce them again, and a notification the person swiped away is not posted
+     * a second time for a room that is still going.
+     */
+    fun claimUnannounced(rooms: List<LiveSangatRoom>): List<LiveSangatRoom> = synchronized(prompted) { rooms.filter { prompted.add(it.roomCode) } }
+
     private fun announce(visible: List<LiveSangatRoom>) {
         val fresh =
             synchronized(prompted) {

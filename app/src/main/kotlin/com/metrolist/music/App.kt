@@ -30,6 +30,7 @@ import com.metrolist.music.BuildConfig
 import com.metrolist.music.saraswati.SaraswatiFeatures
 import com.metrolist.music.saraswati.car.CarHomeHolder
 import com.metrolist.music.saraswati.family.sangat.SangatNotifications
+import com.metrolist.music.saraswati.family.sangat.SangatPushRegistrar
 import com.metrolist.music.saraswati.offline.SmartDownloadExecutor
 import com.metrolist.music.saraswati.offline.SmartDownloadScheduler
 import com.metrolist.music.saraswati.saral.SaralActive
@@ -84,6 +85,10 @@ class App :
     @Inject
     lateinit var sangatNotifications: SangatNotifications
 
+    // SARASWATI: Sangat push — tells the hub this phone's FCM token (a no-op outside the gms flavor).
+    @Inject
+    lateinit var sangatPushRegistrar: SangatPushRegistrar
+
     override fun onCreate() {
         super.onCreate()
 
@@ -91,6 +96,7 @@ class App :
         // process claim WebView's data directory and crash the next main-process WebView.
         if (!isMainProcess()) return
         sangatNotifications.start(applicationScope) // SARASWATI: Phase 4 Task 9
+        sangatPushRegistrar.start(applicationScope) // SARASWATI: Sangat push — Firebase up before any FCM delivery, then register
 
         // Install crash handler first
         CrashHandler.install(this)

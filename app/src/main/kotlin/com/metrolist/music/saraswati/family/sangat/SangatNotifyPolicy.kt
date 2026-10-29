@@ -14,12 +14,17 @@ object SangatNotifyPolicy {
     /** How long a notification tap stays good for a join. */
     const val JOIN_REQUEST_TTL_MS = 60_000L
 
-    /** The rooms just announced that the person has not dismissed. A dismissed room never notifies again, nor does the one this phone is in. */
+    /**
+     * The rooms just announced that the person has not dismissed. A dismissed room never notifies again, nor does the one
+     * this phone is in. SARASWATI: Sangat push — nor does a room in [seen], the codes announced before (kept across
+     * restarts), so a notification the person swiped away does not come back while the room is still going.
+     */
     fun toNotify(
         announced: List<LiveSangatRoom>,
         dismissed: Set<String>,
         here: String? = null,
-    ): List<LiveSangatRoom> = announced.filter { it.roomCode !in dismissed && it.roomCode != here }
+        seen: Set<String> = emptySet(),
+    ): List<LiveSangatRoom> = announced.filter { it.roomCode !in dismissed && it.roomCode != here && it.roomCode !in seen }
 
     /** The posted notifications to take down: the room has ended, this phone is in it, or the person dismissed it. */
     fun toCancel(

@@ -768,7 +768,15 @@ class RealAllowlistTests(unittest.TestCase):
     def test_every_pinned_filter_belongs_to_a_pinned_exported_component_or_a_known_unexported_one(self) -> None:
         exported = set(self.allowlist["exported_components"])
         unexported_with_filters = {o for o in self.allowlist["intent_filters"] if o not in exported}
-        self.assertEqual({"service:com.metrolist.music.playback.ExoDownloadService"}, unexported_with_filters)
+        self.assertEqual(
+            {
+                "service:com.metrolist.music.playback.ExoDownloadService",
+                # Sangat push (FCM): both are bound by the exported FirebaseInstanceIdReceiver's MESSAGING_EVENT.
+                "service:com.google.firebase.messaging.FirebaseMessagingService",
+                "service:com.metrolist.music.saraswati.family.sangat.SangatPushService",
+            },
+            unexported_with_filters,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1035,6 +1043,8 @@ class ShippedPermissionPinTests(unittest.TestCase):
         "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
         "android.permission.READ_MEDIA_AUDIO",
         "dev.diamondspark.saraswati.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
+        # Sangat push (FCM): firebase-messaging's own receive permission, nothing more.
+        "com.google.android.c2dm.permission.RECEIVE",
     }
 
     def _shipped(self) -> dict:

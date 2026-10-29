@@ -153,6 +153,7 @@ import com.metrolist.music.saraswati.family.parivaar.ParivaarMemberName
 import com.metrolist.music.saraswati.family.parivaar.ParivaarMixRefresher
 import com.metrolist.music.saraswati.family.parivaar.TopSongsPlaylistSync
 import com.metrolist.music.saraswati.family.sangat.SangatForeground
+import com.metrolist.music.saraswati.family.sangat.SangatPushRegistrar
 import com.metrolist.music.saraswati.family.sangat.SangatJoinRequests
 import com.metrolist.music.saraswati.family.PairingInbox
 import com.metrolist.music.saraswati.family.StationsCache
@@ -350,6 +351,10 @@ class MainActivity : FragmentActivity() {
     @Inject
     lateinit var sangatForeground: SangatForeground
 
+    // SARASWATI: Sangat push
+    @Inject
+    lateinit var sangatPushRegistrar: SangatPushRegistrar
+
     // The owner's own phone pairs itself here (ensureSelfPaired) so it has the device session Sangat needs.
     private val familyViewModel: FamilyViewModel by viewModels()
 
@@ -411,6 +416,7 @@ class MainActivity : FragmentActivity() {
     override fun onStart() {
         super.onStart()
         sangatForeground.activityStarted() // SARASWATI: Phase 4 Task 9 — counted per process (review fix M13)
+        sangatPushRegistrar.ensureRegisteredAsync() // SARASWATI: Sangat push — retries a registration that failed; a no-op when it is up to date
         // Request notification permission on Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -487,7 +493,9 @@ class MainActivity : FragmentActivity() {
             dropIntentsForSaral(intent)
             return
         }
-        SangatJoinRequests.offerFrom(intent, System.currentTimeMillis()) // SARASWATI: Phase 4 Task 9 — a tap on the Sangat notification
+        val sangatJoin = SangatJoinRequests.offerFrom(intent, System.currentTimeMillis()) // SARASWATI: Phase 4 Task 9 — a tap on the Sangat notification
+        // SARASWATI: Sangat push — the join is taken by the Sangat view model on Home, so a tap from any other screen goes there at once.
+        if (sangatJoin && ::navController.isInitialized) showHomeForSangatJoin(navController)
         if (::navController.isInitialized) {
             handleWidgetTargetIntent(intent, navController)
             // SARASWATI (audit A9.3): a malformed link (e.g. a non-hierarchical
@@ -1803,6 +1811,17 @@ class MainActivity : FragmentActivity() {
         } ?: return
 
         navController.navigate(targetRoute.route)
+    }
+
+    // SARASWATI: Sangat push — back to Home without losing the other tabs' saved state, as the bottom bar does. A cold start
+    // (onCreate) already opens on Home, so only onNewIntent needs this.
+    private fun showHomeForSangatJoin(navController: NavHostController) {
+        if (navController.popBackStack(Screens.Home.route, inclusive = false)) return
+        navController.navigate(Screens.Home.route) {
+            popUpTo(navController.graph.startDestinationId) { saveState = true }
+            launchSingleTop = true
+            restoreState = true
+        }
     }
 
     private fun handleDeepLinkIntent(

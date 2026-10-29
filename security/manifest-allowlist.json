@@ -9,7 +9,8 @@
     "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
     "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
     "android.permission.READ_MEDIA_AUDIO",
-    "dev.diamondspark.saraswati.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+    "dev.diamondspark.saraswati.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
+    "com.google.android.c2dm.permission.RECEIVE"
   ],
   "exported_components": [
     "activity:com.metrolist.music.MainActivity",
@@ -17,7 +18,8 @@
     "activity-alias:com.metrolist.music.MainActivityStatic",
     "service:com.metrolist.music.playback.MusicService",
     "receiver:androidx.media3.session.MediaButtonReceiver",
-    "receiver:androidx.profileinstaller.ProfileInstallReceiver"
+    "receiver:androidx.profileinstaller.ProfileInstallReceiver",
+    "receiver:com.google.firebase.iid.FirebaseInstanceIdReceiver"
   ],
   "forbidden_permissions": [
     "android.permission.RECORD_AUDIO",
@@ -248,6 +250,27 @@
         "data": {}
       }
     ],
+    "receiver:com.google.firebase.iid.FirebaseInstanceIdReceiver": [
+      {
+        "actions": [
+          "com.google.android.c2dm.intent.RECEIVE"
+        ],
+        "autoVerify": false,
+        "categories": [],
+        "data": {}
+      }
+    ],
+    "service:com.google.firebase.messaging.FirebaseMessagingService": [
+      {
+        "actions": [
+          "com.google.firebase.MESSAGING_EVENT"
+        ],
+        "autoVerify": false,
+        "categories": [],
+        "data": {},
+        "priority": "-500"
+      }
+    ],
     "service:com.metrolist.music.playback.ExoDownloadService": [
       {
         "actions": [
@@ -266,6 +289,16 @@
           "android.media.browse.MediaBrowserService",
           "androidx.media3.session.MediaLibraryService",
           "androidx.media3.session.MediaSessionService"
+        ],
+        "autoVerify": false,
+        "categories": [],
+        "data": {}
+      }
+    ],
+    "service:com.metrolist.music.saraswati.family.sangat.SangatPushService": [
+      {
+        "actions": [
+          "com.google.firebase.MESSAGING_EVENT"
         ],
         "autoVerify": false,
         "categories": [],

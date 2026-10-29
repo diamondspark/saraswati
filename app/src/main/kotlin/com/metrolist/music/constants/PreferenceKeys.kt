@@ -808,6 +808,14 @@ val SmartDownloadsEnabledKey = booleanPreferencesKey("saraswatiSmartDownloads")
 // Ask Saraswati on the family hub) has been shown. Set the first time it is acknowledged; never cleared.
 val HasSeenAskVoiceExplanationKey = booleanPreferencesKey("saraswatiHasSeenAskVoiceExplanation")
 
+// SARASWATI: Sangat push — the SHA-256 (hex) of the FCM token last registered with the hub, and when (epoch ms).
+// This phone's own delivery state, so neither is ever backed up; the token itself is never stored.
+val SangatPushDigestKey = stringPreferencesKey("saraswatiSangatPushDigest")
+val SangatPushRegisteredAtKey = longPreferencesKey("saraswatiSangatPushRegisteredAt")
+
+// SARASWATI: Sangat push — the room codes already announced on this phone (see AnnouncedRoomsStore). Live room state, so never backed up.
+val SangatAnnouncedRoomsKey = stringSetPreferencesKey("saraswatiSangatAnnouncedRooms")
+
 // SARASWATI: battery-optimization nudge — set once the one-time "keep playing with the screen off" prompt has been
 // acknowledged (any dismissal counts). Describes this phone's own battery settings, so it is never backed up.
 val BatteryOptimizationNudgeDismissedKey = booleanPreferencesKey("saraswatiBatteryOptimizationNudgeDismissed")
