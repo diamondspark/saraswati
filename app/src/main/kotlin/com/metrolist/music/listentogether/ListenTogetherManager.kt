@@ -37,6 +37,7 @@ import com.metrolist.music.saraswati.family.sangat.RemoteHostGuard
 import com.metrolist.music.saraswati.family.sangat.RemoteEventRouter
 import com.metrolist.music.saraswati.family.sangat.RemoteControllerStore
 import com.metrolist.music.utils.dataStore
+import com.metrolist.music.utils.get
 import com.metrolist.music.utils.getArtistSeparator
 import com.metrolist.music.utils.joinToArtistString
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -275,13 +276,14 @@ class ListenTogetherManager
 
         private fun registerPassengerPlay(videoId: String) {
             scope.launch(Dispatchers.IO) {
+                // SARASWATI: upstream's registerPlayback now looks the tracking URL up itself (one WEB_REMIX player
+                // call, then the stats ping) and sends nothing while Pause listen history is on.
                 YouTube
-                    .player(videoId, client = YouTubeClient.WEB_REMIX)
-                    .mapCatching { response ->
-                        val url = response.playbackTracking?.videostatsPlaybackUrl?.baseUrl
-                        requireNotNull(url) { "no playback tracking URL for $videoId" }
-                        YouTube.registerPlayback(null, url).getOrThrow()
-                    }.onFailure { Timber.tag(TAG).w(it, "Could not register passenger play") }
+                    .registerPlayback(
+                        videoId,
+                        com.metrolist.innertubex.extraction.generateClientPlaybackNonce(),
+                    ) { !context.dataStore.get(com.metrolist.music.constants.PauseListenHistoryKey, false) }
+                    .onFailure { Timber.tag(TAG).w(it, "Could not register passenger play") }
             }
         }
 

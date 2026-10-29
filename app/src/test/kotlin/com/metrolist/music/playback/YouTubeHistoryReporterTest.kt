@@ -210,16 +210,16 @@ class YouTubeHistoryReporterTest {
     // SARASWATI: a song on this phone, or a play that is not this person's taste, is never reported to YouTube,
     // neither live at the threshold nor from the final stats.
     @Test
-    fun `an item the fork's policy refuses is never reported live or at release`() = playback("local:42").run {
-        mayReport = { false }
+    fun `an item the fork's policy refuses is never reported live or at release`() = playback("local:42", mayReport = { false }).run {
         advance(120_000)
         release()
         assertTrue(reports.isEmpty())
         assertEquals(1, finished)
     }
 
-    private fun playback(id: String = "song") = Playback(id).also {
+    private fun playback(id: String = "song", mayReport: (MediaItem) -> Boolean = { true }) = Playback(id).also {
         fixtures += it
+        it.mayReport = mayReport
         it.event(AnalyticsListener.EVENT_TIMELINE_CHANGED)
     }
 
