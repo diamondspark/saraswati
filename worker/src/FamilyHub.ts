@@ -924,7 +924,7 @@ export class FamilyHub extends DurableObject<Env> {
     // The same turn as the update, with nothing awaited in between: no upgrade can
     // authenticate the device in the gap. Its sockets close at once (4001) and its seats,
     // and with them its reconnect tokens, go; waiting for a reconnect would be too late.
-    this.sangat.closeDevice(deviceId, CLOSE_DEVICE_REVOKED, "revoked");
+    const endedARoom = this.sangat.closeDevice(deviceId, CLOSE_DEVICE_REVOKED, "revoked");
     // Its Parivaar row goes too (the list hides it anyway). Its family playlists stay: they
     // belong to the family, and only the admin can remove them now.
     this.ctx.storage.sql.exec(
@@ -933,6 +933,11 @@ export class FamilyHub extends DurableObject<Env> {
     );
     // And its push token, so a revoked phone is never pushed to again.
     this.ctx.storage.sql.exec("DELETE FROM push_tokens WHERE deviceId = ?", deviceId);
+    // A revoked car phone that was hosting ended its room: tell the family, so a passenger's
+    // notification does not outlive it. Only then; any other revoke changes nothing for them.
+    if (endedARoom) {
+      this.notifySangatChanged(deviceId);
+    }
 
     return json({ deviceId, status: "revoked" });
   }

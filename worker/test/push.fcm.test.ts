@@ -226,17 +226,32 @@ describe("classifying the answers", () => {
     expect(await dead(undefined)).toEqual([]);
   });
 
-  it("HTTP 404 is dead", async () => {
-    expect(await dead({ status: 404, body: { error: { status: "NOT_FOUND" } } })).toEqual(["the-token"]);
-    expect(await dead({ status: 404 }, "")).toEqual(["the-token"]);
+  it("a 404 with the UNREGISTERED detail is dead", async () => {
+    expect(await dead({ status: 404, body: UNREGISTERED_BODY })).toEqual(["the-token"]);
   });
 
-  it("UNREGISTERED in the error status or details is dead, whatever the HTTP status", async () => {
+  it("404 NOT_FOUND without UNREGISTERED keeps the token (a wrong project_id looks like this)", async () => {
+    const notFound = { error: { code: 404, message: "Requested entity was not found.", status: "NOT_FOUND" } };
+    expect(await dead({ status: 404, body: notFound })).toEqual([]);
+    expect(await dead({ status: 404, body: { error: { status: "NOT_FOUND", details: [{ errorCode: "SOMETHING_ELSE" }] } } })).toEqual([]);
+    expect(await dead({ status: 404 }, "")).toEqual([]);
+    expect(await dead({ status: 404 }, "<html>not found</html>")).toEqual([]);
+  });
+
+  it("UNREGISTERED counts only as an errorCode in details, whatever the HTTP status", async () => {
     expect(await dead({ status: 410, body: UNREGISTERED_BODY })).toEqual(["the-token"]);
-    expect(await dead({ status: 400, body: { error: { status: "UNREGISTERED" } } })).toEqual(["the-token"]);
+    expect(await dead({ status: 400, body: { error: { status: "UNREGISTERED" } } })).toEqual([]);
   });
 
   it("INVALID_ARGUMENT about the registration token is dead; about anything else it is not", async () => {
+    const inDetails = {
+      error: {
+        status: "INVALID_ARGUMENT",
+        message: "Request contains an invalid argument.",
+        details: [{ fieldViolations: [{ field: "message.token", description: "Invalid registration token" }] }],
+      },
+    };
+    expect(await dead({ status: 400, body: inDetails })).toEqual(["the-token"]);
     const invalidToken = {
       error: {
         code: 400,
@@ -284,7 +299,7 @@ describe("failure handling", () => {
 
   it("a send that never answers times out on its own, the others still count", async () => {
     const account = await fakeAccount();
-    const base = fakeGoogle({ answer: (t) => (t === "gone" ? { status: 404 } : undefined) });
+    const base = fakeGoogle({ answer: (t) => (t === "gone" ? { status: 404, body: UNREGISTERED_BODY } : undefined) });
     const fn = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === SEND_URL && JSON.parse(String(init?.body)).message.token === "stuck") {
         return new Promise<Response>(() => undefined);

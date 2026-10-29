@@ -358,8 +358,11 @@ export class Sangat {
    * The storage work is split so that one failure costs only its own part: the
    * device's join requests and suggestions, in every room, are one step, and each
    * seat's removal from its room is another.
+   *
+   * True when the device was the host of a room and its going ended that room (nobody left,
+   * or a car room, which ends with its host); the caller can then tell the family.
    */
-  closeDevice(deviceId: string, code: number, reason: string): void {
+  closeDevice(deviceId: string, code: number, reason: string): boolean {
     // Members whose sockets died with an earlier instance are still marked connected;
     // settle that before a host is chosen from among them.
     this.reconcileNow();
@@ -380,20 +383,27 @@ export class Sangat {
     );
 
     const seats = this.attempt("listing a closed device's seats", () => this.store.membersOfDevice(deviceId)) ?? [];
+    let endedARoom = false;
     for (const member of seats) {
       const removed = this.attempt("removing a closed device from a room", () =>
         this.store.transaction(() => {
           const room = this.store.getRoom(member.roomCode);
           if (!room || room.emptySince !== null) {
             this.store.deleteMember(member.userId);
-            return [];
+            return { outs: [], ended: false };
           }
-          return removeFromRoom(this.store, room, member, now);
+          const wasHost = member.isHost || room.hostUserId === member.userId;
+          const outs = removeFromRoom(this.store, room, member, now);
+          return { outs, ended: wasHost && room.emptySince !== null };
         }),
       );
-      if (removed) outs.push(...removed);
+      if (removed) {
+        outs.push(...removed.outs);
+        if (removed.ended) endedARoom = true;
+      }
     }
     this.announce(outs);
+    return endedARoom;
   }
 
   /** Runs one piece of storage work whose failure must not stop the rest: logs it and returns undefined. */

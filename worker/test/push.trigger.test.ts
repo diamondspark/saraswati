@@ -308,20 +308,70 @@ describe("a connection dropping or coming back", () => {
 
     expect(google.calls).toHaveLength(0);
   });
+});
 
-  it("revoking a phone does not push", async () => {
-    const f = await family();
-    const room = await createRoom(hub(), f.host);
-    await forgetPushes();
-
-    await call(hub(), "POST", `/roster/${f.host.deviceId}/revoke`, {
+describe("revoking a phone", () => {
+  const adminRevoke = (device: Device) =>
+    call(hub(), "POST", `/roster/${device.deviceId}/revoke`, {
       token: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     });
+
+  it("a revoked car host ends the room, so the others are pushed to (not the revoked phone)", async () => {
+    const f = await family();
+    const room = await createRoom(hub(), f.host);
+    const guest = await joinAndApprove(hub(), room.client, room.code, f.b, "Bharat");
+    await room.client.next("user_joined");
+    await call(hub(), "PUT", "/sangat/car", { token: f.host.token, body: { roomCode: room.code, carMode: true } });
+    await forgetPushes();
+
+    expect((await adminRevoke(f.host)).status).toBe(200);
+    expect((await guest.client.next("kicked")).payload.reason).toBe("Sangat in the car has ended");
+    await settle();
+
+    expect(google.sentTo().sort()).toEqual([f.tokens.b, f.tokens.c].sort());
+  });
+
+  it("a revoked host whose room is then empty pushes too", async () => {
+    const f = await family();
+    await createRoom(hub(), f.host);
+    await forgetPushes();
+
+    await adminRevoke(f.host);
+    await sleep(100);
+    await settle();
+
+    expect(google.sentTo().sort()).toEqual([f.tokens.b, f.tokens.c].sort());
+  });
+
+  it("a revoked host whose room carries on under a new host does not push", async () => {
+    const f = await family();
+    const room = await createRoom(hub(), f.host);
+    const guest = await joinAndApprove(hub(), room.client, room.code, f.b, "Bharat");
+    await room.client.next("user_joined");
+    await forgetPushes();
+
+    await adminRevoke(f.host);
+    await guest.client.next("user_left");
+    await settle();
+
+    expect(google.calls).toHaveLength(0);
+  });
+
+  it("a revoked guest, or a phone in no room, does not push", async () => {
+    const f = await family();
+    const room = await createRoom(hub(), f.host);
+    const guest = await joinAndApprove(hub(), room.client, room.code, f.b, "Bharat");
+    await room.client.next("user_joined");
+    await forgetPushes();
+
+    await adminRevoke(f.b);
+    await room.client.next("user_left");
+    await adminRevoke(f.c);
     await sleep(100);
     await settle();
 
     expect(google.calls).toHaveLength(0);
-    expect(room.code).toBeTruthy();
+    expect(guest.userId).toBeTruthy();
   });
 });
 
@@ -444,7 +494,7 @@ describe("dead tokens", () => {
     const f = await family();
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
-    const inner = fakeGoogle({ answer: (token) => (token === f.tokens.b ? { status: 404 } : undefined) });
+    const inner = fakeGoogle({ answer: (token) => (token === f.tokens.b ? { status: 404, body: UNREGISTERED_BODY } : undefined) });
     fetchSpy.mockImplementation((async (input: RequestInfo | URL, init?: RequestInit) => {
       await gate;
       return inner.fn(input, init);

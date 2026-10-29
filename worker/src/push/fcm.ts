@@ -120,10 +120,8 @@ async function classify(response: Response): Promise<Outcome> {
     discard(response);
     return "auth";
   }
-  if (response.status === 404) {
-    discard(response);
-    return "dead";
-  }
+  // Not even a 404 is proof: a wrong project_id answers 404 NOT_FOUND too, and treating that as
+  // a dead token would wipe every registration. Only FCM's own words count.
   let error: Record<string, unknown> | null = null;
   try {
     const text = (await response.text()).slice(0, MAX_ERROR_BODY_CHARS);
@@ -136,14 +134,18 @@ async function classify(response: Response): Promise<Outcome> {
   if (!error) {
     return "other";
   }
-  if (JSON.stringify([error.status, error.details]).includes("UNREGISTERED")) {
+  const details = Array.isArray(error.details) ? (error.details as unknown[]) : [];
+  if (
+    details.some(
+      (detail) => (detail as { errorCode?: unknown } | null)?.errorCode === "UNREGISTERED",
+    )
+  ) {
     return "dead";
   }
   if (
-    response.status === 400 &&
     error.status === "INVALID_ARGUMENT" &&
-    typeof error.message === "string" &&
-    /registration token/i.test(error.message)
+    (/registration token/i.test(typeof error.message === "string" ? error.message : "") ||
+      /registration token/i.test(JSON.stringify(details)))
   ) {
     return "dead";
   }
