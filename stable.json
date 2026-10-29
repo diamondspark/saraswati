@@ -1,22 +1,22 @@
 {
   "schema": 1,
   "channel": "stable",
-  "versionCode": 4200,
-  "versionName": "13.7.0-s4200",
+  "versionCode": 4216,
+  "versionName": "13.7.0-s4216",
   "apk": {
-    "url": "https://github.com/diamondspark/saraswati/releases/download/v4200/saraswati-v4200.apk",
-    "sha256": "2d34b82ffe3c1cfb46495c171f3abc357dc779f630f73bc343380566d37de9b6",
-    "size": 27044740
+    "url": "https://github.com/diamondspark/saraswati/releases/download/v4216/saraswati-v4216.apk",
+    "sha256": "d2e40686d201d90ad97b607ff17510876ec6db0d51ba493de4c2ee6008712ab7",
+    "size": 27130934
   },
   "urgent": true,
-  "notes": "Car: 'Start Sangat' on the car screen now works, and the car screen no longer goes blank after it. Sangat: family can join with one tap, no code needed. In the car, passengers' phones stay silent and just add songs to the car, so only the driver's phone uses data. Car voice: 'Hey Google, play ...' now finds the right song, singer or film song, and plays that singer's own songs.",
-  "publishedAt": "2026-10-26T05:46:13Z",
+  "notes": "Sangat: when family starts a Sangat, your phone now tells you even if Saraswati is closed - tap to join. In the car your phone stays silent and just adds songs. The notification clears itself when the Sangat ends. Updates: no more switching the install permission off and back on - one run installs everything and asks once at the end. (This update still uses the old updater one last time.)",
+  "publishedAt": "2026-10-29T19:27:38Z",
   "updater": {
-    "versionCode": 4200,
+    "versionCode": 4216,
     "apk": {
-      "url": "https://github.com/diamondspark/saraswati/releases/download/v4200/saraswati-updater-v4200.apk",
-      "sha256": "06e345776bf4f641cb0e532e502a447d46f00d19e7a6e5b77b031ae4c219ceb8",
-      "size": 256152
+      "url": "https://github.com/diamondspark/saraswati/releases/download/v4216/saraswati-updater-v4216.apk",
+      "sha256": "430675bec55a7e8c02a391f79498666b0d1080fd32e89f714d1fe82b0a7d9256",
+      "size": 260248
     }
   }
 }
