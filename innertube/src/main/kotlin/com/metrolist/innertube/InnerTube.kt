@@ -12,6 +12,7 @@ import com.metrolist.innertubex.InnerTube as InnerTubeX
 import com.metrolist.innertubex.InnerTubeHttpException
 import com.metrolist.innertubex.models.Context
 import kotlinx.serialization.Serializable
+import com.metrolist.innertubex.models.response.PlayerResponse
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.okhttp.OkHttp
@@ -28,6 +29,7 @@ import io.ktor.client.request.url
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.ContentType
+import io.ktor.http.Url
 import io.ktor.http.contentType
 import io.ktor.http.userAgent
 import io.ktor.http.isSuccess
@@ -252,11 +254,37 @@ class InnerTube(
     ) = innerTubeX.player(client, videoId, playlistId, signatureTimestamp, poToken)
 
     suspend fun registerPlayback(
-        url: String,
+        videoId: String,
         cpn: String,
-        playlistId: String?,
-        client: YouTubeClient = YouTubeClient.WEB_REMIX,
-    ) = innerTubeX.registerPlayback(client, url, cpn, playlistId).requireSuccess("registerPlayback")
+        isHistoryEnabled: () -> Boolean = { true },
+    ): Boolean {
+        val transport = innerTubeX
+        val session = transport.sessionSnapshot()
+        if (session.cookie.isNullOrBlank() || !isHistoryEnabled()) return false
+        // Streaming clients and cached downloads may not carry account-bound tracking URLs.
+        val response = transport.playerWithSessionBound(
+            client = YouTubeClient.WEB_REMIX,
+            videoId = videoId,
+            playlistId = null,
+            signatureTimestamp = null,
+            poToken = null,
+            requestVisitorData = null,
+            requestSession = session,
+        ).requireSuccess("playbackTracking").body<PlayerResponse>()
+        val trackingUrl = requireNotNull(response.playbackTracking?.videostatsPlaybackUrl?.baseUrl) {
+            "No playback tracking URL returned"
+        }
+        require(Url(trackingUrl).encodedPath == "/api/stats/playback") { "Invalid playback tracking URL" }
+        if (transport !== innerTubeX || transport.sessionSnapshot() != session || !isHistoryEnabled()) return false
+        transport.registerPlaybackWithSession(
+            client = YouTubeClient.WEB_REMIX,
+            url = trackingUrl,
+            cpn = cpn,
+            playlistId = null,
+            requestSession = session,
+        ).requireSuccess("registerPlayback")
+        return true
+    }
 
     suspend fun browse(
         client: YouTubeClient,
