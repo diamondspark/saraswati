@@ -212,18 +212,30 @@ class UpdateActivity : Activity() {
     private fun recoverPendingInstallIfAny(): Boolean {
         val isPending = PendingInstall.isAttemptPending(prefs)
         val knownStatus = if (isPending) PendingInstall.peekTerminalStatus(prefs) else null
+        val target = if (isPending) PendingInstall.peekTarget(prefs) else null
+        val installedTarget = target?.let {
+            // SARASWATI: the Updater's own version is read from BuildConfig, not PackageManager.
+            if (it.packageName == BuildConfig.APPLICATION_ID) BuildConfig.VERSION_CODE.toLong() else installedVersionCode(it.packageName)
+        }
 
-        when (val action = decideInstallRecovery(checkpoint, isPending, knownStatus)) {
+        when (val action = decideInstallRecovery(checkpoint, isPending, knownStatus, target, installedTarget)) {
             InstallRecoveryAction.None, InstallRecoveryAction.WaitForStatus -> return false
+
+            // SARASWATI: stale attempt, nothing to resume. Clear it and let onResume's
+            // normal Checking branch re-check; the permission is NOT touched here.
+            InstallRecoveryAction.Recheck -> {
+                PendingInstall.clear(prefs)
+                return false
+            }
 
             is InstallRecoveryAction.DispatchStatus -> {
                 PendingInstall.consumeTerminalStatus(prefs)
                 dispatch(Event.InstallStatus(action.status))
             }
 
-            InstallRecoveryAction.RecoverAsCrashed -> {
-                PendingInstall.consumeTerminalStatus(prefs) // discard: no manifest left to make use of it
-                checkpoint = UiState.TurnPermissionOff(version = null)
+            is InstallRecoveryAction.RecoverAsSucceeded -> {
+                PendingInstall.consumeTerminalStatus(prefs) // discard: the installed version already tells the outcome
+                checkpoint = UiState.TurnPermissionOff(action.versionName)
                 displayed = checkpoint
                 render(displayed)
                 dispatch(Event.PermissionChecked(canInstall = packageManager.canRequestPackageInstalls()))
@@ -237,7 +249,7 @@ class UpdateActivity : Activity() {
     private fun dispatch(event: Event) {
         val canInstallNow = packageManager.canRequestPackageInstalls()
         val source = checkpoint
-        val next = reduce(source, event, canInstallNow)
+        val next = reduce(source, withFollowUp(event), canInstallNow)
 
         runSideEffects(source, event, next)
 
@@ -247,20 +259,36 @@ class UpdateActivity : Activity() {
         if (source is UiState.TurnPermissionOff && checkpoint !is UiState.TurnPermissionOff) {
             PendingInstall.clear(prefs)
         }
+        // SARASWATI: an install that succeeded with a follow-up queued skips TurnPermissionOff, so resolve the attempt here.
+        if (event is Event.InstallStatus && source is UiState.ReadyToInstall && next !is UiState.TurnPermissionOff) {
+            PendingInstall.clear(prefs)
+        }
 
         render(displayed)
 
         if (!updatingSelf && (next is UiState.UpToDate || next is UiState.AlreadyAhead || next is UiState.Done)) {
             lastFetchedManifest?.let(::maybeStartSelfUpdateCheck)
         }
+        // SARASWATI: the self-update chain continues without a tap.
+        nextQueuedStep(next, updatingSelf)?.let(::dispatch)
+    }
+
+    // SARASWATI: supplies the one fact reduce can't know: is the Updater's own self-update still to come in this run?
+    private fun withFollowUp(event: Event): Event {
+        val queued = !updatingSelf && lastFetchedManifest?.let(::selfUpdateOffered) == true
+        return when (event) {
+            is Event.InstallStatus -> event.copy(followUpQueued = queued)
+            is Event.ManifestLoaded -> event.copy(followUpQueued = queued)
+            else -> event
+        }
     }
 
     private fun runSideEffects(source: UiState, event: Event, next: UiState) {
         when {
-            event == Event.UserTappedUpdate && next is UiState.Downloading && source is UiState.UpdateReady ->
+            (event == Event.UserTappedUpdate || event == Event.ContinueQueued) && next is UiState.Downloading && source is UiState.UpdateReady ->
                 startDownload(source.manifest)
 
-            event == Event.UserTappedUpdate && next == UiState.Installing && source is UiState.ReadyToInstall ->
+            (event == Event.UserTappedUpdate || event == Event.ContinueQueued) && next == UiState.Installing && source is UiState.ReadyToInstall ->
                 startInstall(source.manifest)
 
             event is Event.InstallStatus && source is UiState.ReadyToInstall ->
@@ -346,7 +374,7 @@ class UpdateActivity : Activity() {
                 }
             } catch (e: Exception) {
                 target.delete()
-                postToMain { dispatch(Event.ManifestFailed(getString(R.string.cant_reach_update_server))) }
+                postToMain { dispatch(Event.DownloadFailed(getString(R.string.cant_reach_update_server))) }
                 return@execute
             }
 
@@ -374,9 +402,9 @@ class UpdateActivity : Activity() {
         // REQUEST_INSTALL_PACKAGES actually begins, not after, so a crash
         // OR a plain pause (the system confirmation UI) at any point from
         // here onward is still caught on the next resume/launch.
-        PendingInstall.markAttemptStarted(prefs)
-        val target = downloadTargetFile(manifest.versionCode)
         val expectedPackage = targetPackageName()
+        PendingInstall.markAttemptStarted(prefs, PendingTarget(expectedPackage, manifest.versionCode, manifest.versionName))
+        val target = downloadTargetFile(manifest.versionCode)
         executor.execute {
             try {
                 installSession.install(target, expectedPackage)
@@ -402,8 +430,8 @@ class UpdateActivity : Activity() {
     // — self-update is effectively a release-build-only path, same as the
     // whole publishing pipeline it depends on.
     private fun maybeStartSelfUpdateCheck(manifest: UpdateManifest) {
+        if (!selfUpdateOffered(manifest)) return
         val updaterAsset = manifest.updater ?: return
-        if (updaterAsset.versionCode <= BuildConfig.VERSION_CODE) return
         updatingSelf = true
         val selfManifest = UpdateManifest(
             schema = manifest.schema,
@@ -418,6 +446,9 @@ class UpdateActivity : Activity() {
         checkpoint = UiState.Checking
         dispatch(Event.ManifestLoaded(selfManifest, installed = BuildConfig.VERSION_CODE.toLong()))
     }
+
+    private fun selfUpdateOffered(manifest: UpdateManifest): Boolean =
+        manifest.updater?.let { it.versionCode > BuildConfig.VERSION_CODE } == true
 
     private fun targetPackageName(): String = if (updatingSelf) BuildConfig.APPLICATION_ID else TARGET_PACKAGE_SARASWATI
 

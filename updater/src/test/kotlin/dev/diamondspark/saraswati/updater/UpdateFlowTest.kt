@@ -63,7 +63,7 @@ class UpdateFlowTest {
         val result = reduce(
             UiState.UpdateReady(m),
             Event.DownloadFinished(VerifyResult.Failed("sha256 mismatch")),
-            canInstallNow = true,
+            canInstallNow = false,
         )
         assertEquals(UiState.Error("sha256 mismatch", canRetry = false), result)
         assertNotEquals(UiState.Installing, result)
@@ -133,6 +133,148 @@ class UpdateFlowTest {
             canInstallNow = true,
         )
         assertEquals(UiState.TurnPermissionOff(null), result)
+    }
+
+    // SARASWATI: permission-dance fix — TurnPermissionOff only after the LAST install of a run.
+
+    @Test
+    fun `app install success with an updater follow-up queued keeps the permission on`() {
+        val m = manifest(versionName = "1.42")
+        val result = reduce(
+            UiState.ReadyToInstall(m),
+            Event.InstallStatus(code = 0, followUpQueued = true),
+            canInstallNow = true,
+        )
+        assertEquals(UiState.Done("1.42"), result)
+    }
+
+    @Test
+    fun `app install failure with a follow-up queued still asks to turn the permission off`() {
+        val result = reduce(
+            UiState.ReadyToInstall(manifest()),
+            Event.InstallStatus(code = 2, followUpQueued = true),
+            canInstallNow = true,
+        )
+        assertEquals(UiState.TurnPermissionOff(null), result)
+    }
+
+    @Test
+    fun `full run - app then self-update - asks to turn the permission off exactly once, at the end`() {
+        val app = manifest(versionCode = 42, versionName = "1.42")
+        val self = manifest(versionCode = 7, versionName = "7")
+        val seen = mutableListOf<UiState>()
+        var s: UiState = UiState.ReadyToInstall(app)
+        s = reduce(s, Event.InstallStatus(0, followUpQueued = true), true).also { seen += it }
+        // Activity moves on to the self-update with the permission still on.
+        s = reduce(UiState.Checking, Event.ManifestLoaded(self, installed = 6L), true).also { seen += it }
+        s = reduce(s, Event.UserTappedUpdate, true).also { seen += it }
+        s = reduce(UiState.UpdateReady(self), Event.DownloadFinished(VerifyResult.Ok), true).also { seen += it }
+        assertEquals(UiState.ReadyToInstall(self), s)
+        assertTrue(seen.none { it is UiState.TurnPermissionOff || it is UiState.NeedsInstallPermission })
+        // Self-install finished (process killed -> recovery path): now, once.
+        assertEquals(UiState.Done("7"), reduce(UiState.TurnPermissionOff("7"), Event.PermissionChecked(false), false))
+    }
+
+    @Test
+    fun `relaunch after a successful self-install shows TurnPermissionOff then Done, no error`() {
+        val start = UiState.TurnPermissionOff("7")
+        assertEquals(start, reduce(start, Event.PermissionChecked(true), canInstallNow = true))
+        assertEquals(UiState.Done("7"), reduce(start, Event.PermissionChecked(false), canInstallNow = false))
+    }
+
+    @Test
+    fun `really failed attempt with permission on re-checks and goes straight to ReadyToInstall`() {
+        val m = manifest(versionCode = 10)
+        val update = reduce(UiState.Checking, Event.ManifestLoaded(m, installed = 5L), canInstallNow = true)
+        assertEquals(UiState.UpdateReady(m), update)
+        assertEquals(UiState.ReadyToInstall(m), reduce(update, Event.DownloadFinished(VerifyResult.Ok), canInstallNow = true))
+    }
+
+    @Test
+    fun `up to date with the permission on asks to turn it off once, then lands on UpToDate`() {
+        val m = manifest(versionCode = 10)
+        val ask = reduce(UiState.Checking, Event.ManifestLoaded(m, installed = 10L), canInstallNow = true)
+        assertEquals(UiState.TurnPermissionOff(null, after = UiState.UpToDate(10L)), ask)
+        assertEquals(ask, reduce(ask, Event.Retry, canInstallNow = true))
+        assertEquals(UiState.UpToDate(10L), reduce(ask, Event.PermissionChecked(false), canInstallNow = false))
+    }
+
+    @Test
+    fun `already ahead with the permission on asks to turn it off once`() {
+        val m = manifest(versionCode = 5)
+        val ask = reduce(UiState.Checking, Event.ManifestLoaded(m, installed = 10L), canInstallNow = true)
+        assertEquals(UiState.TurnPermissionOff(null, after = UiState.AlreadyAhead(10L)), ask)
+    }
+
+    @Test
+    fun `up to date with a self-update queued does not ask to turn the permission off`() {
+        val m = manifest(versionCode = 10)
+        val result = reduce(
+            UiState.Checking,
+            Event.ManifestLoaded(m, installed = 10L, followUpQueued = true),
+            canInstallNow = true,
+        )
+        assertEquals(UiState.UpToDate(10L), result)
+    }
+
+    @Test
+    fun `non-retryable error with the permission on asks to turn it off, then shows the error`() {
+        val err = UiState.Error("sha256 mismatch", canRetry = false)
+        val ask = reduce(
+            UiState.UpdateReady(manifest()),
+            Event.DownloadFinished(VerifyResult.Failed("sha256 mismatch")),
+            canInstallNow = true,
+        )
+        assertEquals(UiState.TurnPermissionOff(null, after = err), ask)
+        assertEquals(err, reduce(ask, Event.PermissionChecked(false), canInstallNow = false))
+    }
+
+    // SARASWATI: failed checks/downloads end the run like any other, and the self-update chain runs without taps.
+
+    @Test
+    fun `failed manifest check with the permission on asks to turn it off, then shows the retryable Error`() {
+        val err = UiState.Error("offline", canRetry = true)
+        val ask = reduce(UiState.Checking, Event.ManifestFailed("offline"), canInstallNow = true)
+        assertEquals(UiState.TurnPermissionOff(null, after = err), ask)
+        assertEquals(err, reduce(ask, Event.PermissionChecked(false), canInstallNow = false))
+    }
+
+    @Test
+    fun `download failure is no longer a no-op`() {
+        val m = manifest()
+        val err = UiState.Error("offline", canRetry = true)
+        assertEquals(err, reduce(UiState.UpdateReady(m), Event.DownloadFailed("offline"), canInstallNow = false))
+        assertEquals(err, reduce(UiState.Downloading(40), Event.DownloadFailed("offline"), canInstallNow = false))
+        assertEquals(UiState.Installing, reduce(UiState.Installing, Event.DownloadFailed("offline"), canInstallNow = false))
+    }
+
+    @Test
+    fun `chain auto-continues from the queued self-update to Installing with no tap`() {
+        val self = manifest(versionCode = 7, versionName = "7")
+        val events = mutableListOf<Event>()
+        fun step(state: UiState, e: Event): UiState = reduce(state, e, canInstallNow = true).also { events += e }
+
+        var s = step(UiState.ReadyToInstall(manifest()), Event.InstallStatus(0, followUpQueued = true))
+        assertEquals(UiState.Done("1.42"), s)
+        assertEquals(null, nextQueuedStep(s, chainActive = true))
+        s = step(UiState.Checking, Event.ManifestLoaded(self, installed = 6L))
+        assertEquals(UiState.UpdateReady(self), s)
+        s = step(s, nextQueuedStep(s, chainActive = true)!!)
+        assertEquals(UiState.Downloading(0), s)
+        s = step(UiState.UpdateReady(self), Event.DownloadFinished(VerifyResult.Ok))
+        assertEquals(UiState.ReadyToInstall(self), s)
+        s = step(s, nextQueuedStep(s, chainActive = true)!!)
+        assertEquals(UiState.Installing, s)
+        assertTrue(events.none { it == Event.UserTappedUpdate })
+        assertEquals(null, nextQueuedStep(UiState.UpdateReady(self), chainActive = false))
+    }
+
+    @Test
+    fun `chain download failure with the permission on asks to turn it off, then shows the Error`() {
+        val err = UiState.Error("offline", canRetry = true)
+        val ask = reduce(UiState.Downloading(10), Event.DownloadFailed("offline"), canInstallNow = true)
+        assertEquals(UiState.TurnPermissionOff(null, after = err), ask)
+        assertEquals(err, reduce(ask, Event.PermissionChecked(false), canInstallNow = false))
     }
 
     @Test
