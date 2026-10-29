@@ -359,6 +359,9 @@ class MainActivity : FragmentActivity() {
     private val familyViewModel: FamilyViewModel by viewModels()
 
     private lateinit var navController: NavHostController
+
+    // SARASWATI: Sangat push — ticks on each Sangat join tap, so an open Account dialog closes over the join.
+    private val sangatJoinTaps = androidx.compose.runtime.mutableIntStateOf(0)
     private var pendingIntent: Intent? = null
 
     // SARASWATI: Task 9 — a cache of the role the hub holds for this phone
@@ -495,6 +498,7 @@ class MainActivity : FragmentActivity() {
         }
         val sangatJoin = SangatJoinRequests.offerFrom(intent, System.currentTimeMillis()) // SARASWATI: Phase 4 Task 9 — a tap on the Sangat notification
         // SARASWATI: Sangat push — the join is taken by the Sangat view model on Home, so a tap from any other screen goes there at once.
+        if (sangatJoin) sangatJoinTaps.intValue++
         if (sangatJoin && ::navController.isInitialized) showHomeForSangatJoin(navController)
         if (::navController.isInitialized) {
             handleWidgetTargetIntent(intent, navController)
@@ -1224,6 +1228,9 @@ class MainActivity : FragmentActivity() {
                     }
 
                 var showAccountDialog by remember { mutableStateOf(false) }
+                // SARASWATI: Sangat push — a join tap closes the dialog so the Sangat screen is what the person sees.
+                val joinTaps = sangatJoinTaps.intValue
+                LaunchedEffect(joinTaps) { if (joinTaps > 0) showAccountDialog = false }
 
                 val pauseListenHistory by rememberPreference(PauseListenHistoryKey, defaultValue = false)
                 val eventCount by database.eventCount().collectAsStateWithLifecycle(initialValue = 0)
